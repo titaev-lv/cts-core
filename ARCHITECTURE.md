@@ -134,21 +134,12 @@ flowchart TB
     end
     
     subgraph EXCHANGES["📈 Exchanges"]
-        direction LR
-        BIN[Binance]
-        KUC[KuCoin]
-        BYB[Bybit]
-        OKX_EX[OKX]
-        CEX[Coinex]
-        HTX_EX[HTX]
-        MEXC[MEXC]
+        EX[Binance, KuCoin, Bybit, OKX, Coinex, HTX, MEXC, ...]
     end
     
     subgraph TRADERS["🤖 Trader Daemons (25+ VMs)"]
         direction LR
         T1[trader-1<br/>Binance, KuCoin, Bybit]
-        T2[trader-2<br/>Binance, OKX, Coinex]
-        T3[trader-3<br/>Binance, HTX, MEXC]
         TN[trader-N<br/>...]
     end
     
@@ -174,19 +165,17 @@ flowchart TB
     end
     
     %% Security connections
-    T1 & T2 & T3 & TN -->|mTLS OU=Trading| HSM
+    T1 & TN -->|mTLS OU=Trading| HSM
     WWW -->|mTLS OU=2FA| HSM
     
     %% Trader to exchanges
-    T1 --> BIN & KUC & BYB
-    T2 --> BIN & OKX_EX & CEX
-    T3 --> BIN & HTX_EX & MEXC
+    T1 & TN --> EX
     
     %% Traders to Core
-    T1 & T2 & T3 & TN -->|WebSocket mTLS| API
+    T1 & TN -->|WebSocket mTLS| API
     
     %% Traders to ClickHouse
-    T1 & T2 & T3 & TN -->|Tick Data| CH
+    T1 & TN -->|Tick Data| CH
     
     %% Core connections
     WWW -->|mTLS + WS| API
