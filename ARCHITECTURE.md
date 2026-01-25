@@ -127,61 +127,69 @@
 
 ```mermaid
 flowchart TB
-    subgraph WEB["🌐 Web Layer"]
-        WWW[www-go<br/>Web Interface<br/>Port: 8443]
-    end
-    
-    subgraph CORE["🎛️ CTS-Core (Orchestrator)"]
-        API[API Server<br/>REST + WebSocket]
-        SCHED[Task Scheduler]
-        SESS[Session Manager]
-        METR[Metrics Collector]
-        DBPROXY[DB Proxy]
-        LAT[Latency Tester]
-    end
-    
-    subgraph SECURITY["🔐 Security"]
+    subgraph SECURITY["🔐 Security Layer"]
+        direction LR
         HSM[hsm-service<br/>SoftHSM<br/>KEK: exchange-key, 2fa]
         CA[CA<br/>PKI Management]
     end
     
-    subgraph DATA["💾 Data Layer"]
-        MYSQL[(MySQL 9<br/>Master)]
-        CH[(ClickHouse<br/>Tick Data)]
-    end
-    
-    subgraph TRADERS["🤖 Trader Daemons (25+ VMs)"]
-        T1[trader-1<br/>Binance, KuCoin]
-        T2[trader-2<br/>Bybit, OKX]
-        TN[trader-N<br/>...]
-    end
-    
     subgraph EXCHANGES["📈 Exchanges"]
+        direction LR
         BIN[Binance]
         KUC[KuCoin]
         BYB[Bybit]
-        OKX[OKX]
-        CEX[Coinex, HTX, MEXC...]
+        OKX_EX[OKX]
+        CEX[Coinex]
+        HTX_EX[HTX]
+        MEXC[MEXC]
     end
     
+    subgraph TRADERS["🤖 Trader Daemons (25+ VMs)"]
+        direction LR
+        T1[trader-1<br/>Binance, KuCoin, Bybit]
+        T2[trader-2<br/>Binance, OKX, Coinex]
+        T3[trader-3<br/>Binance, HTX, MEXC]
+        TN[trader-N<br/>...]
+    end
+    
+    subgraph BOTTOM[""]
+        direction LR
+        subgraph DATA["💾 Data Layer"]
+            MYSQL[(MySQL 9<br/>Master)]
+            CH[(ClickHouse<br/>Tick Data)]
+        end
+        
+        subgraph CORE["🎛️ CTS-Core"]
+            API[API Server<br/>REST + WS]
+            SCHED[Task Scheduler]
+            SESS[Session Mgr]
+            DBPROXY[DB Proxy]
+        end
+        
+        subgraph WEB["🌐 Web Layer"]
+            WWW[www-go<br/>Port: 8443]
+        end
+    end
+    
+    %% Security connections
+    T1 & T2 & T3 & TN -->|mTLS OU=Trading| HSM
+    WWW -->|mTLS OU=2FA| HSM
+    
+    %% Trader to exchanges
+    T1 --> BIN & KUC & BYB
+    T2 --> BIN & OKX_EX & CEX
+    T3 --> BIN & HTX_EX & MEXC
+    
+    %% Traders to Core
+    T1 & T2 & T3 & TN -->|WebSocket mTLS| API
+    
+    %% Traders to ClickHouse
+    T1 & T2 & T3 & TN -->|Tick Data| CH
+    
+    %% Core connections
     WWW -->|mTLS + WS| API
-    WWW -->|mTLS<br/>2FA ops| HSM
-    
-    API --> SCHED
-    API --> SESS
-    API --> METR
-    API --> DBPROXY
-    SCHED --> LAT
-    
-    DBPROXY -->|mTLS| MYSQL
-    
-    T1 & T2 & TN -->|WebSocket<br/>mTLS| API
-    T1 & T2 & TN -->|mTLS<br/>Decrypt DEK| HSM
-    T1 & T2 & TN -->|mTLS<br/>Tick Data| CH
-    
-    T1 -->|WS + REST| BIN & KUC
-    T2 -->|WS + REST| BYB & OKX
-    TN -->|WS + REST| CEX
+    DBPROXY --> MYSQL
+    API --> SCHED --> SESS
 ```
 
 ### 3.3 Физическая топология (ASCII)
@@ -231,39 +239,45 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph EU["🇪🇺 Region: Europe (Primary) - Frankfurt"]
-        subgraph INFRA["Infrastructure"]
-            CTS[cts-core]
-            MYSQL[MySQL Master]
-            HSM[hsm-service]
-            CA[CA offline]
-            CH[ClickHouse]
-        end
-        subgraph EU_TRADERS["EU Traders"]
-            T1[trader-1<br/>Binance]
-            T2[trader-2<br/>KuCoin]
-            T3[trader-3<br/>Bybit]
-        end
+        direction LR
+        T1[trader-eu-1<br/>Binance, KuCoin]
+        T2[trader-eu-2<br/>Bybit, OKX]
     end
     
-    subgraph ASIA["🇸🇬 Region: Asia - Singapore"]
-        T4[trader-4<br/>Binance]
-        T5[trader-5<br/>OKX]
-        T6[trader-6<br/>Huobi]
+    subgraph INFRA["🏗️ Infrastructure (Frankfurt DC)"]
+        direction LR
+        CTS[cts-core]
+        MYSQL[(MySQL Master)]
+        HSM[hsm-service]
+        CA[CA offline]
+        CH[(ClickHouse)]
     end
     
     subgraph US["🇺🇸 Region: Americas - New York"]
-        T7[trader-7<br/>Coinbase]
-        T8[trader-8<br/>Kraken]
-        T9[trader-9<br/>Gemini]
+        T5[trader-us-1<br/>Coinbase, Kraken]
+        T6[trader-us-2<br/>Gemini, Binance]
     end
     
-    T1 & T2 & T3 -->|mTLS| CTS
-    T4 & T5 & T6 -->|mTLS<br/>~150ms| CTS
-    T7 & T8 & T9 -->|mTLS<br/>~80ms| CTS
+    subgraph ASIA["🇸🇬 Region: Asia - Singapore"]
+        T3[trader-asia-1<br/>Binance, OKX]
+        T4[trader-asia-2<br/>Huobi, MEXC]
+    end
     
+    %% EU connections
+    T1 & T2 -->|mTLS| CTS
+    
+    %% US connections  
+    T5 & T6 -->|mTLS ~80ms| CTS
+    
+    %% Asia connections
+    T3 & T4 -->|mTLS ~150ms| CTS
+    
+    %% Infrastructure internal
     CTS --> MYSQL
     CTS --> HSM
-    T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9 --> CH
+    
+    %% All traders to ClickHouse
+    T1 & T2 & T3 & T4 & T5 & T6 --> CH
 ```
 
 ---
@@ -392,8 +406,6 @@ sequenceDiagram
 
 ### 4.3 CTS-Core Internal Structure (ASCII)
 
-### 4.3 CTS-Core Internal Structure (ASCII)
-
 **Ответственность:**
 - Центральное управление всеми трейдерами
 - Проксирование данных из БД (зашифрованные credentials)
@@ -505,8 +517,6 @@ flowchart TB
 
 ### 4.5 Trader Daemon Structure (ASCII)
 
-### 4.5 Trader Daemon Structure (ASCII)
-
 **Ответственность:**
 - Подключение к биржам (WebSocket + REST)
 - Сбор рыночных данных (orderbook, trades)
@@ -602,21 +612,33 @@ flowchart TB
 ```mermaid
 flowchart TB
     subgraph CORE_CONN["Core Connections"]
+        direction LR
         WSCORE[WebSocket → CTS-Core<br/>Tasks, Heartbeat, Results]
-        HSMCLI[HSM Client<br/>Decrypt DEK<br/>OU=Trading]
+        HSMCLI[HSM Client<br/>Decrypt DEK, OU=Trading]
     end
     
-    subgraph TRADING["Trading Components"]
+    subgraph EXCHANGES["Exchange Connections"]
+        direction LR
+        BIN[Binance]
+        KUC[KuCoin]
+        BYB[Bybit]
+        OKX_EX[OKX]
+        CEX[Coinex]
+        HTX_EX[HTX]
+        MEXC[MEXC]
+    end
+    
+    subgraph MIDDLE[""]
+        direction LR
         subgraph MARKET["Market Data Module"]
             WSMGR[WebSocket Manager<br/>OrderBook, BBO, Trades]
             NORM[Data Normalizer<br/>Unified Format]
-            CACHE[In-Memory Cache<br/>sync.Map, Lock-free]
+            CACHE[In-Memory Cache<br/>sync.Map]
         end
         
-        subgraph EXEC["Trade Executor Module"]
-            ORDMGR[Order Manager<br/>Market, Limit, Cancel]
-            POS[Position Tracker<br/>P&L, Risk]
-            CHWR[ClickHouse Writer<br/>Async Batching]
+        subgraph EVENTS["Event Collector"]
+            ORDEV[Order Events WS<br/>Fills, Cancels]
+            ACCEV[Account Events WS<br/>Balance, Margin]
         end
         
         subgraph STRAT["Strategy Engine"]
@@ -625,34 +647,27 @@ flowchart TB
             FUT[Futures Stub]
             DEX[DEX Stub]
         end
-        
-        subgraph EVENTS["Event Collector"]
-            ORDEV[Order Events WS<br/>Fills, Cancels]
-            ACCEV[Account Events WS<br/>Balance, Margin]
-        end
     end
     
-    subgraph EXCHANGES["Exchange Connections"]
-        BIN[Binance]
-        KUC[KuCoin]
-        BYB[Bybit]
-        OKX_EX[OKX]
-        CEX_OTHER[Coinex, HTX, MEXC]
+    subgraph EXEC["Trade Executor Module"]
+        direction LR
+        ORDMGR[Order Manager<br/>Market, Limit, Cancel]
+        POS[Position Tracker<br/>P&L, Risk]
+        CHWR[ClickHouse Writer<br/>Async Batching]
     end
     
-    WSCORE --> TRADING
-    HSMCLI --> TRADING
+    CORE_CONN --> MARKET
+    EXCHANGES <--> WSMGR
+    EXCHANGES --> ORDEV & ACCEV
     
     WSMGR --> NORM --> CACHE
     CACHE --> STRAT
+    EVENTS --> STRAT
     
     ARB & DEC --> ORDMGR
     ORDMGR --> POS
     ORDMGR --> CHWR
-    
-    EXCHANGES <--> WSMGR
-    EXCHANGES <--> ORDMGR
-    EXCHANGES --> ORDEV & ACCEV
+    ORDMGR <--> EXCHANGES
 ```
 
 ---
@@ -1019,13 +1034,14 @@ flowchart TB
     end
     
     subgraph HSM_SVC["🔑 hsm-service"]
-        KEK_EX[KEK: exchange-key<br/>AES-256]
-        KEK_2FA[KEK: 2fa<br/>AES-256]
+        direction LR
+        KEK_EX[KEK: exchange-key<br/>AES-256<br/>OU=Trading]
+        KEK_2FA[KEK: 2fa<br/>AES-256<br/>OU=2FA]
     end
     
     subgraph CLIENTS["Clients with mTLS Certificates"]
-        WWW[www-go<br/>OU=2FA, WebAdmin]
-        CTS[cts-core<br/>OU=Core]
+        direction LR
+        WWW[www-go<br/>OU=2FA]
         T1[trader-1<br/>OU=Trading]
         T2[trader-N<br/>OU=Trading]
     end
@@ -1035,15 +1051,19 @@ flowchart TB
         TWOFA_DB[TWOFA_SECRETS<br/>encrypted 2FA]
     end
     
+    subgraph CTS_CORE["🎛️ CTS-Core"]
+        CTS[cts-core<br/>No HSM access]
+    end
+    
     CA -->|Issue certs| WWW & CTS & T1 & T2
     
-    WWW -->|mTLS OU=2FA<br/>Encrypt/Decrypt 2FA secrets| KEK_2FA
-    WWW -->|mTLS OU=WebAdmin| CTS
+    WWW -->|mTLS OU=2FA| KEK_2FA
+    WWW -->|mTLS| CTS
     
     CTS -->|Read encrypted data| CREDS
     CTS -->|Send encrypted DEK| T1 & T2
     
-    T1 & T2 -->|mTLS OU=Trading<br/>Decrypt DEK| KEK_EX
+    T1 & T2 -->|mTLS OU=Trading| KEK_EX
     
     WWW -->|Store encrypted| TWOFA_DB
     
@@ -1743,175 +1763,8 @@ CREATE TABLE `ARBITRAGE_ORDER` (
 
 ## 11. План разработки
 
-### 11.1 Этапы разработки CTS-Core
-
-```mermaid
-gantt
-    title CTS-Core Development Plan
-    dateFormat  YYYY-MM-DD
-    section Phase 1: Foundation
-    Project setup, config, logger     :p1a, 2026-01-27, 3d
-    MySQL connection pool             :p1b, after p1a, 2d
-    HSM client (mTLS)                 :p1c, after p1a, 2d
-    Basic REST API server             :p1d, after p1b, 2d
-    
-    section Phase 2: Core Features
-    WebSocket server (traders)        :p2a, after p1d, 3d
-    Session manager                   :p2b, after p2a, 2d
-    Task scheduler (basic)            :p2c, after p2b, 3d
-    Heartbeat & health check          :p2d, after p2b, 2d
-    
-    section Phase 3: Business Logic
-    DB Proxy (encrypted creds)        :p3a, after p2c, 3d
-    Latency analyzer                  :p3b, after p2c, 2d
-    Task assignment algorithm         :p3c, after p3a, 3d
-    Metrics collector                 :p3d, after p2d, 2d
-    
-    section Phase 4: Integration
-    WebSocket for web (admin)         :p4a, after p3c, 2d
-    Full REST API                     :p4b, after p3c, 3d
-    Trade result processing           :p4c, after p4b, 2d
-    Integration testing               :p4d, after p4c, 5d
-```
-
-### 11.2 Этапы разработки Trader Daemon
-
-> **Примечание:** daemon2 уже имеет базовую структуру в `/other-sub-system/daemon2/`
-
-```mermaid
-gantt
-    title Trader Daemon Development Plan
-    dateFormat  YYYY-MM-DD
-    section Phase 1: Core Connection
-    WebSocket client to CTS-Core      :t1a, 2026-02-10, 3d
-    HSM client integration            :t1b, after t1a, 2d
-    Credential decryption flow        :t1c, after t1b, 2d
-    
-    section Phase 2: Market Data
-    Extend existing WS manager        :t2a, after t1c, 3d
-    Unified message format            :t2b, after t2a, 2d
-    ClickHouse writer (direct)        :t2c, after t2a, 3d
-    
-    section Phase 3: Trading
-    Cross-exchange strategy           :t3a, after t2b, 5d
-    Order executor                    :t3b, after t3a, 3d
-    Result reporting to CTS-Core      :t3c, after t3b, 2d
-    
-    section Phase 4: Advanced
-    Triangular strategy               :t4a, after t3c, 4d
-    Limit+Market strategy             :t4b, after t4a, 4d
-    Futures stub                      :t4c, after t4b, 2d
-    DEX stub                          :t4d, after t4c, 2d
-```
-
-### 11.3 Фазы CTS-Core (Детально)
-
-| Фаза | Компонент | Описание | Приоритет |
-|------|-----------|----------|-----------|
-| **1.1** | Project Setup | go.mod, config, logger (как в hsm-service) | 🔴 Critical |
-| **1.2** | MySQL Pool | Connection pool с retry, mTLS | 🔴 Critical |
-| **1.3** | HSM Client | mTLS client для hsm-service | 🔴 Critical |
-| **1.4** | REST Server | Gin/Echo, /health, /metrics | 🔴 Critical |
-| **2.1** | WS Server | WebSocket для трейдеров, gorilla/websocket | 🔴 Critical |
-| **2.2** | Session Mgr | Регистрация, heartbeat, disconnect handling | 🔴 Critical |
-| **2.3** | Task Scheduler | Загрузка TRADE из БД, базовое распределение | 🔴 Critical |
-| **2.4** | Heartbeat | Ping/pong, timeout detection | 🟡 High |
-| **3.1** | DB Proxy | Передача encrypted credentials | 🔴 Critical |
-| **3.2** | Latency | Periodic latency tests, scoring | 🟡 High |
-| **3.3** | Task Assign | Algorithm: latency + load balancing | 🟡 High |
-| **3.4** | Metrics | Prometheus, сбор метрик с трейдеров | 🟢 Medium |
-| **4.1** | Admin WS | WebSocket для www-go | 🟡 High |
-| **4.2** | Full REST | CRUD для trades, status, statistics | 🟡 High |
-| **4.3** | Trade Results | Обработка результатов, запись в БД | 🔴 Critical |
-| **4.4** | Integration | E2E тесты, stress tests | 🟡 High |
-
-### 11.4 Структура проекта CTS-Core
-
-```
-cts-core/
-├── cmd/
-│   └── cts-core/
-│       └── main.go                 # Entry point
-│
-├── internal/
-│   ├── config/                     # Configuration
-│   │   ├── config.go
-│   │   ├── types.go
-│   │   └── config_test.go
-│   │
-│   ├── logger/                     # Logging (как в daemon2)
-│   │   └── logger.go
-│   │
-│   ├── db/                         # Database layer
-│   │   ├── mysql.go                # MySQL connection pool
-│   │   ├── repository.go           # Repository pattern
-│   │   └── models/                 # DB models
-│   │       ├── trade.go
-│   │       ├── exchange_account.go
-│   │       ├── trader_session.go
-│   │       └── arbitrage_trans.go
-│   │
-│   ├── hsm/                        # HSM client
-│   │   ├── client.go               # mTLS client
-│   │   └── types.go
-│   │
-│   ├── api/                        # API layer
-│   │   ├── server.go               # HTTP server setup
-│   │   ├── rest/                   # REST handlers
-│   │   │   ├── health.go
-│   │   │   ├── traders.go
-│   │   │   ├── trades.go
-│   │   │   └── stats.go
-│   │   └── ws/                     # WebSocket handlers
-│   │       ├── trader_handler.go   # WS for traders
-│   │       ├── admin_handler.go    # WS for web admin
-│   │       └── protocol.go         # Message types
-│   │
-│   ├── session/                    # Session management
-│   │   ├── manager.go              # Session manager
-│   │   ├── trader.go               # Trader session
-│   │   └── heartbeat.go
-│   │
-│   ├── scheduler/                  # Task scheduling
-│   │   ├── scheduler.go            # Main scheduler
-│   │   ├── task.go                 # Task types
-│   │   ├── assignment.go           # Assignment algorithm
-│   │   └── latency.go              # Latency analyzer
-│   │
-│   ├── metrics/                    # Metrics collection
-│   │   ├── collector.go
-│   │   └── prometheus.go
-│   │
-│   └── state/                      # State management
-│       └── state.go                # Persistent state
-│
-├── conf/
-│   ├── config.yaml                 # Main config
-│   └── config.example.yaml
-│
-├── pki/                            # Certificates
-│   ├── ca/
-│   ├── server/
-│   └── client/
-│
-├── scripts/
-│   └── init.sh
-│
-├── Dockerfile
-├── docker-compose.yml
-├── go.mod
-├── go.sum
-├── Makefile
-└── README.md
-```
-
-### 11.5 Следующие шаги
-
-1. **Утверждение архитектуры** — просмотр этого документа
-2. **Создание скелета проекта** — базовая структура CTS-Core
-3. **Phase 1 реализация** — config, logger, MySQL, HSM client
-4. **Параллельно**: Обновление daemon2 для работы с CTS-Core
+> **См. отдельный документ:** [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
 
 ---
 
-*Документ будет обновляться по мере разработки*
+*Документ обновляется по мере развития архитектуры*
