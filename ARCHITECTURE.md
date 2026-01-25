@@ -77,7 +77,7 @@
 │                              ┌─────────────────────┐                                │
 │                              │       www-go        │                                │
 │                              │    (Web Interface)  │                                │
-│                              │      Port: 8443     │                                │
+│                              │      Port:  443     │                                │
 │                              └──────────┬──────────┘                                │
 │                                         │                                           │
 │                           ┌─────────────┼─────────────┐                             │
@@ -160,7 +160,7 @@ flowchart TB
         end
         
         subgraph WEB["🌐 Web Layer"]
-            WWW[www-go<br/>Port: 8443]
+            WWW[www-go<br/>Port: 443]
         end
     end
     
