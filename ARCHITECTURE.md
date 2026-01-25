@@ -152,21 +152,25 @@ flowchart TB
         TN[trader-N<br/>...]
     end
     
-    subgraph DATA["💾 Data Layer"]
-        MYSQL[(MySQL 9<br/>Master)]
-        CH[(ClickHouse<br/>Tick Data)]
-    end
-    
-    subgraph CORE["🎛️ CTS-Core"]
-        direction LR
-        API[API Server<br/>REST + WS]
-        SCHED[Task Scheduler]
-        SESS[Session Mgr]
-        DBPROXY[DB Proxy]
-    end
-    
-    subgraph WEB["🌐 Web Layer"]
-        WWW[www-go<br/>Port: 8443]
+    subgraph INFRA["Infrastructure"]
+        direction TB
+        subgraph CORE["🎛️ CTS-Core"]
+            direction LR
+            API[API Server<br/>REST + WS]
+            SCHED[Task Scheduler]
+            SESS[Session Mgr]
+            DBPROXY[DB Proxy]
+        end
+        
+        subgraph DATA["💾 Data Layer"]
+            direction LR
+            MYSQL[(MySQL 9<br/>Master)]
+            CH[(ClickHouse<br/>Tick Data)]
+        end
+        
+        subgraph WEB["🌐 Web Layer"]
+            WWW[www-go<br/>Port: 8443]
+        end
     end
     
     %% Security connections
