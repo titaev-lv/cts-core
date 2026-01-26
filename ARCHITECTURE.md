@@ -27,12 +27,12 @@
 **CTS-Core** (Crypto Trading System Core) — центральный оркестратор для распределённой системы арбитражной торговли криптовалютами.
 
 **Ключевые функции:**
-- Центральная точка управления всеми торговыми демонами (traders)
-- Проксирование доступа к MySQL для трейдеров (зашифрованные credentials)
-- Сбор метрик и мониторинг состояния всех узлов
-- Интеллектуальное распределение задач между трейдерами
-- API для веб-интерфейса и внешних систем
-- Дублирование критических задач мониторинга
+- Центральная точка управления всеми торговыми/мониторинговыми демонами (traders).
+- Проксирование доступа к MySQL для traders - сохранение результатов арбитражных сделок, ордеров и транзакций
+- Сбор метрик и мониторинг состояния всех traders 
+- Интеллектуальное распределение задач между traders в зависимости от скорости соединения с биржами и загруженностью traders
+- API для веб-интерфейса, traders и других внешних систем
+- Дублирование задач мониторинга
 
 ### 1.2 Ограничения и требования
 
@@ -40,7 +40,7 @@
 - ❌ Не используем брокеры сообщений (Kafka, RabbitMQ) — минимизация задержек
 - ✅ mTLS между всеми компонентами
 - ✅ Отдельные VM для каждого критического сервиса
-- ✅ Масштабирование: поддержка 25+ трейдеров
+- ✅ Масштабирование: поддержка 50+ трейдеров
 
 **Требования к производительности:**
 - Latency WebSocket: < 1ms внутри сети
@@ -53,8 +53,8 @@
 
 | # | Вопрос | Решение | Обоснование |
 |---|--------|---------|-------------|
-| 1 | Доступ трейдеров к HSM | **Напрямую (A)** | CTS-Core передаёт зашифрованные DEK + credentials, трейдер сам расшифровывает через HSM. Ничего не передаётся в открытом виде. |
-| 2 | Доступ трейдеров к ClickHouse | **Напрямую (A)** | Не перегружаем канал и сервер CTS-Core tick data |
+| 1 | Доступ трейдеров к HSM | **Напрямую (A)** | CTS-Core передаёт зашифрованные DEK + credentials бирж, а трейдер сам расшифровывает через HSM. Ничего не передаётся в открытом виде. |
+| 2 | Доступ трейдеров к ClickHouse | **Напрямую (A)** | Не перегружаем канал и сервер CTS-Core tick + snapshot data |
 | 3 | Failover CTS-Core | **Заложить, но не реализовывать** | Возможность на вырост, пока обходимся быстрым рестартом |
 | 4 | Приоритет стратегий | **Cross-exchange → Triangular → Limit+Market** | Cross-exchange: мониторинг N бирж, арбитраж на 2-х самых профитных |
 | 5 | Futures/DEX | **Заложить архитектуру, заглушки** | Не реализуем сейчас, но структура должна поддерживать |
@@ -67,211 +67,89 @@
 
 ## 3. Целевая архитектура
 
-### 3.1 High-Level Architecture (ASCII)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                              ЦЕЛЕВАЯ АРХИТЕКТУРА CTS                                │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│                              ┌─────────────────────┐                                │
-│                              │       www-go        │                                │
-│                              │    (Web Interface)  │                                │
-│                              │      Port:  443     │                                │
-│                              └──────────┬──────────┘                                │
-│                                         │                                           │
-│                           ┌─────────────┼─────────────┐                             │
-│                           │ WebSocket   │   mTLS      │                             │
-│                           │ + REST      │             │                             │
-│                           ▼             │             ▼                             │
-│  ┌────────────────────────────────────┐ │ ┌─────────────────────┐                   │
-│  │           CTS-CORE                 │ │ │    hsm-service      │                   │
-│  │        (Оркестратор)               │ │ │    (SoftHSM)        │                   │
-│  │       VM: cts-core                 │ │ │   Port: 8443        │                   │
-│  │      Port: 8443/8444               │ │ │                     │                   │
-│  │                                    │ │ │  KEK: exchange-key  │                   │
-│  │  ┌──────────┐  ┌──────────┐        │ │ │  KEK: 2fa           │                   │
-│  │  │API Server│  │  Task    │        │ │ └─────────────────────┘                   │
-│  │  │(REST+WS) │  │Scheduler │        │ │           ▲                               │
-│  │  └──────────┘  └──────────┘        │ │           │ mTLS (OU=Trading)             │
-│  │  ┌──────────┐  ┌──────────┐        │ │           │                               │
-│  │  │ Metrics  │  │ Session  │        │ │ ┌─────────┴────────────────────┐          │
-│  │  │Collector │  │ Manager  │        │ │ │                              │          │
-│  │  └──────────┘  └──────────┘        │ │ │   TRADER DAEMONS (25+ VM)    │          │
-│  │  ┌──────────┐  ┌──────────┐        │ │ │                              │          │
-│  │  │DB Proxy  │  │ Latency  │        │ │ │  ┌─────────┐ ┌─────────┐     │          │
-│  │  │(MySQL)   │  │ Tester   │        │◄──┼──┤trader-1 │ │trader-2 │     │          │
-│  │  └──────────┘  └──────────┘        │ │ │  │ Binance │ │ KuCoin  │     │          │
-│  └────────────────────────────────────┘ │ │  └────┬────┘ └────┬────┘     │          │
-│         │              │                │ │       │          │           │          │
-│         │ mTLS         │ mTLS           │ │  ┌────┴────┐ ┌───┴─────┐     │          │
-│         ▼              ▼                │ │  │trader-N │ │  ...    │     │          │
-│  ┌─────────────┐ ┌─────────────┐        │ │  │  Bybit  │ │         │     │          │
-│  │   MySQL 9   │ │ ClickHouse  │◄───────┼─┤  └─────────┘ └─────────┘     │          │
-│  │  (Master)   │ │  (Quotes)   │        │ │                              │          │
-│  └─────────────┘ └─────────────┘        │ └──────────────────────────────┘          │
-│                                         │                                           │
-└─────────────────────────────────────────┴───────────────────────────────────────────┘
-                                          │
-                                          ▼
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                                   EXCHANGES                                         │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐      │
-│  │ Binance  │ │  KuCoin  │ │  Bybit   │ │   OKX    │ │  Coinex  │ │   HTX    │      │
-│  │ (CEX)    │ │  (CEX)   │ │  (CEX)   │ │  (CEX)   │ │  (CEX)   │ │  (CEX)   │      │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘      │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 3.2 High-Level Architecture (Mermaid)
+### 3.1 High-Level Architecture - Overview 
 
 ```mermaid
 flowchart TB
-    subgraph SECURITY["🔐 Security Layer"]
-        direction LR
-        HSM[hsm-service<br/>SoftHSM<br/>KEK: exchange-key, 2fa]
-        CA[CA<br/>PKI Management]
-    end
-    
     subgraph EXCHANGES["📈 Exchanges"]
-        EX[Binance, KuCoin, Bybit, OKX, Coinex, HTX, MEXC, ...]
+        EX["Binance, KuCoin, Bybit, OKX<br/>Coinex, HTX, MEXC, ..."]
     end
     
-    subgraph TRADERS["🤖 Trader Daemons (25+ VMs)"]
+    subgraph CORE["CTS-CORE"]
+        COREBLOCK["🎛️ Orchestrator<br/>VM: cts-core<br/>Port: 8443/8444<br/><br/>API Server, Scheduler<br/>Metrics, Session Manager<br/>..."]
+    end
+    
+    subgraph DATA["💾 Infrastructure"]
         direction LR
-        T1[trader-1<br/>Binance, KuCoin, Bybit]
-        TN[trader-N<br/>...]
+        HSM["🔐 hsm-service<br/>SoftHSM<br/>Port: 8443<br/>KEK: exchange, 2fa"]
+        MYSQL["MySQL 9<br/>Master"]
+        CH["ClickHouse"]
     end
     
-    subgraph INFRA["Infrastructure"]
-        direction TB
-        subgraph CORE["🎛️ CTS-Core"]
-            direction LR
-            API[API Server<br/>REST + WS]
-            SCHED[Task Scheduler]
-            SESS[Session Mgr]
-            DBPROXY[DB Proxy]
-        end
-        
-        subgraph DATA["💾 Data Layer"]
-            direction LR
-            MYSQL[(MySQL 9<br/>Master)]
-            CH[(ClickHouse<br/>Tick Data)]
-        end
-        
-        subgraph WEB["🌐 Web Layer"]
-            WWW[www-go<br/>Port: 443]
-        end
+    subgraph TRADERS["🤖 Trader Daemons<br/>50+ VM"]
+        direction LR
+        T1["trader-1<br/>Binance"]
+        TN["...trader-N"]
     end
     
-    %% Security connections
-    T1 & TN -->|mTLS OU=Trading| HSM
-    WWW -->|mTLS OU=2FA| HSM
+    subgraph WEB["🌐 Web"]
+        WWW["Web UI<br/>Go+Gin<br/>Port: 443"]
+    end
     
-    %% Trader to exchanges
-    T1 & TN --> EX
+    %% Connections
+    WWW -->|mTLS+WS| CORE
+    WWW -->|mTLS| MYSQL
+    WWW -->|mTLS<br/>OU=2FA<br/>| HSM
+    WWW --> |mTLS| CH
+    CORE -->|mTLS<br/>OU=2FA<br/>OU=Trading| HSM
+    CORE -->|mTLS| MYSQL
+
+    CORE <-->|WS+mTLS| T1 & TN
     
-    %% Traders to Core
-    T1 & TN -->|WebSocket mTLS| API
-    
-    %% Traders to ClickHouse
-    T1 & TN -->|Tick Data| CH
-    
-    %% Core connections
-    WWW -->|mTLS + WS| API
-    DBPROXY --> MYSQL
-    API --> SCHED --> SESS
+    T1 & TN -->|mTLS<br/>OU=Trading| HSM
+    T1 & TN -->|mTLS| CH
+    T1 & TN -->|REST+WS| EXCHANGES
 ```
 
-### 3.3 Физическая топология (ASCII)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                           ФИЗИЧЕСКАЯ ТОПОЛОГИЯ                                      │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│  Region: Europe (Primary)                                                           │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  DC: Frankfurt                                                                 │ │
-│  │  ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌───────────┐         │ │
-│  │  │ cts-core  │ │  mysql-1  │ │hsm-service│ │    CA     │ │clickhouse │         │ │
-│  │  │ (primary) │ │ (master)  │ │           │ │  (offline)│ │           │         │ │
-│  │  └───────────┘ └───────────┘ └───────────┘ └───────────┘ └───────────┘         │ │
-│  │                                                                                │ │
-│  │  ┌───────────┐ ┌───────────┐ ┌───────────┐                                     │ │
-│  │  │ trader-1  │ │ trader-2  │ │ trader-3  │                                     │ │
-│  │  │ Binance   │ │  KuCoin   │ │  Bybit    │                                     │ │
-│  │  └───────────┘ └───────────┘ └───────────┘                                     │ │
-│  └────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                     │
-│  Region: Asia (Secondary)                                                           │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  DC: Singapore                                                                 │ │
-│  │  ┌───────────┐ ┌───────────┐ ┌───────────┐                                     │ │
-│  │  │ trader-4  │ │ trader-5  │ │ trader-6  │                                     │ │
-│  │  │ Binance   │ │   OKX     │ │  Huobi    │                                     │ │
-│  │  └───────────┘ └───────────┘ └───────────┘                                     │ │
-│  └────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                     │
-│  Region: Americas (Secondary)                                                       │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐ │
-│  │  DC: New York                                                                  │ │
-│  │  ┌───────────┐ ┌───────────┐ ┌───────────┐                                     │ │
-│  │  │ trader-7  │ │ trader-8  │ │ trader-9  │                                     │ │
-│  │  │ Coinbase  │ │  Kraken   │ │  Gemini   │                                     │ │
-│  │  └───────────┘ └───────────┘ └───────────┘                                     │ │
-│  └────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 3.4 Физическая топология (Mermaid)
+### 3.2 High-Level Architecture - CTS-Core Internal (Mermaid)
 
 ```mermaid
 flowchart TB
-    subgraph EU["🇪🇺 Region: Europe (Primary) - Frankfurt"]
-        direction LR
-        T1[trader-eu-1<br/>Binance, KuCoin]
-        T2[trader-eu-2<br/>Bybit, OKX]
+    subgraph API["🔌 API Layer"]
+        REST["REST API<br/>/api/v1/*"]
+        WST["WebSocket<br/>Traders<br/>/ws/trader"]
+        WSA["WebSocket<br/>Admin<br/>/ws/admin"]
+        HEALTH["Health/Metrics<br/>/health /metrics"]
     end
     
-    subgraph INFRA["🏗️ Infrastructure"]
-        direction LR
-        CTS[cts-core]
-        MYSQL[(MySQL Master)]
-        HSM[hsm-service]
-        CA[CA offline]
-        CH[(ClickHouse)]
+    subgraph BIZ["⚙️ Business Logic Layer"]
+        SESS["Session Manager<br/>• mTLS auth<br/>• Heartbeat<br/>• Health check"]
+        SCHED["Task Scheduler<br/>• Distribute tasks<br/>• Load balancing<br/>• Recrypt Keys<br/>• Failover"]
+        LAT["Latency Analyzer<br/>• Test traders<br/>• Routing<br/>• Rating"]
+        METR["Metrics Aggregator<br/>• Collect metrics<br/>"]
+        LOG["Trade Logger<br/>• Async writes<br/>• Buffering<br/>• Audit"]
     end
     
-    subgraph US["🇺🇸 Region: Americas - New York"]
-        T5[trader-us-1<br/>Coinbase, Kraken]
-        T6[trader-us-2<br/>Gemini, Binance]
+    subgraph DATA["💾 Data Access Layer"]
+        MYSQL["MySQL Pool<br/>master + RO"]
+        HSMCLI["HSM Client<br/>mTLS"]
+        CACHE["In-Memory Cache"]
+        FAIL["Failover Handler"]
     end
     
-    subgraph ASIA["🇸🇬 Region: Asia - Singapore"]
-        T3[trader-asia-1<br/>Binance, OKX]
-        T4[trader-asia-2<br/>Huobi, MEXC]
-    end
+    %% Connections
+    REST & WST & WSA & HEALTH --> SESS
+    SESS --> SCHED & LAT & METR & LOG
     
-    %% EU connections
-    T1 & T2 -->|mTLS| CTS
+    SCHED & METR & LAT --> CACHE
+    SCHED --> MYSQL
+    SCHED --> HSMCLI
+    LOG --> MYSQL
     
-    %% US connections  
-    T5 & T6 -->|mTLS ~80ms| CTS
-    
-    %% Asia connections
-    T3 & T4 -->|mTLS ~150ms| CTS
-    
-    %% Infrastructure internal
-    CTS --> MYSQL
-    CTS --> HSM
-    
-    %% All traders to ClickHouse
-    T1 & T2 & T3 & T4 & T5 & T6 --> CH
+    style API fill:#e1f5ff
+    style BIZ fill:#f3e5f5
+    style DATA fill:#e8f5e9
 ```
-
----
 
 ## 4. Компоненты системы
 
