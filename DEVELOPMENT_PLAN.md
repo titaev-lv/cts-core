@@ -187,10 +187,17 @@ cts-core/
 
 ## 6. Следующие шаги
 
+⚠️ **ВАЖНО: См. [BEFORE_START.md](BEFORE_START.md) - критические вопросы требуют решения ПЕРЕД началом**
+
 1. ✅ **Утверждение архитектуры** — см. [ARCHITECTURE.md](ARCHITECTURE.md)
-2. ⏳ **Создание скелета проекта** — базовая структура CTS-Core
-3. ⏳ **Phase 1 реализация** — config, logger, MySQL, HSM client
-4. ⏳ **Параллельно**: Обновление daemon2 для работы с CTS-Core
+2. 🔴 **Phase 0.5: Architecture Hardening** (1-2 недели) — БЛОКЕР
+   - Решение всех вопросов из BEFORE_START.md
+   - SQL migrations для TRADER, MONITOR_PAIR, EXCHANGE_LIMITS
+   - Финализация API specification
+   - State management design
+3. ⏳ **Создание скелета проекта** — базовая структура CTS-Core
+4. ⏳ **Phase 1 реализация** — config, logger, MySQL, HSM client
+5. ⏳ **Параллельно**: Обновление daemon2 для работы с CTS-Core
 
 ---
 

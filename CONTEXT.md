@@ -14,8 +14,11 @@
 
 | Документ | Описание | Статус |
 |----------|----------|--------|
+| [BEFORE_START.md](BEFORE_START.md) | 🔴 Критические вопросы и пробелы | ⚠️ Требует решения |
+| [API_SPECIFICATION.md](API_SPECIFICATION.md) | Единый API (WebSocket + REST) | ✅ Готов |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Полная архитектура системы | ✅ Готов |
 | [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) | План разработки с Gantt-диаграммами | ✅ Готов |
+| [TRADER_MODES.md](TRADER_MODES.md) | TRADE vs MONITOR режимы | ✅ Готов |
 | [gpt.txt](gpt.txt) | Исходная спецификация (база данных, стратегии) | 📖 Reference |
 | [shema-go.txt](shema-go.txt) | Схема Go-проекта | 📖 Reference |
 
@@ -112,6 +115,8 @@ cts-core/
 
 ## 6. WebSocket Protocol
 
+> **См. полную спецификацию**: [API_SPECIFICATION.md](API_SPECIFICATION.md)
+
 ### 6.1 Endpoint
 
 ```
@@ -177,20 +182,31 @@ wss://cts-core:8443/ws/admin    # Для web-интерфейса
 - [x] SQL-схема для новых таблиц
 - [x] WebSocket protocol specification
 
-### 8.2 Следующие шаги
+### 8.2 Готовность к разработке
 
-1. **Создать скелет проекта CTS-Core**
-   - go.mod
-   - Структура директорий
-   - Базовый config
+⚠️ **СТАТУС: 65% готовности**
 
-2. **Phase 1: Foundation**
+**БЛОКЕРЫ (см. [BEFORE_START.md](BEFORE_START.md)):**
+- [ ] Механизм регистрации трейдеров (automatic vs manual)
+- [ ] State management strategy (Redis vs local file)
+- [ ] Idempotency для trade.result (trade.intent flow)
+- [ ] Недостающие SQL таблицы (TRADER, MONITOR_PAIR, EXCHANGE_LIMITS)
+- [ ] Failover design (Phase 1.5?)
+
+### 8.3 Следующие шаги
+
+**ДО начала Phase 1:**
+1. **Закрыть все блокеры** в BEFORE_START.md
+2. **SQL migrations** для новых таблиц
+3. **Финализировать API** спецификацию
+
+**Phase 1: Foundation (после закрытия блокеров)**
    - [ ] Config loader (YAML)
    - [ ] Logger (как в daemon2)
    - [ ] MySQL connection pool
    - [ ] Basic REST API (/health, /metrics)
 
-3. **Phase 2: Core Features**
+**Phase 2: Core Features**
    - [ ] WebSocket server для трейдеров
    - [ ] Session manager
    - [ ] Task scheduler

@@ -429,136 +429,76 @@ flowchart TB
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 5.2 Sequence Diagrams
+### 5.2 Trader Registration & Task Assignment
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                    SEQUENCE: TRADER REGISTRATION & TASK ASSIGNMENT                  │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│    Trader                  CTS-Core                  MySQL                HSM       │
-│      │                        │                        │                   │        │
-│      │  1. TCP Connect (mTLS) │                        │                   │        │
-│      │───────────────────────>│                        │                   │        │
-│      │                        │                        │                   │        │
-│      │  2. WS Upgrade         │                        │                   │        │
-│      │───────────────────────>│                        │                   │        │
-│      │                        │                        │                   │        │
-│      │  3. trader.register    │                        │                   │        │
-│      │───────────────────────>│                        │                   │        │
-│      │                        │                        │                   │        │
-│      │                        │  4. Verify cert CN     │                   │        │
-│      │                        │  (extract trader_id)   │                   │        │
-│      │                        │                        │                   │        │
-│      │                        │  5. Store session      │                   │        │
-│      │                        │─ ─ ─ ─ ─ ─ ─ ─ ─ ─  ─ >│                   │        │
-│      │                        │                        │                   │        │
-│      │  6. registration.ack   │                        │                   │        │
-│      │<───────────────────────│                        │                   │        │
-│      │                        │                        │                   │        │
-│      │                        │  7. Get pending tasks  │                   │        │
-│      │                        │─ ─ ─ ─ ─ ─ ─ ─ ─  ─ ─ >│                   │        │
-│      │                        │                        │                   │        │
-│      │                        │  8. Get encrypted creds│                   │        │
-│      │                        │─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─>│        │
-│      │                        │                        │                   │        │
-│      │                        │  9. Decrypt creds      │                   │        │
-│      │                        │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│        │
-│      │                        │                        │                   │        │
-│      │  10. task.assign       │                        │                   │        │
-│      │<───────────────────────│                        │                   │        │
-│      │                        │                        │                   │        │
-│      │  11. task.ack          │                        │                   │        │
-│      │───────────────────────>│                        │                   │        │
-│      │                        │                        │                   │        │
-│    ──┴──                    ──┴──                    ──┴──               ──┴──      │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Trader
+    participant Core as CTS-Core
+    participant MySQL
+    participant HSM
+    
+    Trader->>Core: TCP Connect (mTLS)
+    Trader->>Core: WS Upgrade
+    Trader->>Core: trader.register
+    Note over Core: Verify cert CN<br/>(extract trader_id)
+    Core->>MySQL: Store session
+    Core->>Trader: registration.ack
+    Core->>MySQL: Get pending tasks
+    Core->>HSM: Get encrypted creds
+    HSM-->>Core: Decrypt creds
+    Core->>Trader: task.assign
+    Trader->>Core: task.ack
 ```
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                      SEQUENCE: ARBITRAGE TRADE EXECUTION                            │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│   Trader        CTS-Core       MySQL      Binance      KuCoin      ClickHouse       │
-│     │              │             │           │           │             │            │
-│     │              │             │           │           │             │            │
-│     │  WS: OB update (Binance)   │           │           │             │            │
-│     │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│           │             │            │
-│     │              │             │           │           │             │            │
-│     │  WS: OB update (KuCoin)    │           │           │             │            │
-│     │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│             │            │
-│     │              │             │           │           │             │            │
-│     │  Strategy: Detect opportunity          │           │             │            │
-│     │  (Binance buy < KuCoin sell)           │           │             │            │
-│     │              │             │           │           │             │            │
-│     │  1. REST: Place buy order  │           │           │             │            │
-│     │─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─>│           │             │            │
-│     │              │             │           │           │             │            │
-│     │  2. REST: Place sell order │           │           │             │            │
-│     │─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─>│             │            │
-│     │              │             │           │           │             │            │
-│     │  3. Order ack (Binance)    │           │           │             │            │
-│     │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│           │             │            │
-│     │              │             │           │           │             │            │
-│     │  4. Order ack (KuCoin)     │           │           │             │            │
-│     │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│             │            │
-│     │              │             │           │           │             │            │
-│     │  5. WS: Order filled (Binance)         │           │             │            │
-│     │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│           │             │            │
-│     │              │             │           │           │             │            │
-│     │  6. WS: Order filled (KuCoin)          │           │             │            │
-│     │<─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│             │            │
-│     │              │             │           │           │             │            │
-│     │  7. trade.result           │           │           │             │            │
-│     │──────────────>             │           │           │             │            │
-│     │              │             │           │           │             │            │
-│     │              │  8. Insert ARBITRAGE_TRANS          │             │            │
-│     │              │─────────────>           │           │             │            │
-│     │              │             │           │           │             │            │
-│     │  9. Tick data (async batch)│           │           │             │            │
-│     │─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─>│            │
-│     │              │             │           │           │             │            │
-│   ──┴──          ──┴──         ──┴──       ──┴──       ──┴──         ──┴──          │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
+### 5.3 Arbitrage Trade Execution
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Trader
+    participant Core as CTS-Core
+    participant MySQL
+    participant Binance
+    participant KuCoin
+    participant ClickHouse
+    
+    Binance-->>Trader: WS: OB update
+    KuCoin-->>Trader: WS: OB update
+    Note over Trader: Strategy: Detect opportunity<br/>(Binance buy < KuCoin sell)
+    Trader->>Binance: REST: Place buy order
+    Trader->>KuCoin: REST: Place sell order
+    Binance-->>Trader: Order ack
+    KuCoin-->>Trader: Order ack
+    Binance-->>Trader: WS: Order filled
+    KuCoin-->>Trader: WS: Order filled
+    Trader->>Core: trade.result
+    Core->>MySQL: Insert ARBITRAGE_TRANS
+    Trader->>ClickHouse: Tick data (async batch)
 ```
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                       SEQUENCE: TRADER FAILOVER                                     │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│   Trader-1     Trader-2     CTS-Core       MySQL         Exchange                   │
-│      │            │            │             │               │                      │
-│      │  heartbeat │            │             │               │                      │
-│      │────────────────────────>│             │               │                      │
-│      │            │            │             │               │                      │
-│      │  [DISCONNECT / TIMEOUT] │             │               │                      │
-│      X            │            │             │               │                      │
-│                   │            │             │               │                      │
-│                   │  1. Detect trader-1 down │               │                      │
-│                   │            │             │               │                      │
-│                   │  2. Find backup trader   │               │                      │
-│                   │            │             │               │                      │
-│                   │  3. Get trader-1 tasks   │               │                      │
-│                   │            │─────────────>               │                      │
-│                   │            │             │               │                      │
-│                   │  4. task.assign (failover)               │                      │
-│                   │<───────────│             │               │                      │
-│                   │            │             │               │                      │
-│                   │  5. task.ack             │               │                      │
-│                   │───────────>│             │               │                      │
-│                   │            │             │               │                      │
-│                   │  6. Cancel pending orders│               │                      │
-│                   │──────────────────────────────────────────>                      │
-│                   │            │             │               │                      │
-│                   │  7. Continue trading     │               │                      │
-│                   │            │             │               │                      │
-│                 ──┴──        ──┴──         ──┴──           ──┴──                    │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
+### 5.4 Trader Failover
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant T1 as Trader-1
+    participant T2 as Trader-2
+    participant Core as CTS-Core
+    participant MySQL
+    participant Exchange
+    
+    T1->>Core: heartbeat
+    Note over T1: DISCONNECT / TIMEOUT
+    destroy T1
+    Note over Core: Detect trader-1 down
+    Note over Core: Find backup trader
+    Core->>MySQL: Get trader-1 tasks
+    Core->>T2: task.assign (failover)
+    T2->>Core: task.ack
+    T2->>Exchange: Cancel pending orders
+    Note over T2: Continue trading
 ```
 
 ---
@@ -665,63 +605,7 @@ flowchart TB
     style KEK_2FA fill:#bbf,stroke:#333
 ```
 
-### 6.3 Credential Flow: Trader получает API keys (ASCII)
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                     CREDENTIAL DECRYPTION FLOW (Вариант A)                          │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│  Трейдер → HSM напрямую (credentials никогда не в открытом виде через CTS-Core)     │
-│                                                                                     │
-│    Trader                  CTS-Core              MySQL              HSM             │
-│      │                        │                    │                 │              │
-│      │  1. WebSocket connect  │                    │                 │              │
-│      │───────────────────────>│                    │                 │              │
-│      │     (mTLS: OU=Trading) │                    │                 │              │
-│      │                        │                    │                 │              │
-│      │  2. trader.register    │                    │                 │              │
-│      │───────────────────────>│                    │                 │              │
-│      │                        │                    │                 │              │
-│      │                        │  3. SELECT TRADE   │                 │              │
-│      │                        │─────────────────-->│                 │              │
-│      │                        │                    │                 │              │
-│      │                        │  4. SELECT         │                 │              │
-│      │                        │     EXCHANGE_ACCOUNTS                │              │
-│      │                        │─────────────────-->│                 │              │
-│      │                        │  (encrypted DEK,   │                 │              │
-│      │                        │   encrypted keys)  │                 │              │
-│      │                        │                    │                 │              │
-│      │  5. task.assign        │                    │                 │              │
-│      │<───────────────────────│                    │                 │              │
-│      │   {                    │                    │                 │              │
-│      │     encrypted_dek,     │                    │                 │              │
-│      │     encrypted_api_key, │                    │                 │              │
-│      │     encrypted_secret   │                    │                 │              │
-│      │   }                    │                    │                 │              │
-│      │                        │                    │                 │              │
-│      │  6. POST /decrypt      │                    │                 │              │
-│      │     (encrypted_dek)    │                    │                 │              │
-│      │───────────────────────────────────────────────────────────────>              │
-│      │     (mTLS: OU=Trading) │                    │                 │              │
-│      │                        │                    │                 │              │
-│      │  7. Plain DEK          │                    │                 │              │
-│      │<───────────────────────────────────────────────────────────────              │
-│      │                        │                    │                 │              │
-│      │  8. Decrypt API keys locally with DEK       |                 │              │
-│      │     (keys only in memory, never logged)     |                 │              │
-│      │                        │                    │                 │              │
-│      │  9. Connect to Exchange with decrypted keys |                 │              │
-│      │                        │                    │                 │              │
-│                                                                                     │
-│  ✅ CTS-Core НИКОГДА не видит расшифрованные API ключи                              │
-│  ✅ HSM проверяет OU=Trading в сертификате трейдера                                 │
-│  ✅ Расшифрованные ключи существуют только в памяти трейдера                        │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### 6.4 Credential Flow (Mermaid)
+### 6.3 Credential Flow: Trader получает API keys
 
 ```mermaid
 sequenceDiagram
@@ -852,50 +736,42 @@ sequenceDiagram
 
 ### 7.2 Monitoring Duplication
 
+**Цель:** Обеспечить непрерывность мониторинга при отказе трейдера
+
+```mermaid
+flowchart LR
+    subgraph Binance["Exchange: Binance (BTC/USDT, ETH/USDT)"]
+    end
+    
+    subgraph T1["Trader-1 (PRIMARY)"]
+        direction TB
+        OB1_BTC["📊 OrderBook<br/>BTC/USDT"]
+        OB1_ETH["📊 OrderBook<br/>ETH/USDT"]
+        TRADE1["💰 Trading<br/>ACTIVE"]
+    end
+    
+    subgraph T2["Trader-2 (BACKUP)"]
+        direction TB
+        OB2_BTC["📊 OrderBook<br/>BTC/USDT<br/>🔥 HOT STANDBY"]
+        OB2_ETH["📊 OrderBook<br/>ETH/USDT<br/>🔥 HOT STANDBY"]
+        TRADE2["⏸️ Trading<br/>INACTIVE<br/>(только мониторинг)"]
+    end
+    
+    Binance -.->|WS Stream| T1
+    Binance -.->|WS Stream| T2
+    
+    style T1 fill:#c8e6c9
+    style T2 fill:#fff9c4
+    style OB2_BTC fill:#ffecb3
+    style OB2_ETH fill:#ffecb3
 ```
-┌─────────────────────────────────────────────────────────────────────────────────────┐
-│                         MONITORING TASK DUPLICATION                                 │
-├─────────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                     │
-│  Цель: Обеспечить непрерывность мониторинга при отказе трейдера                     │
-│                                                                                     │
-│  Схема:                                                                             │
-│  ┌────────────────────────────────────────────────────────────────────────────────┐ │
-│  │                                                                                │ │
-│  │     Exchange: Binance                                                          │ │
-│  │     Pairs: BTC/USDT, ETH/USDT                                                  │ │
-│  │                                                                                │ │
-│  │     ┌─────────────────┐        ┌─────────────────┐                             │ │
-│  │     │   Trader-1      │        │   Trader-2      │                             │ │
-│  │     │   (PRIMARY)     │        │   (BACKUP)      │                             │ │
-│  │     │                 │        │                 │                             │ │
-│  │     │  ┌───────────┐  │        │  ┌───────────┐  │                             │ │
-│  │     │  │ OrderBook │  │        │  │ OrderBook │  │                             │ │
-│  │     │  │ BTC/USDT  │  │        │  │ BTC/USDT  │  │  ← HOT STANDBY              │ │
-│  │     │  └───────────┘  │        │  └───────────┘  │                             │ │
-│  │     │  ┌───────────┐  │        │  ┌───────────┐  │                             │ │
-│  │     │  │ OrderBook │  │        │  │ OrderBook │  │                             │ │
-│  │     │  │ ETH/USDT  │  │        │  │ ETH/USDT  │  │  ← HOT STANDBY              │ │
-│  │     │  └───────────┘  │        │  └───────────┘  │                             │ │
-│  │     │                 │        │                 │                             │ │
-│  │     │  ┌───────────┐  │        │                 │                             │ │
-│  │     │  │  Trading  │  │        │  ← Не торгует   │                             │ │
-│  │     │  │  Active   │  │        │    (только      │                             │ │
-│  │     │  └───────────┘  │        │    мониторинг)  │                             │ │
-│  │     │                 │        │                 │                             │ │
-│  │     └─────────────────┘        └─────────────────┘                             │ │
-│  │                                                                                │ │
-│  │  При отказе Trader-1:                                                          │ │
-│  │  1. CTS-Core детектирует отказ (heartbeat timeout)                             │ │
-│  │  2. Trader-2 уже имеет актуальные данные                                       │ │
-│  │  3. CTS-Core назначает торговые задачи Trader-2                                │ │
-│  │  4. Trader-2 начинает торговать немедленно                                     │ │
-│  │  5. Время переключения: < 5 сек                                                │ │
-│  │                                                                                │ │
-│  └────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                     │
-└─────────────────────────────────────────────────────────────────────────────────────┘
-```
+
+**При отказе Trader-1:**
+1. CTS-Core детектирует отказ (heartbeat timeout)
+2. Trader-2 уже имеет актуальные данные
+3. CTS-Core назначает торговые задачи Trader-2
+4. Trader-2 начинает торговать немедленно
+5. **Время переключения: < 5 сек**
 
 ### 7.3 Task Assignment Flow (Mermaid)
 
