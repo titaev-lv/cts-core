@@ -47,9 +47,9 @@
 - Время реакции на события биржи: < 10ms
 - Downtime при сбое одного трейдера: 0 (failover)
 
----
-
 ## 2. Принятые решения
+
+### 2.1 Базовые архитектурные решения
 
 | # | Вопрос | Решение | Обоснование |
 |---|--------|---------|-------------|
@@ -62,6 +62,27 @@
 | 7 | Глубина стакана, TTL | **Вынести в настройки** | Будет определено позже |
 | 8 | Логирование | **Локальные логи** | ELK/Loki можно добавить позже |
 | 9 | Сертификаты трейдеров | **Вручную через CA** | Полный контроль над PKI |
+
+### 2.2 Phase 1 архитектурные решения (Январь 2026)
+
+| # | Компонент | Решение | Детали |
+|---|-----------|---------|--------|
+| 10 | **Trader Registration** | Гибридный подход | Admin pre-registration (TRADER table) + trader auto-connect via WebSocket |
+| 11 | **State Persistence** | Local file + MySQL | `daemon.state` (local) + MySQL sync для Phase 1, Redis для Phase 2 |
+| 12 | **Failover Strategy** | Single instance + trader resilience | Без Active-Passive кластера, быстрый restart, traders переподключаются автоматически |
+| 13 | **Database Schema** | 7 новых таблиц | TRADER, TRADER_SESSION, EXCHANGE_LIMITS, TRADER_EXCHANGE_RESOURCE, ARBITRAGE_ORDER, ORDER_TRANSACTION, MONITORING (ALTER) |
+| 14 | **Idempotency** | Core создает ARBITRAGE_TRANS | Минимальная латентность: Core создает ID при task.assign, trader торгует сразу |
+| 15 | **API Split** | WebSocket + REST | WebSocket для real-time (traders, monitoring), REST для CRUD/admin |
+| 16 | **Retry Policy** | Exponential backoff | По типам операций: API (3 retry, 1s base), DB (5 retry, 100ms base), Exchange (3 retry, 2s base) |
+| 17 | **Circuit Breaker** | Отложено на Phase 2 | Не критично для MVP, retry policy достаточно |
+| 18 | **Metrics** | Prometheus + Grafana | 20+ метрик, /metrics endpoint, 4 dashboard (overview, performance, errors, system) |
+| 19 | **Logging Format** | Гибридный | Dev: text (human-readable), Prod: JSON (machine-readable), библиотека: zerolog |
+| 20 | **Timeout Values** | Стандартизированные | heartbeat=5s, timeout=15s, grace=60s, failover=60s |
+| 21 | **Trader Capacity** | Phase 1 ограничения | DEV: 3 traders max, PROD: 2 traders max (инфраструктурные лимиты) |
+| 22 | **Load Balancing** | Scoring алгоритм | Latency 50%, Load 30%, Resources 20% (без региона) |
+| 23 | **Rate Limiting** | Token bucket | REST: 1000 req/min, WebSocket: 10000 msg/min per connection |
+| 24 | **Audit Log** | Гибридный | PRIMARY: JSON файл (logs/audit.log), SECONDARY: MySQL для Phase 2 (UI) |
+| 25 | **Error Codes** | 27 стандартизированных | Группировка: client errors (4xx), server errors (5xx), детали в API_SPECIFICATION.md |
 
 ---
 
@@ -670,11 +691,392 @@ sequenceDiagram
     end
 ```
 
+### 6.6 Rate Limiting & Security Policies (Phase 1)
+
+**Rate Limiting (Token Bucket):**
+
+```yaml
+REST API:
+  /api/v1/* : 1000 requests/min per IP
+  /health, /metrics : unlimited (monitoring)
+  
+WebSocket:
+  Connections: 50 per IP
+  Messages: 10000 msg/min per connection
+  
+Response (429 Too Many Requests):
+  Headers:
+    - X-RateLimit-Limit: 1000
+    - X-RateLimit-Remaining: 847
+    - X-RateLimit-Reset: 1706454345 (unix timestamp)
+
+Implementation:
+  - Library: github.com/ulule/limiter/v3
+  - Storage: In-memory для Phase 1, Redis для Phase 2
+  - Middleware для Gin router
+```
+
+**Retry Policies (Exponential Backoff):**
+
+```yaml
+API CALLS (CTS-Core → MySQL/HSM):
+  max_retries: 5
+  base_delay: 100ms
+  max_delay: 5s
+  multiplier: 2
+  jitter: true
+  
+DATABASE QUERIES:
+  max_retries: 3
+  base_delay: 100ms
+  max_delay: 2s
+  multiplier: 2
+  
+EXCHANGE API (Trader → Exchange):
+  max_retries: 3
+  base_delay: 2s
+  max_delay: 10s
+  multiplier: 2
+  timeout: 10s
+
+WEBSOCKET RECONNECT:
+  max_retries: infinite
+  base_delay: 1s
+  max_delay: 60s
+  multiplier: 2
+```
+
+**Circuit Breaker:** Отложено на Phase 2 (не критично для MVP)
+
+### 6.7 HSM Key Rotation & Re-encryption (Phase 1)
+
+**Проблема:** hsm-service поддерживает key rotation, но нужно перешифровать все данные на новый ключ.
+
+**Затронутые таблицы:**
+```yaml
+EXCHANGE_ACCOUNTS:
+  ✅ Уже готово к rotation
+  - ENC_KEY_VERSION (INT) - версия KEK из key_id
+  - DEK_ENC, API_KEY_ENC, SECRET_KEY_ENC, ADD_KEY_ENC
+  
+USER_2FA:
+  ⚠️ Требует миграции
+  - SECRET_ENC, RECOVERY_CODES_ENC
+  - ❌ Не было ENC_KEY_VERSION (добавлено в миграции)
+  - ✅ Добавлен флаг needs_reencryption
+
+Note: enc_alg НЕ хранится - HSM API не использует его (всегда AES-256-GCM)
+      Алгоритм встроен в key_id: kek-2fa-v1, kek-exchange-key-v2
+```
+
+**Key Rotation процесс:**
+
+```
+1. ADMIN INITIATES KEY ROTATION:
+   - Admin создает новый KEK в hsm-service (key rotation)
+   - Новая версия KEK: v2 (старая: v1)
+   
+2. CTS-CORE SCHEDULER DETECTS:
+   - Запрос к HSM: GET /keys/metadata → получает current_version=2
+   - Сравнение с данными в БД:
+     SELECT DISTINCT enc_key_version FROM EXCHANGE_ACCOUNTS WHERE enc_key_version < 2
+     SELECT DISTINCT enc_key_version FROM USER_2FA WHERE enc_key_version < 2
+   
+3. CREATE RE-ENCRYPTION JOB:
+   INSERT INTO REENCRYPTION_JOBS (
+       job_type = 'exchange_accounts',
+       old_key_version = 1,
+       new_key_version = 2,
+       context = 'exchange-key',
+       total_records = (SELECT COUNT(*) FROM EXCHANGE_ACCOUNTS WHERE enc_key_version = 1)
+   )
+   
+4. BATCH RE-ENCRYPTION (background job):
+   LOOP:
+     - SELECT id FROM EXCHANGE_ACCOUNTS WHERE enc_key_version = 1 LIMIT 100
+     - FOR EACH record:
+         a) Read encrypted DEK (with v1)
+         b) Decrypt via HSM: POST /decrypt {key_version: 1, ciphertext}
+         c) Encrypt via HSM: POST /encrypt {key_version: 2, plaintext}
+         d) UPDATE EXCHANGE_ACCOUNTS SET DEK_ENC=new, enc_key_version=2
+         e) INSERT INTO REENCRYPTION_PROGRESS (status='completed')
+     - IF error: mark failed, continue with next
+     - Sleep 100ms between batches (avoid overload)
+   UNTIL all records processed
+   
+5. VERIFICATION:
+   - Check all records: enc_key_version = 2
+   - Update job status: 'completed'
+   - Log to AUDIT_LOG
+   
+6. OLD KEY DECOMMISSION:
+   - Admin can disable old KEK version in hsm-service
+   - Keep for 30 days (rollback safety)
+```
+
+**Implementation в CTS-Core:**
+
+```go
+// internal/scheduler/reencryption.go
+type ReencryptionJob struct {
+    ID              int
+    JobType         string
+    OldKeyVersion   int
+    NewKeyVersion   int
+    Context         string
+    Status          string
+    TotalRecords    int
+    ProcessedRecords int
+    FailedRecords   int
+    BatchSize       int
+}
+
+func (s *Scheduler) CheckReencryptionJobs() {
+    // Run every minute (or on-demand via API)
+    jobs := s.db.GetPendingReencryptionJobs()
+    
+    for _, job := range jobs {
+        go s.ProcessReencryptionJob(job) // Async
+    }
+}
+
+func (s *Scheduler) ProcessReencryptionJob(job ReencryptionJob) error {
+    // Mark as in_progress
+    s.db.UpdateJobStatus(job.ID, "in_progress")
+    
+    switch job.JobType {
+    case "exchange_accounts":
+        return s.ReencryptExchangeAccounts(job)
+    case "user_2fa":
+        return s.ReencryptUser2FA(job)
+    }
+}
+
+func (s *Scheduler) ReencryptExchangeAccounts(job ReencryptionJob) error {
+    for {
+        // Get batch
+        records := s.db.Query(`
+            SELECT ID, DEK_ENC, API_KEY_ENC, SECRET_KEY_ENC, ADD_KEY_ENC
+            FROM EXCHANGE_ACCOUNTS
+            WHERE enc_key_version = ?
+            LIMIT ?
+        `, job.OldKeyVersion, job.BatchSize)
+        
+        if len(records) == 0 {
+            break // Done
+        }
+        
+        for _, rec := range records {
+            err := s.ReencryptSingleRecord(job, rec)
+            if err != nil {
+                s.db.MarkRecordFailed(job.ID, rec.ID, err.Error())
+                job.FailedRecords++
+                continue
+            }
+            job.ProcessedRecords++
+        }
+        
+        // Update progress
+        s.db.UpdateJobProgress(job.ID, job.ProcessedRecords, job.FailedRecords)
+        
+        // Sleep between batches
+        time.Sleep(100 * time.Millisecond)
+    }
+    
+    // Mark complete
+    s.db.UpdateJobStatus(job.ID, "completed")
+    return nil
+}
+
+func (s *Scheduler) ReencryptSingleRecord(job ReencryptionJob, rec Record) error {
+    // 1. Decrypt with old key
+    dekPlain, err := s.hsm.Decrypt(HSMDecryptRequest{
+        Context:    job.Context,
+        KeyVersion: job.OldKeyVersion,
+        Ciphertext: rec.DEK_ENC,
+    })
+    if err != nil {
+        return fmt.Errorf("decrypt failed: %w", err)
+    }
+    
+    // 2. Encrypt with new key
+    dekNew, err := s.hsm.Encrypt(HSMEncryptRequest{
+        Context:    job.Context,
+        KeyVersion: job.NewKeyVersion,
+        Plaintext:  dekPlain,
+    })
+    if err != nil {
+        return fmt.Errorf("encrypt failed: %w", err)
+    }
+    
+    // 3. Update record (within transaction)
+    tx := s.db.Begin()
+    defer tx.Rollback()
+    
+    _, err = tx.Exec(`
+        UPDATE EXCHANGE_ACCOUNTS
+        SET DEK_ENC = ?,
+            API_KEY_ENC = ?, -- re-encrypt all fields
+            SECRET_KEY_ENC = ?,
+            ADD_KEY_ENC = ?,
+            enc_key_version = ?
+        WHERE ID = ?
+    `, dekNew, ..., job.NewKeyVersion, rec.ID)
+    
+    if err != nil {
+        return err
+    }
+    
+    tx.Commit()
+    return nil
+}
+```
+
+**Scheduler Task Registration:**
+
+```sql
+-- Проверка на pending re-encryption jobs каждые 60 секунд
+INSERT INTO SCHEDULER_TASKS (
+    task_name = 'check_reencryption_jobs',
+    task_type = 'reencryption',
+    schedule_interval_sec = 60,
+    enabled = TRUE,
+    config = '{"batch_size": 100, "sleep_between_batches_ms": 100}'
+);
+```
+
+**Admin API для инициации:**
+
+```
+POST /api/v1/admin/reencryption/initiate
+{
+    "job_type": "exchange_accounts",
+    "new_key_version": 2,
+    "context": "exchange-key"
+}
+
+Response:
+{
+    "job_id": 123,
+    "status": "pending",
+    "total_records": 1523,
+    "estimated_duration_minutes": 15
+}
+
+GET /api/v1/admin/reencryption/jobs/{job_id}
+{
+    "job_id": 123,
+    "status": "in_progress",
+    "progress_percent": 45.2,
+    "processed": 689,
+    "failed": 3,
+    "total": 1523,
+    "started_at": "2026-01-28T15:00:00Z",
+    "estimated_completion": "2026-01-28T15:12:00Z"
+}
+```
+
+**Safety措施:**
+
+1. **Batch processing** - по 100 записей, не перегружаем HSM/DB
+2. **Progress tracking** - можно остановить и продолжить
+3. **Failed records retry** - не блокирует весь процесс
+4. **Rollback safety** - старые ключи хранятся 30 дней
+5. **Verification** - после завершения проверяем все записи
+6. **Audit trail** - все операции логируются
+
 ---
 
 ## 7. Распределение задач
 
-### 7.1 Task Assignment Algorithm
+### 7.1 Load Balancing Algorithm (Phase 1)
+
+**Алгоритм выбора трейдера для задачи** основан на scoring с тремя факторами:
+
+```go
+type AssignmentScore struct {
+    TraderID string
+    Score    float64
+    Details  ScoreBreakdown
+}
+
+type ScoreBreakdown struct {
+    LatencyScore   float64 // 50% - КРИТИЧНО для арбитража
+    LoadScore      float64 // 30% - баланс нагрузки
+    ResourceScore  float64 // 20% - доступные лимиты бирж
+}
+
+func (s *Scheduler) SelectTrader(task Task, candidates []Trader) *Trader {
+    scores := []AssignmentScore{}
+    
+    for _, trader := range candidates {
+        score := s.CalculateScore(trader, task)
+        scores = append(scores, score)
+    }
+    
+    // Sort by score DESC
+    sort.Slice(scores, func(i, j int) bool {
+        return scores[i].Score > scores[j].Score
+    })
+    
+    return scores[0].TraderID
+}
+
+func (s *Scheduler) CalculateScore(trader Trader, task Task) AssignmentScore {
+    breakdown := ScoreBreakdown{}
+    
+    // 1. ЛАТЕНТНОСТЬ К БИРЖАМ (вес: 50%)
+    var avgLatency float64
+    for _, exchangeID := range task.ExchangeIDs {
+        latency := s.GetLatency(trader.ID, exchangeID)
+        avgLatency += latency
+    }
+    avgLatency /= float64(len(task.ExchangeIDs))
+    
+    // Формула: 100 - (latency_ms / 10)
+    latencyScore := 100.0 - (avgLatency / 10.0)
+    if latencyScore < 0 {
+        latencyScore = 0
+    }
+    breakdown.LatencyScore = latencyScore * 0.5
+    
+    // 2. ТЕКУЩАЯ ЗАГРУЗКА (вес: 30%)
+    loadPercent := float64(trader.ActiveTasks) / float64(trader.MaxTasks) * 100
+    loadScore := 100.0 - loadPercent
+    breakdown.LoadScore = loadScore * 0.3
+    
+    // 3. ЛИМИТЫ БИРЖ (вес: 20%)
+    resourceScore := s.CheckResourceAvailability(trader, task)
+    breakdown.ResourceScore = resourceScore * 0.2
+    
+    totalScore := breakdown.LatencyScore + breakdown.LoadScore + breakdown.ResourceScore
+    
+    return AssignmentScore{
+        TraderID: trader.ID,
+        Score:    totalScore,
+        Details:  breakdown,
+    }
+}
+```
+
+**Пример:**
+```yaml
+ЗАДАЧА: Арбитраж BTC/USDT между Binance + Bybit
+
+TRADER-EU-1 (Frankfurt):
+  Latency: (15ms + 20ms) / 2 = 17.5ms → Score: (100 - 1.75) * 0.5 = 49.1
+  Load: 30% → Score: 70 * 0.3 = 21.0
+  Resources: 92.5% available → Score: 92.5 * 0.2 = 18.5
+  TOTAL: 88.6
+
+TRADER-US-1 (New York):
+  Latency: (80ms + 90ms) / 2 = 85ms → Score: (100 - 8.5) * 0.5 = 45.75
+  Load: 10% → Score: 90 * 0.3 = 27.0
+  Resources: 96.5% available → Score: 96.5 * 0.2 = 19.3
+  TOTAL: 92.05 ✅ WINNER (несмотря на худшую латентность, свободнее)
+```
+
+### 7.2 Task Assignment Algorithm
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
@@ -686,6 +1088,7 @@ sequenceDiagram
 │    - Available traders (connected via WebSocket)                                    │
 │    - Latency metrics (trader → exchange)                                            │
 │    - Load metrics (CPU, memory, active tasks)                                       │
+│    - Resource limits (exchange orders/volume per trader)                            │
 │                                                                                     │
 │  Algorithm:                                                                         │
 │                                                                                     │
@@ -706,13 +1109,11 @@ sequenceDiagram
 │     │  }                                                                          │ │
 │     └─────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                     │
-│  3. SCORE TRADERS (для каждой биржи)                                                │
+│  3. SCORE TRADERS (scoring algorithm выше)                                          │
 │     ┌─────────────────────────────────────────────────────────────────────────────┐ │
-│     │  score = w1 * (1 / latency_ms)    // Чем меньше latency, тем лучше          │ │
-│     │        + w2 * (1 - load)          // Чем меньше нагрузка, тем лучше         │ │
-│     │        + w3 * region_bonus        // Бонус за близость к бирже              │ │
-│     │                                                                             │ │
-│     │  weights: w1=0.5, w2=0.3, w3=0.2                                            │ │
+│     │  score = 0.50 * latency_score    // Латентность (50%)                       │ │
+│     │        + 0.30 * load_score        // Текущая нагрузка (30%)                 │ │
+│     │        + 0.20 * resource_score    // Доступные лимиты (20%)                 │ │
 │     └─────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                     │
 │  4. ASSIGN TASKS                                                                    │
@@ -734,7 +1135,7 @@ sequenceDiagram
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.2 Monitoring Duplication
+### 7.3 Monitoring Duplication
 
 **Цель:** Обеспечить непрерывность мониторинга при отказе трейдера
 
@@ -845,18 +1246,124 @@ sequenceDiagram
 
 ## 8. Отказоустойчивость
 
-### 8.1 Failure Scenarios
+### 8.1 State Management (Phase 1)
+
+**Двухуровневое хранение состояния:**
+
+```yaml
+LOCAL STATE FILE:
+  Path: state/daemon.state
+  Format: JSON
+  Purpose: быстрое восстановление после рестарта
+  Content:
+    - active_traders: {trader_id: connection_info}
+    - task_assignments: {task_id: {trader_id, assigned_at}}
+    - last_heartbeats: {trader_id: timestamp}
+  
+  Update: каждые 5 секунд (debounced)
+  Restore: при старте CTS-Core читается first
+
+MYSQL SYNC:
+  Tables: TRADER, TRADER_SESSION, MONITORING
+  Purpose: persistent storage, cross-restart data
+  Content:
+    - TRADER: registration info
+    - TRADER_SESSION: connection history (7 days)
+    - MONITORING: task assignments
+  
+  Update: async после изменений
+  Query: при startup для validation
+```
+
+**Восстановление после рестарта:**
+```go
+// При старте CTS-Core
+1. Читать daemon.state (если существует)
+2. Восстановить in-memory кеш:
+   - active_traders -> SessionManager
+   - task_assignments -> Scheduler
+3. Reconnect traders:
+   - Traders автоматически переподключаются (heartbeat timeout)
+   - Восстановление задач через task.reassign
+4. Синхронизация с MySQL:
+   - UPDATE TRADER_SESSION SET ended_at = NOW() WHERE ended_at IS NULL
+   - Cleanup старых сессий (> 7 days)
+```
+
+**Преимущества:**
+- ✅ Быстрый рестарт (секунды, не минуты)
+- ✅ Не зависит от MySQL при старте
+- ✅ Persistent хранение для аудита
+- ✅ Простота (без Redis для Phase 1)
+
+### 8.2 Trader Registration & Lifecycle
+
+**Гибридный подход:**
+
+```
+РЕГИСТРАЦИЯ (Admin):
+  1. Admin создает запись в TRADER table:
+     INSERT INTO TRADER (id, name, region, max_tasks, status)
+     VALUES ('trader-eu-1', 'EU Frankfurt Trader', 'eu', 10, 'registered')
+  
+  2. CTS-Core знает о трейдере, но он еще offline
+
+ПОДКЛЮЧЕНИЕ (Trader):
+  1. Trader запускается с mTLS сертификатом (OU=Trading)
+  2. Trader connect к ws://cts-core:8443/ws/trader
+  3. CTS-Core проверяет:
+     - mTLS certificate (CN=trader-eu-1)
+     - Exists в TRADER table
+     - Status != 'suspended'
+  
+  4. CTS-Core создает сессию:
+     INSERT INTO TRADER_SESSION (trader_id, connected_at, ip_address)
+  
+  5. CTS-Core отправляет trader.welcome:
+     {
+       "action": "trader.welcome",
+       "trader_id": "trader-eu-1",
+       "assigned_tasks": [...],
+       "config": {...}
+     }
+  
+  6. Trader начинает отправлять heartbeat каждые 5s
+
+HEARTBEAT:
+  Trader -> CTS-Core: {"action": "heartbeat", "load": 0.3, "active_tasks": 3}
+  CTS-Core -> Trader: {"action": "heartbeat.ack"}
+  
+  Timeout: 15s (3 missed heartbeats)
+
+ОТКЛЮЧЕНИЕ:
+  1. Graceful: trader отправляет {"action": "trader.disconnect"}
+  2. Force: heartbeat timeout
+  3. CTS-Core:
+     - Failover задач на других трейдеров
+     - UPDATE TRADER_SESSION SET ended_at = NOW()
+     - Логирование в audit.log
+```
+
+**Timeout Values:**
+```yaml
+heartbeat_interval: 5s   # Trader sends heartbeat
+heartbeat_timeout: 15s   # 3 missed = disconnect
+grace_period: 60s        # Wait before cleanup
+failover_timeout: 60s    # Max time for task reassignment
+```
+
+### 8.3 Failure Scenarios
 
 | Сценарий | Детектирование | Recovery Action | RTO |
 |----------|----------------|-----------------|-----|
-| Trader disconnect | Heartbeat timeout (10s) | Failover to backup | <15s |
+| Trader disconnect | Heartbeat timeout (15s) | Failover to backup | <20s |
 | Trader crash | TCP FIN/RST | Failover + cancel orders | <10s |
 | CTS-Core crash | Trader detects disconnect | Trader pauses, waits | 30s |
-| MySQL down | Connection pool error | Reconnect with backoff | <60s |
+| MySQL down | Connection pool error | Reconnect with backoff, use local state | <60s |
 | HSM down | API timeout | Use cached DEKs | <5s |
 | Exchange WS down | Ping timeout | Reconnect + re-subscribe | <30s |
 
-### 8.2 Failure Recovery (Mermaid)
+### 8.4 Failure Recovery (Mermaid)
 
 ```mermaid
 flowchart LR
@@ -1129,6 +1636,151 @@ sequenceDiagram
 │  }                                                                                  │
 │                                                                                     │
 └─────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9.5 Observability Stack (Phase 1)
+
+### Metrics (Prometheus + Grafana)
+
+**Endpoint:** `GET /metrics`
+
+**Метрики (20+):**
+
+```yaml
+# CTS-Core Server
+cts_core_active_traders (gauge)
+cts_core_tasks_assigned_total (counter) [labels: task_type, status]
+cts_core_tasks_failed_total (counter) [labels: task_type, reason]
+cts_core_websocket_connections (gauge) [labels: client_type]
+cts_core_websocket_messages_total (counter) [labels: action, direction]
+cts_core_api_requests_total (counter) [labels: endpoint, method, status]
+cts_core_api_latency_seconds (histogram) [labels: endpoint]
+cts_core_db_queries_total (counter) [labels: query_type, status]
+cts_core_db_latency_seconds (histogram)
+
+# Task Scheduler
+cts_core_scheduler_queue_size (gauge)
+cts_core_scheduler_assignment_latency_seconds (histogram)
+cts_core_scheduler_assignment_failures_total (counter) [labels: reason]
+
+# Arbitrage
+cts_arbitrage_opportunities_total (counter) [labels: pair, exchanges]
+cts_arbitrage_executed_total (counter) [labels: status]
+cts_arbitrage_profit_usdt (counter)
+cts_arbitrage_execution_latency_seconds (histogram)
+
+# Traders (reported by trader, aggregated by core)
+cts_trader_cpu_usage_percent (gauge) [labels: trader_id]
+cts_trader_memory_usage_percent (gauge) [labels: trader_id]
+cts_trader_active_tasks (gauge) [labels: trader_id, task_type]
+cts_trader_orders_per_second (gauge) [labels: trader_id, exchange]
+cts_trader_ws_connections (gauge) [labels: trader_id, exchange]
+cts_trader_exchange_latency_ms (gauge) [labels: trader_id, exchange]
+
+# System
+go_goroutines (gauge)
+go_memstats_alloc_bytes (gauge)
+process_cpu_seconds_total (counter)
+```
+
+**Grafana Dashboards:**
+1. **Overview:** active traders, tasks, arbitrage count, profit
+2. **Performance:** API latency, DB latency, task assignment latency
+3. **Errors:** failures by type, error rate, circuit breaker status
+4. **System:** CPU, memory, goroutines, GC pauses
+
+**Библиотека:** `github.com/prometheus/client_golang/prometheus`
+
+### Logging (Zerolog)
+
+**Гибридный формат:**
+
+```yaml
+DEVELOPMENT (Docker):
+  format: text (human-readable, colored)
+  output: console + file (logs/daemon.log)
+  level: DEBUG
+  example: |
+    15:04:05 INFO  scheduler: Task assigned trader=eu-1 task=12345 ✓
+    15:04:06 ERROR websocket: Connection lost trader=us-2 reason=timeout
+
+PRODUCTION (VM Debian):
+  format: json (machine-readable)
+  output: file only (logs/daemon.log)
+  level: INFO
+  rotation: daily, 7 days retention
+  shipping: Loki/ELK для централизованного хранения
+  example: |
+    {"timestamp":"2026-01-28T15:04:05Z","level":"INFO","component":"scheduler","message":"Task assigned","trader_id":"trader-eu-1","task_id":"task-12345","latency_ms":45}
+```
+
+**Структура JSON log:**
+```json
+{
+  "timestamp": "2026-01-28T15:04:05.123456Z",
+  "level": "INFO",
+  "component": "scheduler",
+  "message": "Task assigned successfully",
+  "trader_id": "trader-eu-1",
+  "task_id": "task-12345",
+  "task_type": "trade",
+  "trade_id": 123,
+  "correlation_id": "uuid",
+  "latency_ms": 45,
+  "error": null
+}
+```
+
+**Levels:** DEBUG, INFO, WARN, ERROR, FATAL  
+**Required fields:** timestamp, level, component, message  
+**Optional context:** trader_id, task_id, correlation_id, error, stack_trace
+
+**Библиотека:** `github.com/rs/zerolog`
+
+### Audit Log
+
+**Двухуровневый подход:**
+
+```yaml
+PRIMARY: JSON файл
+  Path: logs/audit.log
+  Format: JSON lines (one event per line)
+  Write: Synchronous append-only
+  Rotation: logrotate (30 days локально)
+  Permissions: 0600 (read/write только daemon)
+  
+SECONDARY: MySQL (Phase 2)
+  Table: AUDIT_LOG
+  Purpose: UI для admin панели, быстрые запросы
+  Retention: последние 7 дней
+  Sync: async worker читает файл → пишет в БД
+```
+
+**Logged actions:**
+- trader.create, trader.update, trader.delete, trader.enable/disable
+- config.update (любое изменение через API)
+- limits.update (изменение EXCHANGE_LIMITS)
+- monitor.create, monitor.update, monitor.delete, monitor.enable/disable
+- system.restart, system.shutdown, emergency.stop
+
+**JSON формат:**
+```json
+{
+  "timestamp": "2026-01-28T15:04:05.123456Z",
+  "user_id": 5,
+  "username": "admin",
+  "action": "TRADER_DELETE",
+  "resource_type": "trader",
+  "resource_id": "trader-eu-1",
+  "old_value": {"id": "trader-eu-1", "status": "active"},
+  "new_value": null,
+  "ip_address": "192.168.1.10",
+  "user_agent": "Mozilla/5.0...",
+  "success": true,
+  "error_message": null
+}
 ```
 
 ---

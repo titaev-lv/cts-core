@@ -320,7 +320,16 @@ Trader нашел арбитражную возможность, запраши�
 
 #### 2.4.4 trade.result (event)
 
-Результат исполнения арбитражной сделки.
+Результат исполнения арбитражной сделки с трехуровневой структурой данных.
+
+**Трехуровневая структура:**
+```
+ARBITRAGE_TRANS (top level)
+  ↓ has many
+ARBITRAGE_ORDER (middle level - orders per exchange)
+  ↓ has many  
+ORDER_TRANSACTION (bottom level - individual fills/partials)
+```
 
 **Event:**
 ```json
@@ -329,59 +338,115 @@ Trader нашел арбитражную возможность, запраши�
   "action": "trade.result",
   "payload": {
     "task_id": "task-12345",
-    "arbitrage_id": 12345,
-    "trade_id": 123,
-    "status": "completed",
+    "trader_id": "trader-eu-1",
     "execution_time_ms": 850,
-    "orders": [
-      {
-        "exchange": "binance",
-        "exchange_account_id": 10,
-        "exchange_order_id": "abc123456",
-        "side": "buy",
-        "order_type": "market",
-        "pair": "BTC/USDT",
-        "price": "50000.00",
-        "quantity": "0.5",
-        "filled_quantity": "0.5",
-        "filled_price_avg": "50005.50",
-        "fee": "0.00025",
-        "fee_currency": "BTC",
-        "status": "filled",
-        "timestamp": 1737823200000
-      },
-      {
-        "exchange": "kucoin",
-        "exchange_account_id": 11,
-        "exchange_order_id": "xyz789012",
-        "side": "sell",
-        "order_type": "market",
-        "pair": "BTC/USDT",
-        "price": "50150.00",
-        "quantity": "0.5",
-        "filled_quantity": "0.5",
-        "filled_price_avg": "50145.25",
-        "fee": "12.50",
-        "fee_currency": "USDT",
-        "status": "filled",
-        "timestamp": 1737823200500
-      }
-    ],
-    "profit": {
-      "gross_usdt": "69.88",
-      "net_usdt": "57.38",
-      "percent": "0.11",
-      "fees_total_usdt": "12.50"
+    
+    "arbitrage_trans": {
+      "id": 12345,
+      "trade_id": 123,
+      "user_id": 1,
+      "strategy": "cross_exchange",
+      "pair": "BTC/USDT",
+      "status": "completed",
+      "gross_profit_usdt": "69.88",
+      "net_profit_usdt": "57.38",
+      "profit_percent": "0.11",
+      "total_fees_usdt": "12.50",
+      "started_at": "2026-01-28T15:04:05Z",
+      "completed_at": "2026-01-28T15:04:05.850Z",
+      "orders": [
+        {
+          "arbitrage_order_id": 24001,
+          "exchange": "binance",
+          "exchange_account_id": 10,
+          "exchange_order_id": "abc123456",
+          "side": "buy",
+          "order_type": "market",
+          "pair": "BTC/USDT",
+          "requested_quantity": "0.5",
+          "filled_quantity": "0.5",
+          "avg_price": "50005.50",
+          "total_cost": "25002.75",
+          "total_fee": "0.00025",
+          "fee_currency": "BTC",
+          "status": "filled",
+          "created_at": "2026-01-28T15:04:05.100Z",
+          "filled_at": "2026-01-28T15:04:05.450Z",
+          "transactions": [
+            {
+              "order_transaction_id": 48001,
+              "exchange_transaction_id": "binance-tx-123456",
+              "quantity": "0.3",
+              "price": "50005.00",
+              "cost": "15001.50",
+              "fee": "0.00015",
+              "fee_currency": "BTC",
+              "timestamp": "2026-01-28T15:04:05.250Z"
+            },
+            {
+              "order_transaction_id": 48002,
+              "exchange_transaction_id": "binance-tx-123457",
+              "quantity": "0.2",
+              "price": "50006.25",
+              "cost": "10001.25",
+              "fee": "0.0001",
+              "fee_currency": "BTC",
+              "timestamp": "2026-01-28T15:04:05.450Z"
+            }
+          ]
+        },
+        {
+          "arbitrage_order_id": 24002,
+          "exchange": "kucoin",
+          "exchange_account_id": 11,
+          "exchange_order_id": "xyz789012",
+          "side": "sell",
+          "order_type": "market",
+          "pair": "BTC/USDT",
+          "requested_quantity": "0.5",
+          "filled_quantity": "0.5",
+          "avg_price": "50145.25",
+          "total_cost": "25072.63",
+          "total_fee": "12.50",
+          "fee_currency": "USDT",
+          "status": "filled",
+          "created_at": "2026-01-28T15:04:05.200Z",
+          "filled_at": "2026-01-28T15:04:05.700Z",
+          "transactions": [
+            {
+              "order_transaction_id": 48003,
+              "exchange_transaction_id": "kucoin-tx-789012",
+              "quantity": "0.5",
+              "price": "50145.25",
+              "cost": "25072.63",
+              "fee": "12.50",
+              "fee_currency": "USDT",
+              "timestamp": "2026-01-28T15:04:05.700Z"
+            }
+          ]
+        }
+      ]
     }
   }
 }
 ```
 
 **Status values:**
-- `completed` - Оба ордера исполнены успешно
-- `partial` - Один ордер исполнен частично
+- `completed` - Все ордера исполнены успешно
+- `partial` - Один или несколько ордеров исполнены частично
 - `failed` - Ошибка при исполнении
 - `cancelled` - Отменено (по команде или timeout)
+
+**Сохранение в БД:**
+
+CTS-Core при получении trade.result:
+1. INSERT/UPDATE `ARBITRAGE_TRANS` (если еще не создан - хотя обычно создается при task.assign)
+2. INSERT `ARBITRAGE_ORDER` для каждого ордера (если не partial update)
+3. INSERT `ORDER_TRANSACTION` для каждой транзакции (fill/partial)
+
+**Deduplication:** 
+- UNIQUE constraint на `ARBITRAGE_ORDER(arbitrage_trans_id, exchange_order_id)`
+- UNIQUE constraint на `ORDER_TRANSACTION(arbitrage_order_id, exchange_transaction_id)`
 
 **Note:** Нет response, но CTS-Core acknowledgement через heartbeat.
 
@@ -1427,21 +1492,53 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | Code | HTTP | Описание |
 |------|------|----------|
 | `INVALID_MESSAGE` | 400 | Некорректный формат сообщения |
+| `VALIDATION_ERROR` | 400 | Ошибка валидации данных |
 | `UNAUTHORIZED` | 401 | Нет или невалидный token |
+| `INVALID_CERTIFICATE` | 401 | Невалидный mTLS certificate |
 | `FORBIDDEN` | 403 | Недостаточно прав |
+| `TRADER_SUSPENDED` | 403 | Trader suspended |
 | `NOT_FOUND` | 404 | Ресурс не найден |
 | `CONFLICT` | 409 | Конфликт (duplicate) |
+| `DUPLICATE_CONNECTION` | 409 | Trader уже подключен |
+| `ARBITRAGE_EXPIRED` | 410 | Арбитраж устарел (цены изменились) |
 | `INSUFFICIENT_RESOURCES` | 429 | Недостаточно ресурсов |
-| `INTERNAL_ERROR` | 500 | Внутренняя ошибка |
+| `RATE_LIMIT_EXCEEDED` | 429 | Превышен rate limit |
+| `RISK_LIMIT_EXCEEDED` | 429 | Превышен risk limit |
+| `EXCHANGE_LIMIT_EXCEEDED` | 429 | Превышен лимит биржи (orders/volume) |
+| `TRADER_NOT_REGISTERED` | 400 | Trader не pre-registered в системе |
+| `TRADER_OFFLINE` | 503 | Трейдер отключен/недоступен |
+| `TASK_ASSIGNMENT_FAILED` | 500 | Не удалось назначить задачу |
+| `INSUFFICIENT_BALANCE` | 400 | Недостаточно баланса на бирже |
+| `ORDER_REJECTED` | 400 | Биржа отклонила ордер |
+| `INTERNAL_ERROR` | 500 | Внутренняя ошибка сервера |
+| `DATABASE_ERROR` | 500 | Ошибка базы данных |
+| `CONFIGURATION_ERROR` | 500 | Ошибка конфигурации |
+| `NETWORK_ERROR` | 502 | Сетевая ошибка (connection failed) |
+| `EXCHANGE_ERROR` | 502 | Ошибка от биржи |
 | `SERVICE_UNAVAILABLE` | 503 | Сервис недоступен |
 | `TIMEOUT` | 504 | Timeout операции |
-| `TRADER_NOT_REGISTERED` | 400 | Trader не pre-registered |
-| `INVALID_CERTIFICATE` | 401 | Невалидный mTLS certificate |
-| `TRADER_SUSPENDED` | 403 | Trader suspended |
-| `DUPLICATE_CONNECTION` | 409 | Trader уже подключен |
-| `EXCHANGE_ERROR` | 502 | Ошибка от биржи |
-| `RISK_LIMIT_EXCEEDED` | 429 | Превышен risk limit |
-| `MARKET_MOVED` | 410 | Цены изменились (stale) |
+| `MARKET_MOVED` | 410 | Цены изменились (stale data) |
+
+**Группировка по категориям:**
+
+```yaml
+CLIENT_ERRORS (4xx):
+  - INVALID_MESSAGE, VALIDATION_ERROR
+  - UNAUTHORIZED, INVALID_CERTIFICATE
+  - FORBIDDEN, TRADER_SUSPENDED
+  - NOT_FOUND
+  - CONFLICT, DUPLICATE_CONNECTION
+  - ARBITRAGE_EXPIRED, MARKET_MOVED
+  - INSUFFICIENT_RESOURCES, RATE_LIMIT_EXCEEDED, RISK_LIMIT_EXCEEDED, EXCHANGE_LIMIT_EXCEEDED
+  - TRADER_NOT_REGISTERED, INSUFFICIENT_BALANCE, ORDER_REJECTED
+
+SERVER_ERRORS (5xx):
+  - INTERNAL_ERROR, DATABASE_ERROR, CONFIGURATION_ERROR
+  - TASK_ASSIGNMENT_FAILED
+  - NETWORK_ERROR, EXCHANGE_ERROR
+  - SERVICE_UNAVAILABLE, TRADER_OFFLINE
+  - TIMEOUT
+```
 
 ---
 
