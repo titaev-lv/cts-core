@@ -89,36 +89,1662 @@ gantt
 
 ## 4. Фазы CTS-Core (Детально)
 
-### Phase 0: Database Schema (НАЧАТЬ ЗДЕСЬ)
+> **Примечание:** Для каждой фазы создан отдельный детальный гайд в `guides/`.  
+> После завершения фазы - удалите соответствующий гайд.
 
-| Задача | Описание | Приоритет | Время |
-|--------|----------|-----------|-------|
-| **0.1** | CREATE TABLE TRADER | Регистрация трейдеров (admin pre-registration) | 🔴 Critical | 1h |
-| **0.2** | CREATE TABLE TRADER_SESSION | История подключений (7 days retention) | 🔴 Critical | 1h |
-| **0.3** | ALTER TABLE MONITORING | Добавить поля назначения (trader_id, assigned_at) | 🔴 Critical | 30m |
-| **0.4** | CREATE TABLE EXCHANGE_LIMITS | Лимиты бирж (orders/volume per day) | 🔴 Critical | 1h |
-| **0.5** | CREATE TABLE TRADER_EXCHANGE_RESOURCE | Использование ресурсов трейдером | 🔴 Critical | 1h |
-| **0.6** | CREATE TABLE ARBITRAGE_ORDER | Ордера на биржах (средний уровень) | 🔴 Critical | 1h |
-| **0.7** | CREATE TABLE ORDER_TRANSACTION | Fills/partials (нижний уровень) | 🔴 Critical | 1h |
-| **0.8** | CREATE TABLE AUDIT_LOG | Для Phase 2, можно отложить | 🟢 Medium | 30m |
+### Phase 0: Database Schema 🔴 START HERE
 
-**Итого:** ~7 часов работы
+**Цель:** Применить SQL миграции для создания 11 таблиц Phase 1.
 
-### Phase 1: Foundation
+**Время:** ~1.5 часа
 
-| Фаза | Компонент | Описание | Приоритет | Время |
-|------|-----------|----------|-----------|-------|
-| **1.1** | Project Setup | go.mod, config.yaml, logger (zerolog hybrid) | 🔴 Critical | 1d |
-| **1.2** | MySQL Pool | Connection pool с retry, mTLS | 🔴 Critical | 2d |
-| **1.3** | HSM Client | mTLS client для hsm-service | 🔴 Critical | 2d |
-| **1.4** | State Management | daemon.state (local file) + MySQL sync | 🔴 Critical | 2d |
-| **1.5** | REST Server | Gin, /health, /metrics (Prometheus) | 🔴 Critical | 2d |
+**Детальный гайд:** [guides/phase_0_database_migrations.md](guides/phase_0_database_migrations.md)
 
-**Архитектурные решения реализованы:**
-- Config: DEV (text logs, debug), PROD (JSON logs, info)
-- State: Local file primary, MySQL secondary
-- Retry policies: exponential backoff (API: 5 retry, DB: 3 retry)
-- Error codes: 27 стандартизированных
+**Краткий план:**
+1. Проверить доступ к MySQL (15 мин)
+2. Применить migrations/001_phase1_schema.sql (30 мин)
+3. Верифицировать таблицы (15 мин)
+4. Тестировать операции (15 мин)
+5. Создать migration log (10 мин)
+
+**Deliverables:**
+- ✅ 11 новых таблиц создано
+- ✅ USER_2FA обновлена (enc_key_version добавлен)
+- ✅ 4 scheduler tasks инициализированы
+- ✅ Все foreign keys и UNIQUE constraints работают
+
+**Definition of Done:**
+- [ ] `mysql -e "SHOW TABLES;"` показывает 16 таблиц
+- [ ] Все тесты из гайда пройдены
+- [ ] Migration log создан
+- [ ] Закоммичено в git
+
+---
+
+### Phase 1.1: Project Setup 🔴
+
+**Цель:** Создать базовую структуру проекта, go.mod, config, logger.
+
+**Время:** 1 день
+
+**Детальный гайд:** [guides/phase_1_1_project_setup.md](guides/phase_1_1_project_setup.md)
+
+**Краткий план:**
+1. Создать структуру директорий (30 мин)
+2. Инициализировать go.mod (15 мин)
+3. Создать config.yaml + loader (45 мин)
+4. Config tests (30 мин)
+5. Logger с zerolog (1 час)
+6. Makefile (30 мин)
+7. .gitignore (15 мин)
+
+**Deliverables:**
+- ✅ Project structure (cmd/, internal/, conf/, logs/, state/)
+- ✅ go.mod с 8 dependencies
+- ✅ config.yaml (100+ строк) + validation
+- ✅ Logger (hybrid text/json, rotation)
+- ✅ main.go компилируется и запускается
+- ✅ Makefile с 15+ targets
+
+**Definition of Done:**
+- [ ] `make build` создает bin/cts-core
+- [ ] `./bin/cts-core -config conf/config.yaml` запускается без ошибок
+- [ ] `make test` проходит (coverage > 80%)
+- [ ] Закоммичено в git
+
+---
+
+### Phase 1.2: MySQL Connection Pool 🔴
+
+**Цель:** Реализовать connection pool с mTLS, retry logic, repository pattern.
+
+**Время:** 2 дня
+
+**Детальный гайд:** `guides/phase_1_2_mysql_pool.md` (TODO: создать)
+
+**Краткий план:**
+1. MySQL client с mTLS (4 часа)
+2. Connection pool настройка (2 часа)
+3. Retry logic (exponential backoff) (2 часа)
+4. Repository pattern (3 часа)
+5. DB models (3 часа)
+6. Tests (2 часа)
+
+**Deliverables:**
+- internal/db/mysql.go (connection pool)
+- internal/db/repository.go (CRUD operations)
+- internal/db/models/ (11 models для таблиц)
+- Connection pool tests
+- Integration tests с real MySQL
+
+**Definition of Done:**
+- [ ] Connection pool работает с mTLS
+- [ ] Retry logic протестирован (3 retries)
+- [ ] Repository CRUD работает для всех таблиц
+- [ ] Integration tests проходят
+- [ ] Закоммичено в git
+
+---
+
+### Phase 1.3: HSM Client 🔴
+
+**Цель:** Реализовать mTLS client для hsm-service.
+
+**Время:** 2 дня
+
+**Детальный гайд:** `guides/phase_1_3_hsm_client.md` (TODO: создать)
+
+**Краткий план:**
+1. mTLS HTTP client (3 часа)
+2. Encrypt/Decrypt methods (2 часа)
+3. Retry logic (2 часа)
+4. Error handling (2 часа)
+5. Tests + mocks (5 часов)
+
+**Deliverables:**
+- internal/hsm/client.go
+- internal/hsm/types.go
+- HSM client tests
+- Integration tests с hsm-service
+
+**Definition of Done:**
+- [ ] mTLS connection к hsm-service работает
+- [ ] Encrypt() и Decrypt() методы реализованы
+- [ ] Retry logic с exponential backoff (5 retries)
+- [ ] Integration tests проходят
+- [ ] Закоммичено в git
+
+---
+
+### Phase 1.4: State Management 🔴
+
+**Цель:** Реализовать persistent state (daemon.state + MySQL sync).
+
+**Время:** 2 дня
+
+**Детальный гайд:** `guides/phase_1_4_state_management.md` (TODO: создать)
+
+**Краткий план:**
+1. State file format (JSON) (2 часа)
+2. Load/Save operations (3 часа)
+3. MySQL sync (background goroutine) (3 часа)
+4. Backup mechanism (3 backups) (2 часа)
+5. Recovery from state (3 часа)
+6. Tests (3 часа)
+
+**Deliverables:**
+- internal/state/state.go
+- State persistence tests
+- Recovery tests
+
+**Definition of Done:**
+- [ ] State сохраняется в daemon.state
+- [ ] Sync к MySQL каждые 30 секунд
+- [ ] 3 backup copies сохраняются
+- [ ] Recovery после restart работает
+- [ ] Закоммичено в git
+
+---
+
+### Phase 1.5: Basic REST API Server 🔴
+
+**Цель:** Запустить Gin server с /health, /metrics endpoints.
+
+**Время:** 2 дня
+
+**Детальный гайд:** `guides/phase_1_5_rest_server.md` (TODO: создать)
+
+**Краткий план:**
+1. Gin server setup (2 часа)
+2. TLS configuration (2 часа)
+3. /health endpoint (1 час)
+4. /metrics endpoint (Prometheus) (3 часа)
+5. Middleware (logging, recovery) (2 часа)
+6. Tests (4 часа)
+
+**Deliverables:**
+- internal/api/server.go
+- internal/api/rest/health.go
+- internal/metrics/collector.go
+- REST API tests
+
+**Definition of Done:**
+- [ ] Server запускается на :8443 с TLS
+- [ ] GET /health возвращает 200 OK
+- [ ] GET /metrics (на :9090) работает
+- [ ] Middleware логирует все requests
+- [ ] Tests проходят
+- [ ] Закоммичено в git
+
+---
+
+### Phase 1 Summary
+
+**Total Time:** ~9 дней (Phase 1.1-1.5)
+
+**Key Deliverables:**
+1. ✅ Project setup (config, logger, main.go)
+2. ⏳ MySQL pool (mTLS, retry, repository)
+3. ⏳ HSM client (encrypt/decrypt)
+4. ⏳ State management (daemon.state + sync)
+5. ⏳ REST API (/health, /metrics)
+
+**After Phase 1:**
+- CTS-Core компилируется и запускается
+- Подключается к MySQL и HSM
+- Отдает /health и /metrics
+- Сохраняет state
+- Готов к Phase 2 (WebSocket, sessions)
+
+---
+
+### Phase 0: Database Schema (НАЧАТЬ ЗДЕСЬ) 🔴
+
+**Цель:** Применить SQL миграции для создания всех необходимых таблиц Phase 1.
+
+**Готово:** ✅ migrations/001_phase1_schema.sql создан (11 tables, 397 строк SQL)
+
+#### 0.0 Предварительные проверки (15 минут)
+
+**Шаги:**
+
+1. **Проверить доступ к MySQL:**
+```bash
+mysql -u root -proot -h 127.0.0.1 -e "SELECT VERSION();"
+# Expected: MySQL 9.0.x
+
+mysql -u root -proot -h 127.0.0.1 -e "SHOW DATABASES LIKE 'ct_system';"
+# Expected: ct_system exists
+```
+
+2. **Проверить существующие таблицы:**
+```bash
+mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW TABLES;"
+# Expected: ARBITRAGE_TRANS, USER, EXCHANGE_ACCOUNTS, USER_2FA, MONITORING
+```
+
+3. **Backup существующих данных (опционально для DEV):**
+```bash
+mysqldump -u root -proot -h 127.0.0.1 ct_system > backup_$(date +%Y%m%d_%H%M%S).sql
+```
+
+4. **Проверить файл миграции:**
+```bash
+wc -l migrations/001_phase1_schema.sql
+# Expected: 397 lines
+
+head -20 migrations/001_phase1_schema.sql
+# Check: Header comment present, USE ct_system; statement
+```
+
+**Definition of Done:**
+- ✅ MySQL доступен и версия >= 9.0
+- ✅ База ct_system существует
+- ✅ Backup создан (если нужен)
+- ✅ Файл миграции прочитан и понятен
+
+---
+
+#### 0.1 Применение миграций (30 минут)
+
+**Команда:**
+```bash
+mysql -u root -proot -h 127.0.0.1 ct_system < migrations/001_phase1_schema.sql 2>&1 | tee migration.log
+```
+
+**Что происходит:**
+- **Section 1-8:** CREATE TABLE для 8 основных таблиц
+- **Section 9:** ALTER USER_2FA + CREATE HSM key rotation tables (3)
+- **Section 10:** CREATE SCHEDULER_TASKS + INSERT 4 default tasks
+
+**Ожидаемый вывод:**
+```
+Query OK, 0 rows affected
+Query OK, 0 rows affected
+...
+Query OK, 4 rows affected  (SCHEDULER_TASKS inserts)
+```
+
+**Проверка в процессе:**
+```bash
+# Если ошибка "Table already exists" - нормально, идем дальше
+# Если ошибка "Syntax error" - STOP, проверить migration.log
+```
+
+**Definition of Done:**
+- ✅ Команда выполнена без critical errors
+- ✅ migration.log содержит успешные результаты
+- ✅ Нет синтаксических ошибок SQL
+
+---
+
+#### 0.2 Верификация таблиц (15 минут)
+
+**1. Проверить создание всех таблиц:**
+```sql
+mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW TABLES;"
+
+-- Expected output (16 tables total):
+-- ARBITRAGE_ORDER           (NEW)
+-- ARBITRAGE_TRANS           (existing)
+-- AUDIT_LOG                 (NEW)
+-- EXCHANGE_ACCOUNTS         (existing)
+-- EXCHANGE_LIMITS           (NEW)
+-- MONITORING                (existing, ALTER applied)
+-- ORDER_TRANSACTION         (NEW)
+-- REENCRYPTION_JOBS         (NEW)
+-- REENCRYPTION_PROGRESS     (NEW)
+-- SCHEDULER_TASKS           (NEW)
+-- TRADER                    (NEW)
+-- TRADER_EXCHANGE_RESOURCE  (NEW)
+-- TRADER_SESSION            (NEW)
+-- USER                      (existing)
+-- USER_2FA                  (existing, ALTER applied)
+```
+
+**2. Проверить структуру ключевых таблиц:**
+```sql
+-- TRADER (admin pre-registration)
+DESCRIBE TRADER;
+-- Expected: trader_id, certificate_cn, region, status, max_tasks, created_at
+
+-- TRADER_SESSION (connection history)
+DESCRIBE TRADER_SESSION;
+-- Expected: session_id, trader_id, ws_connection_id, connected_at, last_heartbeat
+
+-- USER_2FA (HSM key rotation added)
+DESCRIBE USER_2FA;
+-- Expected: enc_key_version, needs_reencryption columns added
+
+-- REENCRYPTION_JOBS (HSM key rotation)
+DESCRIBE REENCRYPTION_JOBS;
+-- Expected: job_type, old_key_version, new_key_version, status, total_records
+
+-- SCHEDULER_TASKS (background jobs)
+SELECT task_name, enabled FROM SCHEDULER_TASKS;
+-- Expected: 4 tasks (cleanup_trader_sessions, cleanup_audit_logs, reset_daily_limits, check_reencryption_jobs)
+```
+
+**3. Проверить индексы:**
+```sql
+SHOW INDEX FROM TRADER;
+SHOW INDEX FROM TRADER_SESSION;
+SHOW INDEX FROM ARBITRAGE_ORDER;
+-- Verify: PRIMARY keys, UNIQUE constraints, foreign keys present
+```
+
+**4. Проверить внешние ключи:**
+```sql
+SELECT 
+    TABLE_NAME,
+    CONSTRAINT_NAME,
+    REFERENCED_TABLE_NAME
+FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+WHERE TABLE_SCHEMA = 'ct_system'
+AND REFERENCED_TABLE_NAME IS NOT NULL
+ORDER BY TABLE_NAME;
+
+-- Expected foreign keys:
+-- TRADER_SESSION → TRADER
+-- ARBITRAGE_ORDER → ARBITRAGE_TRANS
+-- ORDER_TRANSACTION → ARBITRAGE_ORDER
+-- REENCRYPTION_PROGRESS → REENCRYPTION_JOBS
+```
+
+**Definition of Done:**
+- ✅ 16 таблиц существуют (11 новых + 5 existing)
+- ✅ USER_2FA имеет enc_key_version, needs_reencryption
+- ✅ SCHEDULER_TASKS содержит 4 задачи (все enabled=TRUE)
+- ✅ Все индексы и foreign keys на месте
+- ✅ UNIQUE constraints проверены (deduplication работает)
+
+---
+
+#### 0.3 Тестирование базовых операций (15 минут)
+
+**1. Test INSERT - TRADER (admin pre-registration):**
+```sql
+INSERT INTO TRADER (
+    trader_id, certificate_cn, region, status, max_tasks, created_by
+) VALUES (
+    'trader-test-1', 
+    'CN=trader-test-1,OU=Trading,O=Private',
+    'EU',
+    'active',
+    5,
+    1  -- admin USER.ID
+);
+
+SELECT * FROM TRADER WHERE trader_id = 'trader-test-1';
+-- Expected: 1 row, status=active, max_tasks=5
+
+-- Cleanup
+DELETE FROM TRADER WHERE trader_id = 'trader-test-1';
+```
+
+**2. Test FOREIGN KEY - TRADER_SESSION:**
+```sql
+-- Should fail (trader doesn't exist)
+INSERT INTO TRADER_SESSION (trader_id, ws_connection_id)
+VALUES ('nonexistent', 'ws-123');
+-- Expected: ERROR 1452 (23000): Cannot add or update a child row
+
+-- Create trader first, then session - should work
+INSERT INTO TRADER (trader_id, certificate_cn, region, status)
+VALUES ('trader-test-2', 'CN=test', 'EU', 'active');
+
+INSERT INTO TRADER_SESSION (trader_id, ws_connection_id)
+VALUES ('trader-test-2', 'ws-123');
+-- Expected: Success
+
+SELECT * FROM TRADER_SESSION WHERE trader_id = 'trader-test-2';
+
+-- Cleanup
+DELETE FROM TRADER WHERE trader_id = 'trader-test-2';
+-- CASCADE should delete session too
+SELECT COUNT(*) FROM TRADER_SESSION WHERE trader_id = 'trader-test-2';
+-- Expected: 0 (CASCADE worked)
+```
+
+**3. Test UNIQUE constraint - ARBITRAGE_ORDER (deduplication):**
+```sql
+-- Assuming ARBITRAGE_TRANS with ID=1 exists
+INSERT INTO ARBITRAGE_ORDER (
+    arbitrage_trans_id, exchange_name, exchange_order_id, side, price
+) VALUES (1, 'binance', 'ORDER-123', 'buy', 50000.00);
+
+-- Try duplicate - should fail
+INSERT INTO ARBITRAGE_ORDER (
+    arbitrage_trans_id, exchange_name, exchange_order_id, side, price
+) VALUES (1, 'binance', 'ORDER-123', 'sell', 50100.00);
+-- Expected: ERROR 1062 (23000): Duplicate entry
+
+-- Cleanup
+DELETE FROM ARBITRAGE_ORDER WHERE exchange_order_id = 'ORDER-123';
+```
+
+**4. Test SCHEDULER_TASKS defaults:**
+```sql
+SELECT 
+    task_name,
+    enabled,
+    schedule_type,
+    schedule_value,
+    last_run_at
+FROM SCHEDULER_TASKS;
+
+-- Expected:
+-- cleanup_trader_sessions   | 1 | cron | 0 2 * * * | NULL
+-- cleanup_audit_logs        | 1 | cron | 0 3 * * * | NULL
+-- reset_daily_limits        | 1 | cron | 0 0 * * * | NULL
+-- check_reencryption_jobs   | 1 | interval | 60 | NULL
+```
+
+**Definition of Done:**
+- ✅ INSERT в TRADER работает
+- ✅ Foreign key constraints работают (error при нарушении)
+- ✅ CASCADE delete работает
+- ✅ UNIQUE constraints работают (deduplication)
+- ✅ SCHEDULER_TASKS содержит валидные задачи
+
+---
+
+#### 0.4 Документация изменений (10 минут)
+
+**1. Создать migration log:**
+```bash
+cat > migration_applied_$(date +%Y%m%d).md <<EOF
+# Migration Applied: 001_phase1_schema.sql
+
+**Date:** $(date)
+**Applied by:** $(whoami)
+**Database:** ct_system @ 127.0.0.1
+
+## Tables Created (11 new):
+1. TRADER - Admin pre-registration of traders
+2. TRADER_SESSION - Connection history (7 days retention)
+3. EXCHANGE_LIMITS - Exchange rate limits (orders/volume per day)
+4. TRADER_EXCHANGE_RESOURCE - Trader resource usage tracking
+5. ARBITRAGE_ORDER - Middle level (per exchange orders)
+6. ORDER_TRANSACTION - Bottom level (fills/partials)
+7. AUDIT_LOG - Admin operations audit trail
+8. REENCRYPTION_JOBS - HSM key rotation job tracking
+9. REENCRYPTION_PROGRESS - Per-record re-encryption progress
+10. SCHEDULER_TASKS - Background job definitions
+11. (no 11th, actually 10 tables + 1 ALTER)
+
+## Tables Altered (1):
+1. USER_2FA - Added enc_key_version, needs_reencryption for HSM key rotation
+
+## Verification Results:
+- Total tables: 16 (11 new + 5 existing)
+- Total indexes: $(mysql -u root -proot -h 127.0.0.1 ct_system -e "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS WHERE TABLE_SCHEMA='ct_system';" -N)
+- Foreign keys: 4 (verified CASCADE works)
+- UNIQUE constraints: 3 (verified deduplication works)
+- Default scheduler tasks: 4
+
+## Next Steps:
+- Phase 1.1: Project Setup (go.mod, config, logger)
+EOF
+
+cat migration_applied_$(date +%Y%m%d).md
+```
+
+**2. Commit changes:**
+```bash
+git add migrations/001_phase1_schema.sql
+git commit -m "feat(db): phase 0 complete - applied 11 table migrations
+
+- TRADER, TRADER_SESSION for session management
+- EXCHANGE_LIMITS, TRADER_EXCHANGE_RESOURCE for load balancing
+- ARBITRAGE_ORDER, ORDER_TRANSACTION for 3-level trade structure
+- REENCRYPTION_JOBS, REENCRYPTION_PROGRESS, SCHEDULER_TASKS for HSM key rotation
+- AUDIT_LOG for compliance
+- ALTER USER_2FA for key versioning
+
+All verifications passed. Ready for Phase 1.1."
+
+git push
+```
+
+**Definition of Done:**
+- ✅ Migration log создан с датой и результатами
+- ✅ Изменения закоммичены в git
+- ✅ Документация обновлена
+
+---
+
+#### 0.5 Rollback Plan (если что-то пошло не так)
+
+**Если нужно откатить миграции:**
+
+```sql
+-- WARNING: This will DELETE all data in new tables!
+
+-- Drop tables in reverse dependency order
+DROP TABLE IF EXISTS REENCRYPTION_PROGRESS;
+DROP TABLE IF EXISTS REENCRYPTION_JOBS;
+DROP TABLE IF EXISTS SCHEDULER_TASKS;
+DROP TABLE IF EXISTS ORDER_TRANSACTION;
+DROP TABLE IF EXISTS ARBITRAGE_ORDER;
+DROP TABLE IF EXISTS AUDIT_LOG;
+DROP TABLE IF EXISTS TRADER_EXCHANGE_RESOURCE;
+DROP TABLE IF EXISTS EXCHANGE_LIMITS;
+DROP TABLE IF EXISTS TRADER_SESSION;
+DROP TABLE IF EXISTS TRADER;
+
+-- Revert USER_2FA changes
+ALTER TABLE USER_2FA
+DROP COLUMN IF EXISTS enc_key_version,
+DROP COLUMN IF EXISTS needs_reencryption;
+
+-- Verify rollback
+SHOW TABLES;
+-- Expected: Back to 6 original tables
+```
+
+**Восстановление из backup (если был создан):**
+```bash
+mysql -u root -proot -h 127.0.0.1 ct_system < backup_YYYYMMDD_HHMMSS.sql
+```
+
+---
+
+### Phase 0 Summary
+
+**Total Time:** ~1.5 hours (включая проверки и тесты)
+
+**Deliverables:**
+1. ✅ 11 новых таблиц созданы
+2. ✅ USER_2FA обновлена для HSM key rotation
+3. ✅ Все индексы, foreign keys, UNIQUE constraints работают
+4. ✅ 4 scheduler tasks созданы и активны
+5. ✅ Тесты базовых операций пройдены
+6. ✅ Migration log создан
+7. ✅ Git commit/push выполнен
+
+**Next Phase:** Phase 1.1 - Project Setup (go.mod, directory structure, config.yaml)
+
+---
+
+### Phase 1: Foundation 🔴
+
+**Цель:** Создать базовую инфраструктуру CTS-Core (config, logger, MySQL pool, HSM client, state management, basic REST API).
+
+---
+
+#### 1.1 Project Setup (1 день) 🔴
+
+**Цель:** Создать структуру проекта, go.mod, конфигурацию, базовый logger.
+
+##### 1.1.1 Создание структуры директорий (30 минут)
+
+**Команды:**
+```bash
+cd /home/dev/docker/cts-core
+
+# Create directory structure
+mkdir -p cmd/cts-core
+mkdir -p internal/{config,logger,db,hsm,api,session,scheduler,metrics,state}
+mkdir -p internal/api/{rest,ws}
+mkdir -p internal/db/models
+mkdir -p conf
+mkdir -p pki/{ca,server,client}
+mkdir -p logs
+mkdir -p scripts
+mkdir -p state
+
+# Create placeholder files
+touch cmd/cts-core/main.go
+touch internal/config/{config.go,types.go,config_test.go}
+touch internal/logger/logger.go
+touch conf/{config.yaml,config.example.yaml}
+touch scripts/init.sh
+touch Makefile
+touch .gitignore
+
+# Set permissions
+chmod +x scripts/init.sh
+chmod 755 pki/{ca,server,client}
+chmod 700 state  # State directory should be private
+```
+
+**Verify:**
+```bash
+tree -L 3 -I 'other-sub-system|migrations|*.md'
+# Expected: Clean directory structure matching plan
+
+ls -la state/
+# Expected: drwx------ (700 permissions)
+```
+
+**Definition of Done:**
+- ✅ Все директории созданы
+- ✅ Базовые файлы созданы (пустые)
+- ✅ Permissions правильные (state/ = 700)
+
+---
+
+##### 1.1.2 Инициализация Go модуля (15 минут)
+
+**go.mod:**
+```bash
+cd /home/dev/docker/cts-core
+
+go mod init github.com/your-org/cts-core
+
+# Add dependencies
+go get github.com/gin-gonic/gin@v1.9.1
+go get github.com/gorilla/websocket@v1.5.1
+go get github.com/rs/zerolog@v1.31.0
+go get github.com/go-sql-driver/mysql@v1.7.1
+go get github.com/prometheus/client_golang@v1.17.0
+go get gopkg.in/yaml.v3@v3.0.1
+go get github.com/ulule/limiter/v3@v3.11.2
+
+go mod tidy
+```
+
+**Expected go.mod:**
+```go
+module github.com/your-org/cts-core
+
+go 1.21
+
+require (
+    github.com/gin-gonic/gin v1.9.1
+    github.com/gorilla/websocket v1.5.1
+    github.com/rs/zerolog v1.31.0
+    github.com/go-sql-driver/mysql v1.7.1
+    github.com/prometheus/client_golang v1.17.0
+    gopkg.in/yaml.v3 v3.0.1
+    github.com/ulule/limiter/v3 v3.11.2
+)
+
+// indirect dependencies will be added by go mod tidy
+```
+
+**Verify:**
+```bash
+go mod verify
+# Expected: all modules verified
+
+go list -m all | head -10
+# Expected: All dependencies listed
+```
+
+**Definition of Done:**
+- ✅ go.mod создан с правильными зависимостями
+- ✅ go.sum сгенерирован
+- ✅ `go mod verify` проходит успешно
+
+---
+
+##### 1.1.3 Конфигурация (config.yaml) (45 минут)
+
+**conf/config.yaml:**
+```yaml
+# CTS-Core Configuration
+# Environment: development | production
+
+environment: development
+
+server:
+  host: "0.0.0.0"
+  port: 8443
+  
+  tls:
+    enabled: true
+    cert_file: "pki/server/cts-core.crt"
+    key_file: "pki/server/cts-core.key"
+    ca_file: "pki/ca/ca.crt"
+    
+  timeouts:
+    read: 30s
+    write: 30s
+    idle: 120s
+
+mysql:
+  host: "127.0.0.1"
+  port: 3306
+  user: "root"
+  password: "root"  # TODO: Use env var in production
+  database: "ct_system"
+  
+  pool:
+    max_open_conns: 25
+    max_idle_conns: 10
+    conn_max_lifetime: 300s  # 5 minutes
+    
+  tls:
+    enabled: true
+    ca_file: "pki/ca/ca.crt"
+    cert_file: "pki/client/cts-core-mysql.crt"
+    key_file: "pki/client/cts-core-mysql.key"
+    
+  retry:
+    max_attempts: 3
+    initial_delay: 100ms
+    max_delay: 5s
+    multiplier: 2.0
+
+hsm:
+  url: "https://hsm-service:8443"
+  
+  tls:
+    enabled: true
+    ca_file: "pki/ca/ca.crt"
+    cert_file: "pki/client/cts-core-hsm.crt"
+    key_file: "pki/client/cts-core-hsm.key"
+    
+  timeout: 10s
+  
+  retry:
+    max_attempts: 5
+    initial_delay: 200ms
+    max_delay: 10s
+    multiplier: 2.0
+
+state:
+  file_path: "state/daemon.state"
+  sync_interval: 30s  # Sync to MySQL every 30 seconds
+  backup_count: 3     # Keep 3 backup copies
+
+logging:
+  level: debug        # debug | info | warn | error
+  format: text        # text (DEV) | json (PROD)
+  
+  output:
+    console: true
+    file: true
+    file_path: "logs/cts-core.log"
+    
+  rotation:
+    max_size: 100     # MB
+    max_age: 7        # days
+    max_backups: 10
+    compress: true
+
+session:
+  heartbeat_interval: 5s
+  heartbeat_timeout: 15s   # 3 missed heartbeats
+  grace_period: 60s
+  cleanup_interval: 300s   # 5 minutes
+
+scheduler:
+  task_assignment_interval: 1s
+  latency_check_interval: 60s
+  resource_check_interval: 30s
+
+rate_limiting:
+  rest:
+    requests_per_minute: 1000
+    burst: 100
+    
+  websocket:
+    messages_per_minute: 10000
+    burst: 1000
+
+metrics:
+  enabled: true
+  port: 9090
+  path: "/metrics"
+
+audit:
+  enabled: true
+  file_path: "logs/audit.log"
+  mysql_enabled: false  # Phase 2
+  retention_days: 30
+```
+
+**internal/config/types.go:**
+```go
+package config
+
+import "time"
+
+type Config struct {
+    Environment string         `yaml:"environment"`
+    Server      ServerConfig   `yaml:"server"`
+    MySQL       MySQLConfig    `yaml:"mysql"`
+    HSM         HSMConfig      `yaml:"hsm"`
+    State       StateConfig    `yaml:"state"`
+    Logging     LoggingConfig  `yaml:"logging"`
+    Session     SessionConfig  `yaml:"session"`
+    Scheduler   SchedulerConfig `yaml:"scheduler"`
+    RateLimiting RateLimitConfig `yaml:"rate_limiting"`
+    Metrics     MetricsConfig  `yaml:"metrics"`
+    Audit       AuditConfig    `yaml:"audit"`
+}
+
+type ServerConfig struct {
+    Host     string        `yaml:"host"`
+    Port     int           `yaml:"port"`
+    TLS      TLSConfig     `yaml:"tls"`
+    Timeouts TimeoutConfig `yaml:"timeouts"`
+}
+
+type TLSConfig struct {
+    Enabled  bool   `yaml:"enabled"`
+    CertFile string `yaml:"cert_file"`
+    KeyFile  string `yaml:"key_file"`
+    CAFile   string `yaml:"ca_file"`
+}
+
+type TimeoutConfig struct {
+    Read  time.Duration `yaml:"read"`
+    Write time.Duration `yaml:"write"`
+    Idle  time.Duration `yaml:"idle"`
+}
+
+type MySQLConfig struct {
+    Host     string      `yaml:"host"`
+    Port     int         `yaml:"port"`
+    User     string      `yaml:"user"`
+    Password string      `yaml:"password"`
+    Database string      `yaml:"database"`
+    Pool     PoolConfig  `yaml:"pool"`
+    TLS      TLSConfig   `yaml:"tls"`
+    Retry    RetryConfig `yaml:"retry"`
+}
+
+type PoolConfig struct {
+    MaxOpenConns    int           `yaml:"max_open_conns"`
+    MaxIdleConns    int           `yaml:"max_idle_conns"`
+    ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime"`
+}
+
+type RetryConfig struct {
+    MaxAttempts  int           `yaml:"max_attempts"`
+    InitialDelay time.Duration `yaml:"initial_delay"`
+    MaxDelay     time.Duration `yaml:"max_delay"`
+    Multiplier   float64       `yaml:"multiplier"`
+}
+
+type HSMConfig struct {
+    URL     string      `yaml:"url"`
+    TLS     TLSConfig   `yaml:"tls"`
+    Timeout time.Duration `yaml:"timeout"`
+    Retry   RetryConfig `yaml:"retry"`
+}
+
+type StateConfig struct {
+    FilePath     string        `yaml:"file_path"`
+    SyncInterval time.Duration `yaml:"sync_interval"`
+    BackupCount  int           `yaml:"backup_count"`
+}
+
+type LoggingConfig struct {
+    Level    string         `yaml:"level"`
+    Format   string         `yaml:"format"` // text | json
+    Output   OutputConfig   `yaml:"output"`
+    Rotation RotationConfig `yaml:"rotation"`
+}
+
+type OutputConfig struct {
+    Console  bool   `yaml:"console"`
+    File     bool   `yaml:"file"`
+    FilePath string `yaml:"file_path"`
+}
+
+type RotationConfig struct {
+    MaxSize    int  `yaml:"max_size"`    // MB
+    MaxAge     int  `yaml:"max_age"`     // days
+    MaxBackups int  `yaml:"max_backups"`
+    Compress   bool `yaml:"compress"`
+}
+
+type SessionConfig struct {
+    HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
+    HeartbeatTimeout  time.Duration `yaml:"heartbeat_timeout"`
+    GracePeriod       time.Duration `yaml:"grace_period"`
+    CleanupInterval   time.Duration `yaml:"cleanup_interval"`
+}
+
+type SchedulerConfig struct {
+    TaskAssignmentInterval time.Duration `yaml:"task_assignment_interval"`
+    LatencyCheckInterval   time.Duration `yaml:"latency_check_interval"`
+    ResourceCheckInterval  time.Duration `yaml:"resource_check_interval"`
+}
+
+type RateLimitConfig struct {
+    REST      LimitConfig `yaml:"rest"`
+    WebSocket LimitConfig `yaml:"websocket"`
+}
+
+type LimitConfig struct {
+    RequestsPerMinute int `yaml:"requests_per_minute"`
+    Burst             int `yaml:"burst"`
+}
+
+type MetricsConfig struct {
+    Enabled bool   `yaml:"enabled"`
+    Port    int    `yaml:"port"`
+    Path    string `yaml:"path"`
+}
+
+type AuditConfig struct {
+    Enabled       bool   `yaml:"enabled"`
+    FilePath      string `yaml:"file_path"`
+    MySQLEnabled  bool   `yaml:"mysql_enabled"`
+    RetentionDays int    `yaml:"retention_days"`
+}
+```
+
+**internal/config/config.go:**
+```go
+package config
+
+import (
+    "fmt"
+    "os"
+    
+    "gopkg.in/yaml.v3"
+)
+
+// Load reads configuration from file
+func Load(path string) (*Config, error) {
+    data, err := os.ReadFile(path)
+    if err != nil {
+        return nil, fmt.Errorf("failed to read config file: %w", err)
+    }
+    
+    var cfg Config
+    if err := yaml.Unmarshal(data, &cfg); err != nil {
+        return nil, fmt.Errorf("failed to parse config: %w", err)
+    }
+    
+    // Validate configuration
+    if err := cfg.Validate(); err != nil {
+        return nil, fmt.Errorf("invalid configuration: %w", err)
+    }
+    
+    // Override with environment variables (for production)
+    cfg.applyEnvOverrides()
+    
+    return &cfg, nil
+}
+
+// Validate checks configuration values
+func (c *Config) Validate() error {
+    if c.Environment != "development" && c.Environment != "production" {
+        return fmt.Errorf("invalid environment: %s", c.Environment)
+    }
+    
+    if c.Server.Port < 1 || c.Server.Port > 65535 {
+        return fmt.Errorf("invalid server port: %d", c.Server.Port)
+    }
+    
+    if c.MySQL.Database == "" {
+        return fmt.Errorf("mysql database cannot be empty")
+    }
+    
+    if c.State.FilePath == "" {
+        return fmt.Errorf("state file path cannot be empty")
+    }
+    
+    if c.Logging.Level != "debug" && c.Logging.Level != "info" && 
+       c.Logging.Level != "warn" && c.Logging.Level != "error" {
+        return fmt.Errorf("invalid log level: %s", c.Logging.Level)
+    }
+    
+    if c.Logging.Format != "text" && c.Logging.Format != "json" {
+        return fmt.Errorf("invalid log format: %s", c.Logging.Format)
+    }
+    
+    return nil
+}
+
+// applyEnvOverrides overrides config with environment variables
+func (c *Config) applyEnvOverrides() {
+    if env := os.Getenv("CTS_ENVIRONMENT"); env != "" {
+        c.Environment = env
+    }
+    
+    if mysqlPass := os.Getenv("CTS_MYSQL_PASSWORD"); mysqlPass != "" {
+        c.MySQL.Password = mysqlPass
+    }
+    
+    if logLevel := os.Getenv("CTS_LOG_LEVEL"); logLevel != "" {
+        c.Logging.Level = logLevel
+    }
+}
+
+// IsDevelopment returns true if running in development mode
+func (c *Config) IsDevelopment() bool {
+    return c.Environment == "development"
+}
+
+// IsProduction returns true if running in production mode
+func (c *Config) IsProduction() bool {
+    return c.Environment == "production"
+}
+```
+
+**Verify:**
+```bash
+# Test config loading
+cd /home/dev/docker/cts-core
+go test ./internal/config/...
+
+# Should create config_test.go first (see next step)
+```
+
+**Definition of Done:**
+- ✅ config.yaml создан со всеми параметрами
+- ✅ types.go содержит все structs
+- ✅ config.go реализует Load() и Validate()
+- ✅ Environment overrides работают
+
+---
+
+##### 1.1.4 Config Tests (30 минут)
+
+**internal/config/config_test.go:**
+```go
+package config
+
+import (
+    "os"
+    "testing"
+)
+
+func TestLoad(t *testing.T) {
+    // Create temp config file
+    tmpFile := createTempConfig(t)
+    defer os.Remove(tmpFile)
+    
+    cfg, err := Load(tmpFile)
+    if err != nil {
+        t.Fatalf("Failed to load config: %v", err)
+    }
+    
+    // Validate loaded values
+    if cfg.Environment != "development" {
+        t.Errorf("Expected environment=development, got %s", cfg.Environment)
+    }
+    
+    if cfg.Server.Port != 8443 {
+        t.Errorf("Expected port=8443, got %d", cfg.Server.Port)
+    }
+    
+    if cfg.MySQL.Database != "ct_system" {
+        t.Errorf("Expected database=ct_system, got %s", cfg.MySQL.Database)
+    }
+}
+
+func TestValidate(t *testing.T) {
+    tests := []struct {
+        name    string
+        cfg     Config
+        wantErr bool
+    }{
+        {
+            name: "valid config",
+            cfg: Config{
+                Environment: "development",
+                Server:      ServerConfig{Port: 8443},
+                MySQL:       MySQLConfig{Database: "ct_system"},
+                State:       StateConfig{FilePath: "state/daemon.state"},
+                Logging:     LoggingConfig{Level: "info", Format: "text"},
+            },
+            wantErr: false,
+        },
+        {
+            name: "invalid environment",
+            cfg: Config{
+                Environment: "staging",  // Invalid
+                Server:      ServerConfig{Port: 8443},
+                MySQL:       MySQLConfig{Database: "ct_system"},
+                State:       StateConfig{FilePath: "state/daemon.state"},
+                Logging:     LoggingConfig{Level: "info", Format: "text"},
+            },
+            wantErr: true,
+        },
+        {
+            name: "invalid port",
+            cfg: Config{
+                Environment: "development",
+                Server:      ServerConfig{Port: 99999},  // Invalid
+                MySQL:       MySQLConfig{Database: "ct_system"},
+                State:       StateConfig{FilePath: "state/daemon.state"},
+                Logging:     LoggingConfig{Level: "info", Format: "text"},
+            },
+            wantErr: true,
+        },
+        {
+            name: "invalid log level",
+            cfg: Config{
+                Environment: "development",
+                Server:      ServerConfig{Port: 8443},
+                MySQL:       MySQLConfig{Database: "ct_system"},
+                State:       StateConfig{FilePath: "state/daemon.state"},
+                Logging:     LoggingConfig{Level: "verbose", Format: "text"},  // Invalid
+            },
+            wantErr: true,
+        },
+    }
+    
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := tt.cfg.Validate()
+            if (err != nil) != tt.wantErr {
+                t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+            }
+        })
+    }
+}
+
+func TestEnvOverrides(t *testing.T) {
+    os.Setenv("CTS_ENVIRONMENT", "production")
+    os.Setenv("CTS_MYSQL_PASSWORD", "secret123")
+    os.Setenv("CTS_LOG_LEVEL", "error")
+    defer func() {
+        os.Unsetenv("CTS_ENVIRONMENT")
+        os.Unsetenv("CTS_MYSQL_PASSWORD")
+        os.Unsetenv("CTS_LOG_LEVEL")
+    }()
+    
+    cfg := &Config{
+        Environment: "development",
+        MySQL:       MySQLConfig{Password: "default"},
+        Logging:     LoggingConfig{Level: "debug"},
+    }
+    
+    cfg.applyEnvOverrides()
+    
+    if cfg.Environment != "production" {
+        t.Errorf("Expected environment=production, got %s", cfg.Environment)
+    }
+    
+    if cfg.MySQL.Password != "secret123" {
+        t.Errorf("Expected password=secret123, got %s", cfg.MySQL.Password)
+    }
+    
+    if cfg.Logging.Level != "error" {
+        t.Errorf("Expected log level=error, got %s", cfg.Logging.Level)
+    }
+}
+
+func createTempConfig(t *testing.T) string {
+    content := `
+environment: development
+
+server:
+  host: "0.0.0.0"
+  port: 8443
+  
+mysql:
+  database: "ct_system"
+  
+state:
+  file_path: "state/daemon.state"
+  
+logging:
+  level: info
+  format: text
+`
+    
+    tmpFile, err := os.CreateTemp("", "config-*.yaml")
+    if err != nil {
+        t.Fatalf("Failed to create temp file: %v", err)
+    }
+    
+    if _, err := tmpFile.WriteString(content); err != nil {
+        t.Fatalf("Failed to write temp file: %v", err)
+    }
+    
+    tmpFile.Close()
+    return tmpFile.Name()
+}
+```
+
+**Run tests:**
+```bash
+go test ./internal/config/... -v
+
+# Expected output:
+# === RUN   TestLoad
+# --- PASS: TestLoad (0.00s)
+# === RUN   TestValidate
+# --- PASS: TestValidate (0.00s)
+# === RUN   TestEnvOverrides
+# --- PASS: TestEnvOverrides (0.00s)
+# PASS
+```
+
+**Definition of Done:**
+- ✅ Все тесты config пройдены
+- ✅ Test coverage > 80%
+- ✅ Edge cases покрыты
+
+---
+
+##### 1.1.5 Logger Setup (1 час)
+
+**internal/logger/logger.go:**
+```go
+package logger
+
+import (
+    "io"
+    "os"
+    "path/filepath"
+    "time"
+    
+    "github.com/rs/zerolog"
+    "github.com/rs/zerolog/log"
+    "gopkg.in/natefinch/lumberjack.v2"
+)
+
+type LoggerConfig struct {
+    Level      string
+    Format     string // "text" or "json"
+    Console    bool
+    File       bool
+    FilePath   string
+    MaxSize    int  // MB
+    MaxAge     int  // days
+    MaxBackups int
+    Compress   bool
+}
+
+// Init initializes the global logger
+func Init(cfg LoggerConfig) error {
+    // Set log level
+    level, err := zerolog.ParseLevel(cfg.Level)
+    if err != nil {
+        return err
+    }
+    zerolog.SetGlobalLevel(level)
+    
+    // Configure writers
+    var writers []io.Writer
+    
+    // Console output
+    if cfg.Console {
+        var consoleWriter io.Writer
+        if cfg.Format == "text" {
+            // Pretty console output for development
+            consoleWriter = zerolog.ConsoleWriter{
+                Out:        os.Stdout,
+                TimeFormat: time.RFC3339,
+            }
+        } else {
+            // JSON output for production
+            consoleWriter = os.Stdout
+        }
+        writers = append(writers, consoleWriter)
+    }
+    
+    // File output with rotation
+    if cfg.File {
+        // Ensure log directory exists
+        logDir := filepath.Dir(cfg.FilePath)
+        if err := os.MkdirAll(logDir, 0755); err != nil {
+            return err
+        }
+        
+        fileWriter := &lumberjack.Logger{
+            Filename:   cfg.FilePath,
+            MaxSize:    cfg.MaxSize,
+            MaxAge:     cfg.MaxAge,
+            MaxBackups: cfg.MaxBackups,
+            Compress:   cfg.Compress,
+        }
+        writers = append(writers, fileWriter)
+    }
+    
+    // Create multi-writer
+    multiWriter := io.MultiWriter(writers...)
+    
+    // Set global logger
+    log.Logger = zerolog.New(multiWriter).
+        With().
+        Timestamp().
+        Caller().
+        Logger()
+    
+    log.Info().
+        Str("level", cfg.Level).
+        Str("format", cfg.Format).
+        Bool("console", cfg.Console).
+        Bool("file", cfg.File).
+        Msg("Logger initialized")
+    
+    return nil
+}
+
+// GetLogger returns the global logger
+func GetLogger() *zerolog.Logger {
+    return &log.Logger
+}
+
+// Debug logs a debug message
+func Debug(msg string) *zerolog.Event {
+    return log.Debug().Msg(msg)
+}
+
+// Info logs an info message
+func Info(msg string) *zerolog.Event {
+    return log.Info().Msg(msg)
+}
+
+// Warn logs a warning message
+func Warn(msg string) *zerolog.Event {
+    return log.Warn().Msg(msg)
+}
+
+// Error logs an error message
+func Error(err error, msg string) *zerolog.Event {
+    return log.Error().Err(err).Msg(msg)
+}
+
+// Fatal logs a fatal message and exits
+func Fatal(err error, msg string) {
+    log.Fatal().Err(err).Msg(msg)
+}
+```
+
+**cmd/cts-core/main.go (initial version):**
+```go
+package main
+
+import (
+    "flag"
+    "os"
+    
+    "github.com/your-org/cts-core/internal/config"
+    "github.com/your-org/cts-core/internal/logger"
+)
+
+func main() {
+    // Parse command line flags
+    configPath := flag.String("config", "conf/config.yaml", "Path to configuration file")
+    flag.Parse()
+    
+    // Load configuration
+    cfg, err := config.Load(*configPath)
+    if err != nil {
+        logger.Fatal(err, "Failed to load configuration")
+    }
+    
+    // Initialize logger
+    loggerCfg := logger.LoggerConfig{
+        Level:      cfg.Logging.Level,
+        Format:     cfg.Logging.Format,
+        Console:    cfg.Logging.Output.Console,
+        File:       cfg.Logging.Output.File,
+        FilePath:   cfg.Logging.Output.FilePath,
+        MaxSize:    cfg.Logging.Rotation.MaxSize,
+        MaxAge:     cfg.Logging.Rotation.MaxAge,
+        MaxBackups: cfg.Logging.Rotation.MaxBackups,
+        Compress:   cfg.Logging.Rotation.Compress,
+    }
+    
+    if err := logger.Init(loggerCfg); err != nil {
+        logger.Fatal(err, "Failed to initialize logger")
+    }
+    
+    log := logger.GetLogger()
+    
+    log.Info().
+        Str("environment", cfg.Environment).
+        Str("version", "0.0.1").
+        Msg("CTS-Core starting")
+    
+    // TODO: Phase 1.2 - Initialize MySQL pool
+    // TODO: Phase 1.3 - Initialize HSM client
+    // TODO: Phase 1.4 - Load state
+    // TODO: Phase 1.5 - Start REST server
+    
+    log.Info().Msg("CTS-Core initialized successfully")
+    
+    // Keep running
+    select {}
+}
+```
+
+**Test run:**
+```bash
+cd /home/dev/docker/cts-core
+go build -o bin/cts-core cmd/cts-core/main.go
+
+./bin/cts-core -config conf/config.yaml
+
+# Expected console output (text format in DEV):
+# 2026-01-28T10:00:00Z INF Logger initialized level=debug format=text console=true file=true
+# 2026-01-28T10:00:00Z INF CTS-Core starting environment=development version=0.0.1
+# 2026-01-28T10:00:00Z INF CTS-Core initialized successfully
+
+# Check log file:
+tail logs/cts-core.log
+# Expected: Same messages in file
+
+# Stop with Ctrl+C
+```
+
+**Definition of Done:**
+- ✅ Logger package реализован с zerolog
+- ✅ Hybrid format работает (text DEV, json PROD)
+- ✅ Log rotation настроен (lumberjack)
+- ✅ main.go компилируется и запускается
+- ✅ Логи пишутся в console + file
+
+---
+
+##### 1.1.6 Makefile (30 минут)
+
+**Makefile:**
+```makefile
+.PHONY: help build run test clean lint fmt install
+
+# Variables
+APP_NAME=cts-core
+BIN_DIR=bin
+CMD_DIR=cmd/cts-core
+CONFIG_FILE=conf/config.yaml
+
+# Go commands
+GOCMD=go
+GOBUILD=$(GOCMD) build
+GOTEST=$(GOCMD) test
+GOMOD=$(GOCMD) mod
+GOFMT=$(GOCMD) fmt
+GOVET=$(GOCMD) vet
+
+help: ## Show this help message
+	@echo "Available targets:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
+
+install: ## Install dependencies
+	$(GOMOD) download
+	$(GOMOD) tidy
+
+build: ## Build the application
+	@echo "Building $(APP_NAME)..."
+	@mkdir -p $(BIN_DIR)
+	$(GOBUILD) -o $(BIN_DIR)/$(APP_NAME) $(CMD_DIR)/main.go
+	@echo "Build complete: $(BIN_DIR)/$(APP_NAME)"
+
+run: ## Run the application
+	@echo "Running $(APP_NAME)..."
+	$(BIN_DIR)/$(APP_NAME) -config $(CONFIG_FILE)
+
+dev: build run ## Build and run in development mode
+
+test: ## Run tests
+	@echo "Running tests..."
+	$(GOTEST) -v -race -cover ./...
+
+test-coverage: ## Run tests with coverage report
+	@echo "Running tests with coverage..."
+	$(GOTEST) -v -race -coverprofile=coverage.out ./...
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+	@echo "Coverage report: coverage.html"
+
+lint: ## Run linters
+	@echo "Running linters..."
+	$(GOVET) ./...
+	@which golangci-lint > /dev/null || (echo "golangci-lint not installed" && exit 1)
+	golangci-lint run ./...
+
+fmt: ## Format code
+	@echo "Formatting code..."
+	$(GOFMT) ./...
+
+clean: ## Clean build artifacts
+	@echo "Cleaning..."
+	rm -rf $(BIN_DIR)
+	rm -f coverage.out coverage.html
+	rm -rf logs/*.log
+	rm -rf state/*.state state/*.backup
+
+db-migrate: ## Apply database migrations
+	@echo "Applying database migrations..."
+	mysql -u root -proot -h 127.0.0.1 ct_system < migrations/001_phase1_schema.sql
+	@echo "Migrations applied"
+
+db-rollback: ## Rollback database migrations (WARNING: destructive!)
+	@echo "WARNING: This will DROP all Phase 1 tables!"
+	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ] || exit 1
+	@echo "Rolling back..."
+	# Add rollback SQL here
+
+docker-build: ## Build Docker image
+	docker build -t $(APP_NAME):latest .
+
+docker-run: ## Run Docker container
+	docker-compose up
+
+.DEFAULT_GOAL := help
+```
+
+**Test Makefile:**
+```bash
+make help
+# Expected: List of all targets
+
+make install
+# Expected: Dependencies installed
+
+make build
+# Expected: Binary created in bin/
+
+make test
+# Expected: All tests pass
+
+make fmt
+# Expected: Code formatted
+
+make clean
+# Expected: Artifacts removed
+```
+
+**Definition of Done:**
+- ✅ Makefile создан со всеми targets
+- ✅ `make build` работает
+- ✅ `make test` проходит
+- ✅ `make db-migrate` работает
+
+---
+
+##### 1.1.7 .gitignore (15 минут)
+
+**.gitignore:**
+```gitignore
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.html
+coverage.out
+
+# Go
+go.work
+
+# Logs
+logs/*.log
+logs/*.log.*
+
+# State files
+state/*.state
+state/*.backup
+
+# Certificates (generated)
+pki/server/*.crt
+pki/server/*.key
+pki/client/*.crt
+pki/client/*.key
+# Keep CA certs in git
+#pki/ca/*.crt
+#pki/ca/*.key
+
+# Config (keep example, ignore real)
+conf/config.yaml
+# Keep example
+!conf/config.example.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Backups
+*.backup
+backup_*.sql
+
+# Temporary
+tmp/
+temp/
+```
+
+**Test:**
+```bash
+git status
+# Expected: Only tracked files shown, logs/state ignored
+```
+
+**Definition of Done:**
+- ✅ .gitignore создан
+- ✅ Sensitive files (config.yaml, logs, state) игнорируются
+- ✅ Binary artifacts игнорируются
+
+---
+
+### Phase 1.1 Summary
+
+**Total Time:** 1 день (~8 часов)
+
+**Deliverables:**
+1. ✅ Project structure создана (cmd/, internal/, conf/, pki/, logs/, state/)
+2. ✅ go.mod инициализирован с 7 dependencies
+3. ✅ config.yaml полностью реализован (200+ строк)
+4. ✅ Config types и loader с validation
+5. ✅ Config tests (80%+ coverage)
+6. ✅ Logger с zerolog (hybrid text/json, rotation)
+7. ✅ main.go базовая версия (компилируется и запускается)
+8. ✅ Makefile с 15+ targets
+9. ✅ .gitignore настроен
+
+**Files Created:** 15+
+**Lines of Code:** ~800
+
+**Next Phase:** 1.2 - MySQL Connection Pool (2 дня)
+
+---
 
 ### Phase 2: Core Features
 
