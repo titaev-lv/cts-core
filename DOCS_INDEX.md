@@ -1,8 +1,8 @@
 # 📚 CTS-Core Documentation Index
 
-> **Последнее обновление**: 2026-01-27  
-> **Статус проекта**: 🔴 Требуется Phase 0.5 (Architecture Hardening)  
-> **Готовность**: 65%
+> **Последнее обновление**: 2026-01-28  
+> **Статус проекта**: 🟢 Phase 0 - Database Migrations  
+> **Готовность**: 100% архитектуры
 
 ---
 
@@ -10,9 +10,9 @@
 
 ### Если вы новый разработчик:
 1. 📖 **[README.md](README.md)** - Обзор проекта
-2. 🏗️ **[ARCHITECTURE.md](ARCHITECTURE.md)** - Архитектура системы
-3. 🚨 **[BEFORE_START.md](BEFORE_START.md)** - ⚠️ КРИТИЧЕСКИЕ вопросы (ОБЯЗАТЕЛЬНО к прочтению)
-4. 📋 **[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)** - План разработки
+2. 📋 **[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)** - НАЧНИТЕ ЗДЕСЬ (Phase 0-4)
+3. 🏗️ **[ARCHITECTURE.md](ARCHITECTURE.md)** - Архитектура + все решения
+4. 🔐 **[HSM_KEY_ROTATION.md](HSM_KEY_ROTATION.md)** - HSM key rotation guide
 
 ### Если хотите понять API:
 1. 🔌 **[API_SPECIFICATION.md](API_SPECIFICATION.md)** - Единый API (WebSocket + REST)
@@ -24,30 +24,19 @@
 
 ## 📁 Структура документации
 
-### 🔴 Критические документы (требуют действий)
+### ✅ Основные документы
 
-| Документ | Описание | Статус | Приоритет |
-|----------|----------|--------|-----------|
-| [BEFORE_START.md](BEFORE_START.md) | 12 критических вопросов без ответа | 🔴 Блокер | **НЕМЕДЛЕННО** |
-
-**Основные блокеры:**
-- Механизм регистрации трейдеров (automatic vs manual vs hybrid)
-- State persistence strategy (MySQL vs Redis vs file)
-- Idempotency для trade operations (trade.intent flow)
-- Недостающие SQL таблицы (TRADER, MONITOR_PAIR, EXCHANGE_LIMITS, etc.)
-- Failover design (Active-Passive minimum)
+| Документ | Описание | Статус | Дата |
+|----------|----------|--------|------|
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Полная архитектура + 25 Phase 1 решений | ✅ Завершено | 2026-01-28 |
+| [API_SPECIFICATION.md](API_SPECIFICATION.md) | Единый API: WebSocket + REST (27 error codes) | ✅ Завершено | 2026-01-28 |
+| [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) | План разработки Phase 0-4 | ✅ Завершено | 2026-01-28 |
+| [TRADER_MODES.md](TRADER_MODES.md) | Dual-mode operation (TRADE + MONITOR) | ✅ Завершено | 2026-01-27 |
+| [HSM_KEY_ROTATION.md](HSM_KEY_ROTATION.md) | HSM key rotation & re-encryption guide | ✅ Завершено | 2026-01-28 |
+| [CONTEXT.md](CONTEXT.md) | Контекст для AI/новых разработчиков | ✅ Завершено | 2026-01-26 |
+| [migrations/](migrations/) | SQL schema migrations (11 tables) | ✅ Готово | 2026-01-28 |
 
 ---
-
-### ✅ Завершенные документы
-
-| Документ | Описание | Дата |
-|----------|----------|------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Полная архитектура (диаграммы, компоненты, безопасность) | 2026-01-26 |
-| [API_SPECIFICATION.md](API_SPECIFICATION.md) | Единый API: WebSocket + REST | 2026-01-27 |
-| [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) | План разработки с Gantt-диаграммами | 2026-01-26 |
-| [TRADER_MODES.md](TRADER_MODES.md) | Dual-mode operation (TRADE + MONITOR) | 2026-01-27 |
-| [CONTEXT.md](CONTEXT.md) | Контекст для AI/новых разработчиков | 2026-01-26 |
 
 ---
 
@@ -66,20 +55,24 @@
 
 - [x] Архитектурная документация (ASCII + Mermaid диаграммы)
 - [x] WebSocket protocol спецификация
-- [x] REST API спецификация
+- [x] REST API спецификация (27 error codes)
 - [x] TRADE/MONITOR режимы документированы
-- [x] Security design (HSM, mTLS, envelope encryption)
+- [x] Security design (HSM, mTLS, envelope encryption, key rotation)
 - [x] Plan разработки с фазами
+- [x] **Все 25 архитектурных решений Phase 1**
+- [x] **Trader registration** (Hybrid: admin pre-register + auto-connect)
+- [x] **State persistence** (daemon.state + MySQL sync)
+- [x] **Idempotency** (UNIQUE constraints + exchange_order_id)
+- [x] **SQL migrations** (11 tables including HSM key rotation)
+- [x] **Failover design** (Single instance + trader resilience)
+- [x] **Error handling** (27 standardized codes with retry policies)
+- [x] **Observability** (Prometheus 20+ metrics, zerolog, audit log)
+- [x] **HSM key rotation** (Complete infrastructure with re-encryption)
 
-### Требует решения 🔴
+### Текущая фаза 🔵
 
-- [ ] **Trader registration mechanism** (см. BEFORE_START.md #1)
-- [ ] **State persistence strategy** (см. BEFORE_START.md #2)
-- [ ] **Idempotency guarantees** (см. BEFORE_START.md #4)
-- [ ] **SQL migrations** для недостающих таблиц (см. BEFORE_START.md #3)
-- [ ] **Failover design** (Active-Passive minimum)
-- [ ] **Error handling & retry policies** (см. BEFORE_START.md #6)
-- [ ] **Observability** (metrics, logging) (см. BEFORE_START.md #7)
+- [ ] **Phase 0**: Применить миграции `mysql < migrations/001_phase1_schema.sql`
+- [ ] **Phase 1**: Начать разработку (Project setup, MySQL pool, HSM client)
 
 ### Можно отложить ⏳
 
@@ -94,11 +87,10 @@
 ## 🗺️ Roadmap
 
 ```
-Phase 0.5: Architecture Hardening (1-2 недели) 🔴 ТЕКУЩАЯ ФАЗА
-├─ Решить все вопросы из BEFORE_START.md
-├─ SQL migrations для новых таблиц
-├─ Финализировать API specification
-└─ State management design
+Phase 0: Database Migrations (~1 час) 🔵 ТЕКУЩАЯ ФАЗА
+├─ Применить migrations/001_phase1_schema.sql
+├─ Проверить создание 11 таблиц
+└─ Готовность к Phase 1
 
 Phase 1: Foundation (2 недели)
 ├─ Project setup (go.mod, config, logger)
@@ -133,12 +125,13 @@ Phase 1.5 (optional): Failover (1 неделя)
 ## 🔗 Связи между документами
 
 ```
-BEFORE_START.md (блокеры)
+ARCHITECTURE.md (25 Phase 1 decisions)
     ↓
-    ├─→ API_SPECIFICATION.md (trade.intent, REST endpoints)
-    ├─→ ARCHITECTURE.md (state management, failover)
-    ├─→ DEVELOPMENT_PLAN.md (Phase 0.5 добавлена)
-    └─→ CONTEXT.md (ссылки на блокеры)
+    ├─→ API_SPECIFICATION.md (trade.intent, REST endpoints, 27 error codes)
+    ├─→ DEVELOPMENT_PLAN.md (Phase 0-4 roadmap)
+    ├─→ TRADER_MODES.md (TRADE vs MONITOR)
+    ├─→ HSM_KEY_ROTATION.md (key rotation workflow)
+    └─→ migrations/ (11 tables DDL)
 
 ARCHITECTURE.md
     ↓
@@ -196,11 +189,11 @@ Trader → cleanup → disconnect
 
 ### Q: Можно ли начинать кодировать?
 
-**A: НЕТ.** Сначала нужно закрыть все блокеры в [BEFORE_START.md](BEFORE_START.md).
+**A: ДА.** Примените миграции и начинайте с [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) Phase 1.
 
 ### Q: Какой самый критичный вопрос?
 
-**A: Trader registration mechanism** (см. BEFORE_START.md #1.1). От этого зависят таблицы БД и API flows.
+**A: Применение миграций** - `mysql -u root -proot -h 127.0.0.1 ct_system < migrations/001_phase1_schema.sql`
 
 ### Q: Почему dual-mode (TRADE + MONITOR)?
 
@@ -233,14 +226,15 @@ ls -la *.md
 # Поиск по всем документам
 grep -r "trader.register" *.md
 
-# Проверка блокеров
-grep -A 5 "БЛОКЕР" BEFORE_START.md
+# Применить миграции (Phase 0)
+mysql -u root -proot -h 127.0.0.1 ct_system < migrations/001_phase1_schema.sql
 
-# Генерация SQL migrations (когда готово)
-# cd other-sub-system/daemon2/
-# mysql -u root -p < migrations/001_trader_tables.sql
+# Проверить создание таблиц
+mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW TABLES;"
 ```
 
 ---
 
-**🔴 ВАЖНО: НЕ начинайте Phase 1 пока не закрыты все блокеры в [BEFORE_START.md](BEFORE_START.md)**
+**✅ ГОТОВО к Phase 1 - начинайте с [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)**
+
+**✅ ГОТОВО к Phase 1 - начинайте с [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)**

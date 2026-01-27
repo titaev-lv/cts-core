@@ -3,7 +3,7 @@
 > **Версия документа**: 1.0.0  
 > **Дата**: 2026-01-27  
 > **Статус**: Спецификация (требует review)  
-> **Связь с**: ARCHITECTURE.md, TRADER_MODES.md, BEFORE_START.md
+> **Связь с**: ARCHITECTURE.md, TRADER_MODES.md, DEVELOPMENT_PLAN.md
 
 ---
 

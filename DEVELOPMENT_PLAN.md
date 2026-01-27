@@ -269,15 +269,14 @@ cts-core/
 
 ## 6. Следующие шаги
 
-⚠️ **ВАЖНО: См. [BEFORE_START.md](BEFORE_START.md) - критические вопросы требуют решения ПЕРЕД началом**
+✅ **Архитектура готова - все решения приняты и задокументированы**
 
-1. ✅ **Утверждение архитектуры** — см. [ARCHITECTURE.md](ARCHITECTURE.md)
-2. 🔴 **Phase 0.5: Architecture Hardening** (1-2 недели) — БЛОКЕР
-   - Решение всех вопросов из BEFORE_START.md
-   - SQL migrations для TRADER, MONITOR_PAIR, EXCHANGE_LIMITS
-   - Финализация API specification
-   - State management design
-3. ⏳ **Создание скелета проекта** — базовая структура CTS-Core
+1. ✅ **Архитектура завершена** — см. [ARCHITECTURE.md](ARCHITECTURE.md) (25 Phase 1 решений)
+2. ✅ **Phase 0: Database Migrations** (ТЕКУЩАЯ)
+   - ✅ SQL migrations созданы (migrations/001_phase1_schema.sql)
+   - ⏳ Применить миграции: `mysql < migrations/001_phase1_schema.sql`
+   - ⏳ Проверить создание 11 таблиц
+3. ⏳ **Создание скелета проекта** — базовая структура CTS-Core (Phase 1.1)
 4. ⏳ **Phase 1 реализация** — config, logger, MySQL, HSM client
 5. ⏳ **Параллельно**: Обновление daemon2 для работы с CTS-Core
 

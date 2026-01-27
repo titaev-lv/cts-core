@@ -14,7 +14,7 @@
 
 | Документ | Описание | Статус |
 |----------|----------|--------|
-| [BEFORE_START.md](BEFORE_START.md) | 🔴 Критические вопросы и пробелы | ⚠️ Требует решения |
+| ~~[BEFORE_START.md]~~ (УДАЛЕНО) | ✅ Все решения перенесены в ARCHITECTURE.md | ✅ Завершено |
 | [API_SPECIFICATION.md](API_SPECIFICATION.md) | Единый API (WebSocket + REST) | ✅ Готов |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Полная архитектура системы | ✅ Готов |
 | [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) | План разработки с Gantt-диаграммами | ✅ Готов |
@@ -184,26 +184,30 @@ wss://cts-core:8443/ws/admin    # Для web-интерфейса
 
 ### 8.2 Готовность к разработке
 
-⚠️ **СТАТУС: 65% готовности**
+✅ **СТАТУС: 100% готовности архитектуры**
 
-**БЛОКЕРЫ (см. [BEFORE_START.md](BEFORE_START.md)):**
-- [ ] Механизм регистрации трейдеров (automatic vs manual)
-- [ ] State management strategy (Redis vs local file)
-- [ ] Idempotency для trade.result (trade.intent flow)
-- [ ] Недостающие SQL таблицы (TRADER, MONITOR_PAIR, EXCHANGE_LIMITS)
-- [ ] Failover design (Phase 1.5?)
+**ВСЕ БЛОКЕРЫ РЕШЕНЫ:**
+- [x] Trader registration: Hybrid (admin pre-register + auto-connect)
+- [x] State persistence: daemon.state + MySQL sync
+- [x] SQL таблицы: 11 tables в migrations/001_phase1_schema.sql
+- [x] Idempotency: UNIQUE constraints + exchange_order_id tracking
+- [x] Failover: Single instance + trader resilience (Phase 1)
+- [x] Rate limiting: 1000 req/min REST, 10000 msg/min WS
+- [x] Error codes: 27 стандартизированных кодов
+- [x] HSM key rotation: Complete infrastructure with re-encryption
 
 ### 8.3 Следующие шаги
 
-**ДО начала Phase 1:**
-1. **Закрыть все блокеры** в BEFORE_START.md
-2. **SQL migrations** для новых таблиц
-3. **Финализировать API** спецификацию
+**Phase 0: Database Migrations (ТЕКУЩАЯ ФАЗА)**
+1. **Применить миграции** - `mysql < migrations/001_phase1_schema.sql`
+2. **Проверить таблицы** - `mysql -e "SHOW TABLES;"`
+3. **Готовность к Phase 1**
 
-**Phase 1: Foundation (после закрытия блокеров)**
+**Phase 1: Foundation (после миграций)**
    - [ ] Config loader (YAML)
-   - [ ] Logger (как в daemon2)
-   - [ ] MySQL connection pool
+   - [ ] Logger (zerolog hybrid: text DEV, JSON PROD)
+   - [ ] MySQL connection pool (mTLS)
+   - [ ] HSM client (mTLS)
    - [ ] Basic REST API (/health, /metrics)
 
 **Phase 2: Core Features**

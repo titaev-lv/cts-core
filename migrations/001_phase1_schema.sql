@@ -2,7 +2,7 @@
 -- CTS-Core Phase 1 Database Schema Migrations
 -- ============================================================================
 -- Created: 2026-01-28
--- Purpose: Implement all architectural decisions from BEFORE_START.md
+-- Purpose: Implement all architectural decisions (see ARCHITECTURE.md section 2.2)
 -- Database: ct_system (MySQL 9)
 -- 
 -- Tables:

@@ -158,4 +158,4 @@ CONSTRAINT: WS resource limits per exchange
 
 **Подробности API:** См. [API_SPECIFICATION.md](API_SPECIFICATION.md)  
 **Архитектура:** См. [ARCHITECTURE.md](ARCHITECTURE.md)  
-**Блокеры:** См. [BEFORE_START.md](BEFORE_START.md)
+**Статус:** ✅ Все решения приняты - см. [ARCHITECTURE.md](ARCHITECTURE.md) и [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)
