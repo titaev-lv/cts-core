@@ -2,10 +2,10 @@
 
 > **Центральный оркестратор для распределённой системы арбитражной торговли криптовалютами**
 
-[![Status](https://img.shields.io/badge/status-design-orange)](BEFORE_START.md)
-[![Architecture](https://img.shields.io/badge/architecture-ready-green)](ARCHITECTURE.md)
+[![Status](https://img.shields.io/badge/status-ready-green)](DEVELOPMENT_PLAN.md)
+[![Architecture](https://img.shields.io/badge/architecture-complete-green)](ARCHITECTURE.md)
 [![API](https://img.shields.io/badge/API-specified-green)](API_SPECIFICATION.md)
-[![Readiness](https://img.shields.io/badge/readiness-65%25-yellow)](BEFORE_START.md)
+[![Phase](https://img.shields.io/badge/phase-0_migrations-blue)](migrations/)
 
 ---
 
@@ -21,23 +21,21 @@
 
 ---
 
-## 🚨 ВАЖНО: Проект НЕ готов к разработке
+## ✅ Архитектура готова - можно начинать Phase 1
 
-**Готовность: 65%**  
-**Статус: 🔴 Phase 0.5 - Architecture Hardening**
+**Готовность: 100%**  
+**Статус: 🟢 Phase 0 - Database Migrations**
 
-### Критические блокеры
+### Что готово
 
-Перед началом кодирования необходимо решить **12 критических вопросов**:
+✅ **Все архитектурные решения приняты:**
+1. ✅ Hybrid trader registration (admin pre-register + auto-connect)
+2. ✅ State: daemon.state + MySQL sync
+3. ✅ Idempotency: UNIQUE constraints + exchange_order_id tracking
+4. ✅ SQL schema: 11 таблиц включая HSM key rotation support
+5. ✅ Failover: single instance + trader resilience (Phase 1)
 
-📖 **См. [BEFORE_START.md](BEFORE_START.md)** для полного списка
-
-**Top-5 блокеров:**
-1. ⚠️ Механизм регистрации трейдеров (automatic vs manual vs hybrid)
-2. ⚠️ State persistence strategy (MySQL vs Redis vs local file)
-3. ⚠️ Idempotency guarantees (trade.intent flow)
-4. ⚠️ Недостающие SQL таблицы (TRADER, MONITOR_PAIR, EXCHANGE_LIMITS, etc.)
-5. ⚠️ Failover design (Active-Passive minimum)
+📖 **См. [ARCHITECTURE.md](ARCHITECTURE.md)** для всех архитектурных решений
 
 ---
 
@@ -48,10 +46,10 @@
 | Документ | Описание | Когда читать |
 |----------|----------|-------------|
 | **[DOCS_INDEX.md](DOCS_INDEX.md)** | 📑 Навигация по всем документам | Первым делом |
-| **[BEFORE_START.md](BEFORE_START.md)** | 🔴 Критические вопросы | ОБЯЗАТЕЛЬНО |
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | 🏗️ Архитектура системы | После BEFORE_START |
+| **[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)** | 📋 План разработки (Phase 0-4) | НАЧАТЬ ЗДЕСЬ |
+| **[ARCHITECTURE.md](ARCHITECTURE.md)** | 🏗️ Архитектура + все решения | Для понимания системы |
 | **[API_SPECIFICATION.md](API_SPECIFICATION.md)** | 🔌 WebSocket + REST API | При работе с API |
-| **[DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)** | 📋 План разработки | Для планирования |
+| **[HSM_KEY_ROTATION.md](HSM_KEY_ROTATION.md)** | 🔐 HSM key rotation guide | Для production |
 
 ### 📖 Дополнительно
 
@@ -184,17 +182,17 @@ Monitoring:
 ## 🗺️ Roadmap
 
 ```
-✅ Phase 0: Architecture Design (завершено)
-   - ARCHITECTURE.md
-   - API_SPECIFICATION.md
-   - TRADER_MODES.md
-   - DEVELOPMENT_PLAN.md
+✅ Phase 0: Architecture & Migrations (завершено)
+   - ARCHITECTURE.md (25 Phase 1 decisions + HSM key rotation)
+   - API_SPECIFICATION.md (27 error codes, 3-level trade structure)
+   - DEVELOPMENT_PLAN.md (Phase 0-4 roadmap)
+   - migrations/001_phase1_schema.sql (11 tables)
+   - HSM_KEY_ROTATION.md (complete guide)
 
-🔴 Phase 0.5: Architecture Hardening (ТЕКУЩАЯ, 1-2 недели)
-   - Решить все вопросы из BEFORE_START.md
-   - SQL migrations для недостающих таблиц
-   - Финализировать state management strategy
-   - Failover design (Active-Passive minimum)
+🔵 Phase 0 Current: Apply migrations (~1 час)
+   - mysql < migrations/001_phase1_schema.sql
+   - Verify 11 tables created
+   - Ready for Phase 1 development
 
 ⏳ Phase 1: Foundation (2 недели)
    - Project setup (go.mod, config, logger)
@@ -231,9 +229,10 @@ Monitoring:
 
 ### Перед началом работы
 
-1. **Прочитайте [BEFORE_START.md](BEFORE_START.md)** - критические вопросы
-2. **Изучите [ARCHITECTURE.md](ARCHITECTURE.md)** - понимание системы
-3. **Ознакомьтесь с [API_SPECIFICATION.md](API_SPECIFICATION.md)** - контракты
+1. **Примените миграции**: `mysql -u root -proot -h 127.0.0.1 ct_system < migrations/001_phase1_schema.sql`
+2. **Изучите [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)** - начните с Phase 1
+3. **Прочитайте [ARCHITECTURE.md](ARCHITECTURE.md)** - понимание системы
+4. **Ознакомьтесь с [API_SPECIFICATION.md](API_SPECIFICATION.md)** - контракты
 
 ### Workflow
 
@@ -280,4 +279,4 @@ TBD
 
 ---
 
-**⚠️ НЕ начинайте Phase 1 пока не закрыты все блокеры в [BEFORE_START.md](BEFORE_START.md)**
+**✅ Готово к Phase 1 - начинайте с [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md)**
