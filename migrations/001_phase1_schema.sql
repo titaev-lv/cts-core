@@ -118,8 +118,9 @@ ADD CONSTRAINT fk_trade_trader
 -- ============================================================================
 -- Purpose: Track trader's current load and rate limit status
 -- Architecture Decision: Rate limits managed by TRADERS, not Core
---   - Rate limits bound to trader's IP (Binance: 1200 req/min per IP)
---   - Trader autonomously tracks its own limits from exchange API headers
+--   - IP-level limits: Trader IP → EXCHANGE (e.g., Binance 1200 req/min per IP)
+--   - Account-level limits: Trader IP → EXCHANGE_ACCOUNT (e.g., Binance VIP0 vs VIP9 order limits)
+--   - Trader autonomously tracks both types from exchange API headers
 --   - Trader periodically reports metrics to Core (this table)
 --   - Core uses metrics for smart task distribution (avoid overloaded traders)
 --   - Trader can reject tasks if rate limit exceeded
@@ -130,21 +131,27 @@ CREATE TABLE IF NOT EXISTS TRADER_EXCHANGE_RESOURCE (
     ID BIGINT PRIMARY KEY AUTO_INCREMENT,
     TRADER_ID INT NOT NULL COMMENT 'TRADER.ID',
     EXCHANGE_ID INT NOT NULL COMMENT 'EXCHANGE.ID',
+    EXCHANGE_ACCOUNT_ID INT DEFAULT NULL COMMENT 'EXCHANGE_ACCOUNTS.ID (NULL = IP-level limit, NOT NULL = account-level limit)',
     RESOURCE_TYPE ENUM('api_requests_minute', 'api_weight_minute', 'orders_minute', 'websocket_connections') NOT NULL,
     USED_VALUE DECIMAL(20, 8) NOT NULL DEFAULT 0 COMMENT 'Current usage reported by trader',
     MAX_VALUE DECIMAL(20, 8) NOT NULL COMMENT 'Limit from exchange (trader discovers via API)',
     LAST_UPDATED TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     RESET_AT TIMESTAMP NOT NULL COMMENT 'When USED_VALUE resets (calculated by trader)',
     
-    UNIQUE KEY uk_resource (TRADER_ID, EXCHANGE_ID, RESOURCE_TYPE),
+    UNIQUE KEY uk_resource (TRADER_ID, EXCHANGE_ID, EXCHANGE_ACCOUNT_ID, RESOURCE_TYPE),
     INDEX idx_trader (TRADER_ID),
     INDEX idx_exchange (EXCHANGE_ID),
+    INDEX idx_account (EXCHANGE_ACCOUNT_ID),
     INDEX idx_availability (TRADER_ID, EXCHANGE_ID, RESOURCE_TYPE, USED_VALUE) COMMENT 'For scoring',
     
     CONSTRAINT fk_trader_resource_trader FOREIGN KEY (TRADER_ID) 
-        REFERENCES TRADER(ID) ON DELETE CASCADE ON UPDATE CASCADE
+        REFERENCES TRADER(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_trader_resource_exchange FOREIGN KEY (EXCHANGE_ID) 
+        REFERENCES EXCHANGE(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_trader_resource_account FOREIGN KEY (EXCHANGE_ACCOUNT_ID) 
+        REFERENCES EXCHANGE_ACCOUNTS(ID) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Trader resource usage tracking (for load balancing)';
+COMMENT='Trader resource usage tracking (IP-level + account-level limits)';
 
 -- ============================================================================
 -- 6. ARBITRAGE_ORDER: Middle Level (Orders per Exchange)
