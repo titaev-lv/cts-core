@@ -186,10 +186,7 @@ CREATE TABLE IF NOT EXISTS ARBITRAGE_ORDER (
     FILLED_AT TIMESTAMP NULL COMMENT 'When fully filled',
     
     UNIQUE KEY uk_exchange_order (ARBITRAGE_TRANS_ID, EXCHANGE_ORDER_ID) COMMENT 'Deduplication',
-    INDEX idx_arbitrage (ARBITRAGE_TRANS_ID),
     INDEX idx_exchange (EXCHANGE_ID, STATUS),
-    INDEX idx_account (EXCHANGE_ACCOUNT_ID),
-    INDEX idx_trader (TRADER_ID),
     INDEX idx_status (STATUS),
     INDEX idx_created (DATE_CREATE),
     
