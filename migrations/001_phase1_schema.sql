@@ -318,14 +318,10 @@ CREATE TABLE IF NOT EXISTS REENCRYPTION_JOBS (
     ERROR_MESSAGE TEXT,
     
     DATE_CREATE TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    USER_CREATED INT COMMENT 'USER.ID who initiated',
     
     INDEX idx_status (STATUS),
     INDEX idx_job_type (JOB_TYPE, STATUS),
-    INDEX idx_processing (STATUS, LAST_PROCESSED_AT) COMMENT 'For scheduler pickup',
-    
-    CONSTRAINT fk_reencryption_user_created FOREIGN KEY (USER_CREATED) 
-        REFERENCES USER(ID) ON DELETE RESTRICT ON UPDATE CASCADE
+    INDEX idx_processing (STATUS, LAST_PROCESSED_AT) COMMENT 'For scheduler pickup'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='HSM key rotation re-encryption jobs';
 
