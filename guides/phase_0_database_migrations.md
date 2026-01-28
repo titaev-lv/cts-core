@@ -105,8 +105,7 @@ mysql -u root -proot -h 127.0.0.1 ct_system < migrations/001_phase1_schema.sql 2
 - TRADER_SESSION (connection history, 7 days retention)
 - MONITORING (ALTER: ASSIGNED_TRADER_ID, ASSIGNED_AT, BACKUP_TRADER_ID)
 - TRADE (ALTER: TRADER_ID, ASSIGNED_AT)
-- EXCHANGE_LIMITS (per-exchange rate limits)
-- TRADER_EXCHANGE_RESOURCE (usage tracking)
+- TRADER_EXCHANGE_RESOURCE (trader metrics: rate limits, load)
 - ARBITRAGE_ORDER (middle level - per exchange)
 - ORDER_TRANSACTION (bottom level - fills/partials)
 - AUDIT_LOG (Phase 2, optional)
@@ -183,7 +182,6 @@ mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW TABLES;"
 | ARBITRAGE_TRANS         | (existing)
 | AUDIT_LOG               | (NEW)
 | EXCHANGE_ACCOUNTS       | (existing)
-| EXCHANGE_LIMITS         | (NEW)
 | MONITORING              | (existing, ALTER applied)
 | ORDER_TRANSACTION       | (NEW)
 | REENCRYPTION_JOBS       | (NEW)
@@ -500,20 +498,21 @@ cat > migration_applied_$(date +%Y%m%d).md <<EOF
 **Applied by:** $(whoami)
 **Database:** ct_system @ 127.0.0.1
 
-## Tables Created (11 new):
+## Tables Created (8 new):
 1. TRADER - Admin pre-registration of traders
 2. TRADER_SESSION - Connection history (7 days retention)
-3. EXCHANGE_LIMITS - Exchange rate limits (orders/volume per day)
-4. TRADER_EXCHANGE_RESOURCE - Trader resource usage tracking
-5. ARBITRAGE_ORDER - Middle level (per exchange orders)
-6. ORDER_TRANSACTION - Bottom level (fills/partials)
-7. AUDIT_LOG - Admin operations audit trail
-8. REENCRYPTION_JOBS - HSM key rotation job tracking
-9. REENCRYPTION_PROGRESS - Per-record re-encryption progress
-10. SCHEDULER_TASKS - Background job definitions
+3. TRADER_EXCHANGE_RESOURCE - Trader metrics (rate limits, load)
+4. ARBITRAGE_ORDER - Middle level (per exchange orders)
+5. ORDER_TRANSACTION - Bottom level (fills/partials)
+6. AUDIT_LOG - Admin operations audit trail
+7. REENCRYPTION_JOBS - HSM key rotation job tracking
+8. REENCRYPTION_PROGRESS - Per-record re-encryption progress
+9. SCHEDULER_TASKS - Background job definitions
 
-## Tables Altered (1):
+## Tables Altered (3):
 1. USER_2FA - Added enc_key_version, needs_reencryption for HSM key rotation
+2. MONITORING - Added assigned_trader_id, assigned_at, backup_trader_id
+3. TRADE - Added trader_id, assigned_at
 
 ## Verification Results:
 - Total tables: 16 (11 new + 5 existing)
@@ -543,19 +542,21 @@ cat migration_applied_$(date +%Y%m%d).md
 git add migrations/001_phase1_schema.sql
 git add migration_applied_$(date +%Y%m%d).md
 
-git commit -m "feat(db): phase 0 complete - applied 11 table migrations
+git commit -m "feat(db): phase 0 complete - applied 8 tables + 3 ALTERs
 
 - TRADER, TRADER_SESSION for session management
-- EXCHANGE_LIMITS, TRADER_EXCHANGE_RESOURCE for load balancing
+- TRADER_EXCHANGE_RESOURCE for load balancing (metrics from traders)
 - ARBITRAGE_ORDER, ORDER_TRANSACTION for 3-level trade structure
 - REENCRYPTION_JOBS, REENCRYPTION_PROGRESS, SCHEDULER_TASKS for HSM key rotation
 - AUDIT_LOG for compliance
-- ALTER USER_2FA for key versioning
+- ALTER USER_2FA, MONITORING, TRADE for trader assignment
+
+Architecture: Rate limits managed by traders autonomously (see RATE_LIMITS_ARCHITECTURE.md)
 
 All verifications passed:
-- 16 tables created/altered
-- 4 foreign keys verified
-- 3 UNIQUE constraints tested
+- 17 tables total (8 new + 3 altered + 6 existing)
+- Foreign keys verified
+- UNIQUE constraints tested
 - 4 scheduler tasks initialized
 
 Ready for Phase 1.1."
@@ -591,14 +592,24 @@ DROP TABLE IF EXISTS ORDER_TRANSACTION;
 DROP TABLE IF EXISTS ARBITRAGE_ORDER;
 DROP TABLE IF EXISTS AUDIT_LOG;
 DROP TABLE IF EXISTS TRADER_EXCHANGE_RESOURCE;
-DROP TABLE IF EXISTS EXCHANGE_LIMITS;
 DROP TABLE IF EXISTS TRADER_SESSION;
 DROP TABLE IF EXISTS TRADER;
 
 -- Revert USER_2FA changes
 ALTER TABLE USER_2FA
-DROP COLUMN IF EXISTS enc_key_version,
-DROP COLUMN IF EXISTS needs_reencryption;
+DROP COLUMN IF EXISTS ENC_KEY_VERSION,
+DROP COLUMN IF EXISTS NEEDS_REENCRYPTION;
+
+-- Revert MONITORING changes
+ALTER TABLE MONITORING
+DROP COLUMN IF EXISTS ASSIGNED_TRADER_ID,
+DROP COLUMN IF EXISTS ASSIGNED_AT,
+DROP COLUMN IF EXISTS BACKUP_TRADER_ID;
+
+-- Revert TRADE changes
+ALTER TABLE TRADE
+DROP COLUMN IF EXISTS TRADER_ID,
+DROP COLUMN IF EXISTS ASSIGNED_AT;
 
 -- Verify rollback
 SHOW TABLES;
