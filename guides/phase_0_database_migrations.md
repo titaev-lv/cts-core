@@ -15,6 +15,8 @@
 **Что будет создано:**
 - 11 новых таблиц (TRADER, TRADER_SESSION, EXCHANGE_LIMITS, и др.)
 - ALTER USER_2FA для HSM key rotation
+- ALTER MONITORING для tracker assignment
+- ALTER TRADE для tracker assignment
 - 4 scheduler tasks по умолчанию
 
 ---
@@ -97,14 +99,15 @@ mysql -u root -proot -h 127.0.0.1 ct_system < migrations/001_phase1_schema.sql 2
 ### Что происходит
 
 **Section 1-8:** CREATE TABLE для 8 основных таблиц
-- TRADER (admin pre-registration)
+- TRADER (admin pre-registration, uses ID as PK for all FK)
 - TRADER_SESSION (connection history, 7 days retention)
+- MONITORING (ALTER: ASSIGNED_TRADER_ID, ASSIGNED_AT, BACKUP_TRADER_ID)
+- TRADE (ALTER: TRADER_ID, ASSIGNED_AT)
 - EXCHANGE_LIMITS (per-exchange rate limits)
 - TRADER_EXCHANGE_RESOURCE (usage tracking)
 - ARBITRAGE_ORDER (middle level - per exchange)
 - ORDER_TRANSACTION (bottom level - fills/partials)
 - AUDIT_LOG (Phase 2, optional)
-- (MONITORING - ALTER to add trader assignment fields)
 
 **Section 9:** HSM Key Rotation Support (3 tables)
 - ALTER USER_2FA (add enc_key_version, needs_reencryption)
@@ -169,7 +172,7 @@ tail -50 migration.log
 mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW TABLES;"
 ```
 
-**✅ Expected output (16 tables total):**
+**✅ Expected output (таблицы):**
 ```
 +-------------------------+
 | Tables_in_ct_system     |
@@ -184,6 +187,8 @@ mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW TABLES;"
 | REENCRYPTION_JOBS       | (NEW)
 | REENCRYPTION_PROGRESS   | (NEW)
 | SCHEDULER_TASKS         | (NEW)
+| TRADE                   | (existing, ALTER applied)
+| TRADE_PAIRS             | (existing)
 | TRADER                  | (NEW)
 | TRADER_EXCHANGE_RESOURCE| (NEW)
 | TRADER_SESSION          | (NEW)
@@ -200,12 +205,13 @@ mysql -u root -proot -h 127.0.0.1 ct_system -e "DESCRIBE TRADER;"
 ```
 
 **✅ Expected columns:**
-- trader_id (PK)
-- certificate_cn
-- region
-- status (active/suspended/deleted)
-- max_tasks
-- created_at, updated_at, created_by
+- ID (PK, INT AUTO_INCREMENT)
+- TRADER_NAME (human-readable name)
+- CERTIFICATE_CN (mTLS CN, UNIQUE)
+- REGION
+- STATUS (registered/active/suspended/decommissioned)
+- MAX_TASKS
+- DATE_CREATE, DATE_MODIFY, USER_CREATED, USER_MODIFY
 
 ```sql
 -- TRADER_SESSION (connection history)
@@ -213,11 +219,20 @@ mysql -u root -proot -h 127.0.0.1 ct_system -e "DESCRIBE TRADER_SESSION;"
 ```
 
 **✅ Expected columns:**
-- id (PK, AUTO_INCREMENT)
-- session_id (UNIQUE)
-- trader_id (FK → TRADER)
-- ws_connection_id
-- connected_at, last_heartbeat, ended_at
+- ID (PK, BIGINT AUTO_INCREMENT)
+- TRADER_ID (INT, FK → TRADER.ID)
+- SESSION_ID (VARCHAR(100), UNIQUE)
+- WS_CONNECTION_ID (VARCHAR(100))
+- CONNECTED_AT, LAST_HEARTBEAT, ENDED_AT
+
+```sql
+-- TRADE (trader assignment added)
+mysql -u root -proot -h 127.0.0.1 ct_system -e "DESCRIBE TRADE;"
+```
+
+**✅ Expected NEW columns:**
+- TRADER_ID (INT, FK → TRADER.ID) - какой trader выполняет задачу
+- ASSIGNED_AT (TIMESTAMP NULL) - когда назначено
 
 ```sql
 -- USER_2FA (HSM key rotation added)
@@ -225,8 +240,8 @@ mysql -u root -proot -h 127.0.0.1 ct_system -e "DESCRIBE USER_2FA;"
 ```
 
 **✅ Expected NEW columns:**
-- enc_key_version (INT) - для tracking KEK version
-- needs_reencryption (BOOLEAN) - флаг для scheduler
+- ENC_KEY_VERSION (INT) - для tracking KEK version
+- NEEDS_REENCRYPTION (BOOLEAN) - флаг для scheduler
 
 ```sql
 -- REENCRYPTION_JOBS (HSM key rotation)
@@ -265,8 +280,8 @@ mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW INDEX FROM TRADER;"
 ```
 
 **✅ Expected indexes:**
-- PRIMARY (trader_id)
-- idx_certificate_cn
+- PRIMARY (ID)
+- UNIQUE (CERTIFICATE_CN)
 - idx_status
 - idx_region
 
@@ -275,11 +290,12 @@ mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW INDEX FROM TRADER_SESSION;"
 ```
 
 **✅ Expected indexes:**
-- PRIMARY (id)
-- UNIQUE uk_session_id (session_id)
-- idx_trader_id (trader_id)
+- PRIMARY (ID)
+- UNIQUE (SESSION_ID)
 - idx_connected_at
-- idx_cleanup (ended_at, connected_at) - для auto-cleanup
+- idx_active_sessions (TRADER_ID, ENDED_AT)
+- idx_cleanup (ENDED_AT) - для auto-cleanup
+- FK на TRADER_ID автоматически создает индекс
 
 ```sql
 mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW INDEX FROM ARBITRAGE_ORDER;"
@@ -333,32 +349,33 @@ ORDER BY TABLE_NAME;
 mysql -u root -proot -h 127.0.0.1 ct_system <<EOF
 -- Insert test trader
 INSERT INTO TRADER (
-    trader_id, certificate_cn, region, status, max_tasks, created_by
+    TRADER_NAME, CERTIFICATE_CN, REGION, STATUS, MAX_TASKS, USER_CREATED
 ) VALUES (
-    'trader-test-1', 
-    'CN=trader-test-1,OU=Trading,O=Private',
-    'EU',
+    'Test Trader EU', 
+    'trader-test-1.cts.internal',
+    'eu',
     'active',
     5,
     1  -- admin USER.ID
 );
 
 -- Verify
-SELECT * FROM TRADER WHERE trader_id = 'trader-test-1';
+SELECT * FROM TRADER WHERE TRADER_NAME = 'Test Trader EU';
 
 -- Cleanup
-DELETE FROM TRADER WHERE trader_id = 'trader-test-1';
+DELETE FROM TRADER WHERE TRADER_NAME = 'Test Trader EU';
 EOF
 ```
 
 **✅ Expected result:**
 ```
-trader_id: trader-test-1
-certificate_cn: CN=trader-test-1,OU=Trading,O=Private
-region: EU
-status: active
-max_tasks: 5
-created_by: 1
+ID: 1
+TRADER_NAME: Test Trader EU
+CERTIFICATE_CN: trader-test-1.cts.internal
+REGION: eu
+STATUS: active
+MAX_TASKS: 5
+USER_CREATED: 1
 ```
 
 ### Тест 2: Foreign Key Constraint
@@ -379,20 +396,22 @@ ERROR 1452 (23000): Cannot add or update a child row: a foreign key constraint f
 ```sql
 mysql -u root -proot -h 127.0.0.1 ct_system <<EOF
 -- Test 2: Should SUCCEED (trader exists)
-INSERT INTO TRADER (trader_id, certificate_cn, region, status)
-VALUES ('trader-test-2', 'CN=test', 'EU', 'active');
+INSERT INTO TRADER (TRADER_NAME, CERTIFICATE_CN, REGION, STATUS)
+VALUES ('Test Trader 2', 'test-2.cts.internal', 'eu', 'active');
 
-INSERT INTO TRADER_SESSION (trader_id, ws_connection_id)
-VALUES ('trader-test-2', 'ws-123');
+SET @trader_id = LAST_INSERT_ID();
+
+INSERT INTO TRADER_SESSION (TRADER_ID, SESSION_ID, WS_CONNECTION_ID)
+VALUES (@trader_id, UUID(), 'ws-123');
 
 -- Verify
-SELECT * FROM TRADER_SESSION WHERE trader_id = 'trader-test-2';
+SELECT * FROM TRADER_SESSION WHERE TRADER_ID = @trader_id;
 
 -- Test CASCADE delete
-DELETE FROM TRADER WHERE trader_id = 'trader-test-2';
+DELETE FROM TRADER WHERE ID = @trader_id;
 
 -- Verify CASCADE worked (session should be deleted too)
-SELECT COUNT(*) as count FROM TRADER_SESSION WHERE trader_id = 'trader-test-2';
+SELECT COUNT(*) as count FROM TRADER_SESSION WHERE TRADER_ID = @trader_id;
 EOF
 ```
 
