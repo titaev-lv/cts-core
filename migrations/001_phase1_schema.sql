@@ -92,6 +92,20 @@ ADD CONSTRAINT fk_monitoring_backup_trader
     FOREIGN KEY (BACKUP_TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- ============================================================================
+-- 3.1. TRADE: ALTER to add trader assignment
+-- ============================================================================
+-- Purpose: Track which trader is executing trade tasks
+-- Note: Simpler than MONITORING (no backup trader needed for trades)
+
+ALTER TABLE TRADE
+ADD COLUMN TRADER_ID INT DEFAULT NULL COMMENT 'TRADER.ID executing this trade task',
+ADD COLUMN ASSIGNED_AT TIMESTAMP NULL DEFAULT NULL COMMENT 'When trader was assigned',
+ADD INDEX idx_trader (TRADER_ID),
+ADD INDEX idx_assignment (TRADER_ID, ASSIGNED_AT),
+ADD CONSTRAINT fk_trade_trader 
+    FOREIGN KEY (TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- ============================================================================
 -- 4. EXCHANGE_LIMITS: Exchange Rate Limits
 -- ============================================================================
 -- Purpose: Define per-exchange rate limits (orders/volume per day)
