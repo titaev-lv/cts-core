@@ -12,7 +12,7 @@
 --   4. TRADE - ALTER to add trader assignment
 --   5. TRADER_EXCHANGE_RESOURCE - trader metrics (rate limits, load)
 --   6. ARBITRAGE_ORDER - middle level (orders per exchange)
---   7. ORDER_TRANSACTION - bottom level (individual fills/partials)
+--   7. ARBITRAGE_ORDER_TRANS - bottom level (individual fills/partials)
 --   8. AUDIT_LOG - audit trail (Phase 2, optional)
 --   9. REENCRYPTION_JOBS - HSM key rotation jobs
 --   10. REENCRYPTION_PROGRESS - per-record re-encryption tracking
@@ -162,7 +162,7 @@ COMMENT='Trader resource usage tracking (IP-level + account-level limits)';
 
 CREATE TABLE IF NOT EXISTS ARBITRAGE_ORDER (
     ID BIGINT PRIMARY KEY AUTO_INCREMENT,
-    ARBITRAGE_TRANS_ID BIGINT NOT NULL COMMENT 'ARBITRAGE_TRANS.ID (parent)',
+    ARBITRAGE_TRANS_ID INT NOT NULL COMMENT 'ARBITRAGE_TRANS.ID (parent)',
     EXCHANGE_ID INT NOT NULL COMMENT 'EXCHANGE.ID',
     EXCHANGE_ACCOUNT_ID INT NOT NULL COMMENT 'EXCHANGE_ACCOUNTS.ID',
     EXCHANGE_ORDER_ID VARCHAR(255) NOT NULL COMMENT 'Order ID from exchange',
@@ -204,13 +204,13 @@ CREATE TABLE IF NOT EXISTS ARBITRAGE_ORDER (
 COMMENT='Orders per exchange (middle level of arbitrage)';
 
 -- ============================================================================
--- 7. ORDER_TRANSACTION: Bottom Level (Individual Fills/Partials)
+-- 7. ARBITRAGE_ORDER_TRANS: Bottom Level (Individual Fills/Partials)
 -- ============================================================================
 -- Purpose: Track individual fills/partial executions within an order
 -- Used for: Detailed execution analysis, fee tracking, audit
 -- Idempotency: UNIQUE(arbitrage_order_id, exchange_transaction_id)
 
-CREATE TABLE IF NOT EXISTS ORDER_TRANSACTION (
+CREATE TABLE IF NOT EXISTS ARBITRAGE_ORDER_TRANS (
     ID BIGINT PRIMARY KEY AUTO_INCREMENT,
     ARBITRAGE_ORDER_ID BIGINT NOT NULL COMMENT 'ARBITRAGE_ORDER.ID (parent)',
     EXCHANGE_TRANSACTION_ID VARCHAR(255) NOT NULL COMMENT 'Transaction/fill ID from exchange',
@@ -229,7 +229,7 @@ CREATE TABLE IF NOT EXISTS ORDER_TRANSACTION (
     INDEX idx_order (ARBITRAGE_ORDER_ID),
     INDEX idx_timestamp (TIMESTAMP)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Individual fills/partials (bottom level of arbitrage)';
+COMMENT='Individual fills/partials within ARBITRAGE_ORDER (bottom level)';
 
 -- ============================================================================
 -- 8. AUDIT_LOG: Audit Trail (Optional - Phase 2)

@@ -107,7 +107,7 @@ mysql -u root -proot -h 127.0.0.1 ct_system < migrations/001_phase1_schema.sql 2
 - TRADE (ALTER: TRADER_ID, ASSIGNED_AT)
 - TRADER_EXCHANGE_RESOURCE (trader metrics: rate limits, load)
 - ARBITRAGE_ORDER (middle level - per exchange)
-- ORDER_TRANSACTION (bottom level - fills/partials)
+- ARBITRAGE_ORDER_TRANS (bottom level - fills/partials)
 - AUDIT_LOG (Phase 2, optional)
 
 **Section 9:** HSM Key Rotation Support (3 tables)
@@ -179,11 +179,11 @@ mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW TABLES;"
 | Tables_in_ct_system     |
 +-------------------------+
 | ARBITRAGE_ORDER         | (NEW)
+| ARBITRAGE_ORDER_TRANS   | (NEW)
 | ARBITRAGE_TRANS         | (existing)
 | AUDIT_LOG               | (NEW)
 | EXCHANGE_ACCOUNTS       | (existing)
 | MONITORING              | (existing, ALTER applied)
-| ORDER_TRANSACTION       | (NEW)
 | REENCRYPTION_JOBS       | (NEW)
 | REENCRYPTION_PROGRESS   | (NEW)
 | SCHEDULER_TASKS         | (NEW)
@@ -325,10 +325,10 @@ ORDER BY TABLE_NAME;
 +---------------------------+---------------------------+------------------------+
 | TABLE_NAME                | CONSTRAINT_NAME           | REFERENCED_TABLE_NAME  |
 +---------------------------+---------------------------+------------------------+
-| ARBITRAGE_ORDER           | fk_arbitrage_trans        | ARBITRAGE_TRANS        |
-| ORDER_TRANSACTION         | fk_arbitrage_order        | ARBITRAGE_ORDER        |
+| ARBITRAGE_ORDER           | fk_arbitrage_order_trans  | ARBITRAGE_TRANS        |
+| ARBITRAGE_ORDER_TRANS     | fk_arbitrage_order        | ARBITRAGE_ORDER        |
 | REENCRYPTION_PROGRESS     | fk_reencryption_job       | REENCRYPTION_JOBS      |
-| TRADER_SESSION            | fk_trader                 | TRADER                 |
+| TRADER_SESSION            | fk_trader_session_trader  | TRADER                 |
 +---------------------------+---------------------------+------------------------+
 ```
 
@@ -498,12 +498,12 @@ cat > migration_applied_$(date +%Y%m%d).md <<EOF
 **Applied by:** $(whoami)
 **Database:** ct_system @ 127.0.0.1
 
-## Tables Created (8 new):
+## Tables Created (9 new):
 1. TRADER - Admin pre-registration of traders
 2. TRADER_SESSION - Connection history (7 days retention)
 3. TRADER_EXCHANGE_RESOURCE - Trader metrics (rate limits, load)
 4. ARBITRAGE_ORDER - Middle level (per exchange orders)
-5. ORDER_TRANSACTION - Bottom level (fills/partials)
+5. ARBITRAGE_ORDER_TRANS - Bottom level (fills/partials)
 6. AUDIT_LOG - Admin operations audit trail
 7. REENCRYPTION_JOBS - HSM key rotation job tracking
 8. REENCRYPTION_PROGRESS - Per-record re-encryption progress
@@ -542,11 +542,11 @@ cat migration_applied_$(date +%Y%m%d).md
 git add migrations/001_phase1_schema.sql
 git add migration_applied_$(date +%Y%m%d).md
 
-git commit -m "feat(db): phase 0 complete - applied 8 tables + 3 ALTERs
+git commit -m "feat(db): phase 0 complete - applied 9 tables + 3 ALTERs
 
 - TRADER, TRADER_SESSION for session management
 - TRADER_EXCHANGE_RESOURCE for load balancing (metrics from traders)
-- ARBITRAGE_ORDER, ORDER_TRANSACTION for 3-level trade structure
+- ARBITRAGE_ORDER, ARBITRAGE_ORDER_TRANS for 3-level trade structure
 - REENCRYPTION_JOBS, REENCRYPTION_PROGRESS, SCHEDULER_TASKS for HSM key rotation
 - AUDIT_LOG for compliance
 - ALTER USER_2FA, MONITORING, TRADE for trader assignment
@@ -554,7 +554,7 @@ git commit -m "feat(db): phase 0 complete - applied 8 tables + 3 ALTERs
 Architecture: Rate limits managed by traders autonomously (see RATE_LIMITS_ARCHITECTURE.md)
 
 All verifications passed:
-- 17 tables total (8 new + 3 altered + 6 existing)
+- 18 tables total (9 new + 3 altered + 6 existing)
 - Foreign keys verified
 - UNIQUE constraints tested
 - 4 scheduler tasks initialized
@@ -588,7 +588,7 @@ USE ct_system;
 DROP TABLE IF EXISTS REENCRYPTION_PROGRESS;
 DROP TABLE IF EXISTS REENCRYPTION_JOBS;
 DROP TABLE IF EXISTS SCHEDULER_TASKS;
-DROP TABLE IF EXISTS ORDER_TRANSACTION;
+DROP TABLE IF EXISTS ARBITRAGE_ORDER_TRANS;
 DROP TABLE IF EXISTS ARBITRAGE_ORDER;
 DROP TABLE IF EXISTS AUDIT_LOG;
 DROP TABLE IF EXISTS TRADER_EXCHANGE_RESOURCE;
