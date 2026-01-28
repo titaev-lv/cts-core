@@ -9,11 +9,19 @@
 --   1. TRADER - trader registration (admin pre-registration)
 --   2. TRADER_SESSION - connection history (7 days retention)
 --   3. MONITORING - ALTER to add assignment fields
---   4. EXCHANGE_LIMITS - exchange rate limits (orders/volume)
---   5. TRADER_EXCHANGE_RESOURCE - trader resource usage tracking
+--   4. TRADE - ALTER to add trader assignment
+--   5. TRADER_EXCHANGE_RESOURCE - trader metrics (rate limits, load)
 --   6. ARBITRAGE_ORDER - middle level (orders per exchange)
 --   7. ORDER_TRANSACTION - bottom level (individual fills/partials)
 --   8. AUDIT_LOG - audit trail (Phase 2, optional)
+--   9. REENCRYPTION_JOBS - HSM key rotation jobs
+--   10. REENCRYPTION_PROGRESS - per-record re-encryption tracking
+--   11. SCHEDULER_TASKS - background jobs
+--
+-- Architecture Note: Rate limits managed by TRADERS autonomously
+--   - Exchange rate limits are IP-bound (trader's IP, not Core's)
+--   - Traders report metrics to Core via TRADER_EXCHANGE_RESOURCE
+--   - Core uses metrics for load balancing, but traders make final decisions
 -- ============================================================================
 
 USE ct_system;
@@ -106,46 +114,27 @@ ADD CONSTRAINT fk_trade_trader
     FOREIGN KEY (TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- ============================================================================
--- 4. EXCHANGE_LIMITS: Exchange Rate Limits
+-- 4. TRADER_EXCHANGE_RESOURCE: Trader Resource Usage (Metrics from Traders)
 -- ============================================================================
--- Purpose: Define per-exchange rate limits (orders/volume per day)
--- Managed by: Admin (manual updates based on exchange documentation)
--- Used by: Scheduler (resource availability scoring)
-
-CREATE TABLE IF NOT EXISTS EXCHANGE_LIMITS (
-    ID INT PRIMARY KEY AUTO_INCREMENT,
-    EXCHANGE_ID INT NOT NULL COMMENT 'EXCHANGE.ID',
-    EXCHANGE_ACCOUNT_ID INT NOT NULL COMMENT 'EXCHANGE_ACCOUNTS.ID',
-    LIMIT_TYPE ENUM('orders_per_day', 'volume_per_day', 'orders_per_minute', 'api_requests_per_minute') NOT NULL,
-    MAX_VALUE DECIMAL(20, 8) NOT NULL COMMENT 'Maximum allowed value',
-    CURRENT_VALUE DECIMAL(20, 8) NOT NULL DEFAULT 0 COMMENT 'Current usage (resets daily/minutely)',
-    RESET_AT TIMESTAMP NOT NULL COMMENT 'When CURRENT_VALUE resets',
-    DATE_MODIFY TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    NOTES TEXT COMMENT 'Admin notes about limit',
-    
-    UNIQUE KEY uk_limit (EXCHANGE_ACCOUNT_ID, LIMIT_TYPE),
-    INDEX idx_exchange (EXCHANGE_ID),
-    INDEX idx_account (EXCHANGE_ACCOUNT_ID),
-    INDEX idx_reset (RESET_AT) COMMENT 'For cleanup/reset job'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-COMMENT='Exchange rate limits (orders/volume per account)';
-
--- ============================================================================
--- 5. TRADER_EXCHANGE_RESOURCE: Trader Resource Usage
--- ============================================================================
--- Purpose: Track trader's usage of exchange resources
--- Updated by: Trader (reports via metrics), CTS-Core (aggregates)
--- Used by: Scheduler (resource availability scoring 20%)
+-- Purpose: Track trader's current load and rate limit status
+-- Architecture Decision: Rate limits managed by TRADERS, not Core
+--   - Rate limits bound to trader's IP (Binance: 1200 req/min per IP)
+--   - Trader autonomously tracks its own limits from exchange API headers
+--   - Trader periodically reports metrics to Core (this table)
+--   - Core uses metrics for smart task distribution (avoid overloaded traders)
+--   - Trader can reject tasks if rate limit exceeded
+-- Updated by: Trader (WebSocket metrics reports every 10-30 seconds)
+-- Used by: Scheduler (load balancing, avoid overloaded traders)
 
 CREATE TABLE IF NOT EXISTS TRADER_EXCHANGE_RESOURCE (
     ID BIGINT PRIMARY KEY AUTO_INCREMENT,
     TRADER_ID INT NOT NULL COMMENT 'TRADER.ID',
     EXCHANGE_ID INT NOT NULL COMMENT 'EXCHANGE.ID',
-    RESOURCE_TYPE ENUM('orders_today', 'volume_today', 'api_requests_minute', 'websocket_connections') NOT NULL,
-    USED_VALUE DECIMAL(20, 8) NOT NULL DEFAULT 0,
-    MAX_VALUE DECIMAL(20, 8) NOT NULL COMMENT 'Limit for this trader (from EXCHANGE_LIMITS or config)',
+    RESOURCE_TYPE ENUM('api_requests_minute', 'api_weight_minute', 'orders_minute', 'websocket_connections') NOT NULL,
+    USED_VALUE DECIMAL(20, 8) NOT NULL DEFAULT 0 COMMENT 'Current usage reported by trader',
+    MAX_VALUE DECIMAL(20, 8) NOT NULL COMMENT 'Limit from exchange (trader discovers via API)',
     LAST_UPDATED TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    RESET_AT TIMESTAMP NOT NULL COMMENT 'When USED_VALUE resets',
+    RESET_AT TIMESTAMP NOT NULL COMMENT 'When USED_VALUE resets (calculated by trader)',
     
     UNIQUE KEY uk_resource (TRADER_ID, EXCHANGE_ID, RESOURCE_TYPE),
     INDEX idx_trader (TRADER_ID),

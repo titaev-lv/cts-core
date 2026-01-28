@@ -10,14 +10,16 @@
 
 **Цель:** Применить SQL миграции для создания всех необходимых таблиц Phase 1.
 
-**Готово:** ✅ migrations/001_phase1_schema.sql создан (11 tables, 397 строк SQL)
+**Готово:** ✅ migrations/001_phase1_schema.sql создан (10 tables + 3 ALTERs)
 
 **Что будет создано:**
-- 11 новых таблиц (TRADER, TRADER_SESSION, EXCHANGE_LIMITS, и др.)
+- 8 новых таблиц (TRADER, TRADER_SESSION, TRADER_EXCHANGE_RESOURCE, и др.)
 - ALTER USER_2FA для HSM key rotation
 - ALTER MONITORING для tracker assignment
 - ALTER TRADE для tracker assignment
 - 4 scheduler tasks по умолчанию
+
+**Архитектурное решение:** Rate limits управляются трейдерами автономно (см. RATE_LIMITS_ARCHITECTURE.md)
 
 ---
 
