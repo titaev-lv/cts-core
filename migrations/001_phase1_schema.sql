@@ -6,6 +6,7 @@
 -- Database: ct_system (MySQL 9)
 -- 
 -- Tables:
+--   0. ARBITRAGE_TRANS - ALTER to extend ID to BIGINT (future-proof)
 --   1. TRADER - trader registration (admin pre-registration)
 --   2. TRADER_SESSION - connection history (7 days retention)
 --   3. MONITORING - ALTER to add assignment fields
@@ -25,6 +26,16 @@
 -- ============================================================================
 
 USE ct_system;
+
+-- ============================================================================
+-- 0. ARBITRAGE_TRANS: Extend ID to BIGINT
+-- ============================================================================
+-- Purpose: Future-proof for high-volume trading
+-- INT max: 4.3 billion (insufficient for long-term high-frequency trading)
+-- BIGINT max: 9.2 quintillion (sufficient for decades)
+
+ALTER TABLE ARBITRAGE_TRANS 
+MODIFY COLUMN ID BIGINT NOT NULL AUTO_INCREMENT;
 
 -- ============================================================================
 -- 1. TRADER: Trader Registration
@@ -162,7 +173,7 @@ COMMENT='Trader resource usage tracking (IP-level + account-level limits)';
 
 CREATE TABLE IF NOT EXISTS ARBITRAGE_ORDER (
     ID BIGINT PRIMARY KEY AUTO_INCREMENT,
-    ARBITRAGE_TRANS_ID INT NOT NULL COMMENT 'ARBITRAGE_TRANS.ID (parent)',
+    ARBITRAGE_TRANS_ID BIGINT NOT NULL COMMENT 'ARBITRAGE_TRANS.ID (parent)',
     EXCHANGE_ID INT NOT NULL COMMENT 'EXCHANGE.ID',
     EXCHANGE_ACCOUNT_ID INT NOT NULL COMMENT 'EXCHANGE_ACCOUNTS.ID',
     EXCHANGE_ORDER_ID VARCHAR(255) NOT NULL COMMENT 'Order ID from exchange',

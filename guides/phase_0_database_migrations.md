@@ -13,7 +13,8 @@
 **Готово:** ✅ migrations/001_phase1_schema.sql создан (10 tables + 3 ALTERs)
 
 **Что будет создано:**
-- 8 новых таблиц (TRADER, TRADER_SESSION, TRADER_EXCHANGE_RESOURCE, и др.)
+- 9 новых таблиц (TRADER, TRADER_SESSION, TRADER_EXCHANGE_RESOURCE, и др.)
+- ALTER ARBITRAGE_TRANS для future-proofing (ID: INT→BIGINT)
 - ALTER USER_2FA для HSM key rotation
 - ALTER MONITORING для tracker assignment
 - ALTER TRADE для tracker assignment
@@ -102,7 +103,10 @@ mysql -u root -proot -h 127.0.0.1 ct_system < migrations/001_phase1_schema.sql 2
 
 **Section 1-8:** CREATE TABLE для 8 основных таблиц
 - TRADER (admin pre-registration, uses ID as PK for all FK)
+**Section 1-5:** TRADER tables
+- TRADER (admin pre-registration)
 - TRADER_SESSION (connection history, 7 days retention)
+- ARBITRAGE_TRANS (ALTER: ID INT→BIGINT for future-proofing)
 - MONITORING (ALTER: ASSIGNED_TRADER_ID, ASSIGNED_AT, BACKUP_TRADER_ID)
 - TRADE (ALTER: TRADER_ID, ASSIGNED_AT)
 - TRADER_EXCHANGE_RESOURCE (trader metrics: rate limits, load)
@@ -509,10 +513,11 @@ cat > migration_applied_$(date +%Y%m%d).md <<EOF
 8. REENCRYPTION_PROGRESS - Per-record re-encryption progress
 9. SCHEDULER_TASKS - Background job definitions
 
-## Tables Altered (3):
-1. USER_2FA - Added enc_key_version, needs_reencryption for HSM key rotation
-2. MONITORING - Added assigned_trader_id, assigned_at, backup_trader_id
-3. TRADE - Added trader_id, assigned_at
+## Tables Altered (4):
+1. ARBITRAGE_TRANS - ID extended from INT to BIGINT (4.3B→9.2 quintillion capacity)
+2. USER_2FA - Added enc_key_version, needs_reencryption for HSM key rotation
+3. MONITORING - Added assigned_trader_id, assigned_at, backup_trader_id
+4. TRADE - Added trader_id, assigned_at
 
 ## Verification Results:
 - Total tables: 16 (11 new + 5 existing)
@@ -542,8 +547,9 @@ cat migration_applied_$(date +%Y%m%d).md
 git add migrations/001_phase1_schema.sql
 git add migration_applied_$(date +%Y%m%d).md
 
-git commit -m "feat(db): phase 0 complete - applied 9 tables + 3 ALTERs
+git commit -m "feat(db): phase 0 complete - applied 9 tables + 4 ALTERs
 
+- ARBITRAGE_TRANS.ID extended to BIGINT for future-proofing
 - TRADER, TRADER_SESSION for session management
 - TRADER_EXCHANGE_RESOURCE for load balancing (metrics from traders)
 - ARBITRAGE_ORDER, ARBITRAGE_ORDER_TRANS for 3-level trade structure
@@ -554,7 +560,7 @@ git commit -m "feat(db): phase 0 complete - applied 9 tables + 3 ALTERs
 Architecture: Rate limits managed by traders autonomously (see RATE_LIMITS_ARCHITECTURE.md)
 
 All verifications passed:
-- 18 tables total (9 new + 3 altered + 6 existing)
+- 18 tables total (9 new + 4 altered + 5 existing)
 - Foreign keys verified
 - UNIQUE constraints tested
 - 4 scheduler tasks initialized
@@ -594,6 +600,10 @@ DROP TABLE IF EXISTS AUDIT_LOG;
 DROP TABLE IF EXISTS TRADER_EXCHANGE_RESOURCE;
 DROP TABLE IF EXISTS TRADER_SESSION;
 DROP TABLE IF EXISTS TRADER;
+
+-- Revert ARBITRAGE_TRANS changes
+ALTER TABLE ARBITRAGE_TRANS 
+MODIFY COLUMN ID INT NOT NULL AUTO_INCREMENT;
 
 -- Revert USER_2FA changes
 ALTER TABLE USER_2FA
