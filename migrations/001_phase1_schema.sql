@@ -264,10 +264,9 @@ CREATE TABLE IF NOT EXISTS AUDIT_LOG (
     ERROR_MESSAGE TEXT COMMENT 'If SUCCESS=FALSE',
     
     INDEX idx_user (UID),
-    INDEX idx_timestamp (TIMESTAMP),
+    INDEX idx_timestamp (TIMESTAMP) COMMENT 'For queries by time and cleanup job',
     INDEX idx_action (ACTION),
     INDEX idx_resource (RESOURCE_TYPE, RESOURCE_ID),
-    INDEX idx_cleanup (TIMESTAMP) COMMENT 'For auto-cleanup (7 days)',
     
     CONSTRAINT fk_audit_log_user FOREIGN KEY (UID) 
         REFERENCES USER(ID) ON DELETE RESTRICT ON UPDATE CASCADE
