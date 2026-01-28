@@ -26,9 +26,8 @@ USE ct_system;
 
 CREATE TABLE IF NOT EXISTS TRADER (
     ID INT PRIMARY KEY AUTO_INCREMENT,
-    TRADER_ID VARCHAR(100) UNIQUE NOT NULL COMMENT 'Unique trader identifier (e.g., trader-eu-1)',
-    NAME VARCHAR(255) NOT NULL COMMENT 'Human-readable name',
-    CERTIFICATE_CN VARCHAR(255) NOT NULL COMMENT 'mTLS certificate CN',
+    TRADER_NAME VARCHAR(100) NOT NULL COMMENT 'Human-readable name (e.g., EU Frankfurt Trader)',
+    CERTIFICATE_CN VARCHAR(255) UNIQUE NOT NULL COMMENT 'mTLS certificate CN (e.g., trader-eu-1.cts.internal)',
     REGION VARCHAR(50) COMMENT 'Geographic region (eu, us, asia)',
     STATUS ENUM('registered', 'active', 'suspended', 'decommissioned') NOT NULL DEFAULT 'registered',
     MAX_TASKS INT NOT NULL DEFAULT 10 COMMENT 'Max concurrent tasks',
@@ -58,7 +57,7 @@ COMMENT='Trader pre-registration (admin-managed)';
 
 CREATE TABLE IF NOT EXISTS TRADER_SESSION (
     ID BIGINT PRIMARY KEY AUTO_INCREMENT,
-    TRADER_ID VARCHAR(100) NOT NULL,
+    TRADER_ID INT NOT NULL COMMENT 'TRADER.ID',
     SESSION_ID VARCHAR(100) UNIQUE NOT NULL COMMENT 'UUID for this session',
     WS_CONNECTION_ID VARCHAR(255) COMMENT 'WebSocket connection ID',
     IP_ADDRESS VARCHAR(45) COMMENT 'Client IP (IPv4/IPv6)',
@@ -68,11 +67,13 @@ CREATE TABLE IF NOT EXISTS TRADER_SESSION (
     DISCONNECT_REASON ENUM('graceful', 'timeout', 'error', 'server_shutdown', 'kicked') COMMENT 'Disconnect reason',
     ERROR_MESSAGE TEXT COMMENT 'Error details if DISCONNECT_REASON=error',
     
-    FOREIGN KEY (TRADER_ID) REFERENCES TRADER(TRADER_ID) ON DELETE CASCADE,
     INDEX idx_trader (TRADER_ID),
     INDEX idx_connected_at (CONNECTED_AT),
     INDEX idx_active_sessions (TRADER_ID, ENDED_AT),
-    INDEX idx_cleanup (ENDED_AT) COMMENT 'For cleanup job (DELETE WHERE ENDED_AT < NOW() - 7 days)'
+    INDEX idx_cleanup (ENDED_AT) COMMENT 'For cleanup job (DELETE WHERE ENDED_AT < NOW() - 7 days)',
+    
+    CONSTRAINT fk_trader_session_trader FOREIGN KEY (TRADER_ID) 
+        REFERENCES TRADER(ID) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Trader connection history (7 days retention)';
 
@@ -83,18 +84,17 @@ COMMENT='Trader connection history (7 days retention)';
 -- Note: Assumes MONITORING table already exists
 
 ALTER TABLE MONITORING 
-ADD COLUMN IF NOT EXISTS ASSIGNED_TRADER_ID VARCHAR(100) COMMENT 'Currently assigned trader',
+ADD COLUMN IF NOT EXISTS ASSIGNED_TRADER_ID INT COMMENT 'TRADER.ID currently assigned',
 ADD COLUMN IF NOT EXISTS ASSIGNED_AT TIMESTAMP NULL COMMENT 'When task was assigned',
-ADD COLUMN IF NOT EXISTS BACKUP_TRADER_ID VARCHAR(100) COMMENT 'Backup trader (monitoring duplication)';
+ADD COLUMN IF NOT EXISTS BACKUP_TRADER_ID INT COMMENT 'Backup TRADER.ID (monitoring duplication)';
 
 ALTER TABLE MONITORING
 ADD INDEX IF NOT EXISTS idx_assigned_trader (ASSIGNED_TRADER_ID),
-ADD INDEX IF NOT EXISTS idx_assignment (ASSIGNED_TRADER_ID, ASSIGNED_AT);
-
--- Add foreign key if TRADER table exists
-ALTER TABLE MONITORING
-ADD CONSTRAINT fk_monitoring_trader 
-FOREIGN KEY IF NOT EXISTS (ASSIGNED_TRADER_ID) REFERENCES TRADER(TRADER_ID) ON DELETE SET NULL;
+ADD INDEX IF NOT EXISTS idx_assignment (ASSIGNED_TRADER_ID, ASSIGNED_AT),
+ADD CONSTRAINT fk_monitoring_assigned_trader 
+    FOREIGN KEY (ASSIGNED_TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE,
+ADD CONSTRAINT fk_monitoring_backup_trader 
+    FOREIGN KEY (BACKUP_TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- ============================================================================
 -- 4. EXCHANGE_LIMITS: Exchange Rate Limits
@@ -130,7 +130,7 @@ COMMENT='Exchange rate limits (orders/volume per account)';
 
 CREATE TABLE IF NOT EXISTS TRADER_EXCHANGE_RESOURCE (
     ID BIGINT PRIMARY KEY AUTO_INCREMENT,
-    TRADER_ID VARCHAR(100) NOT NULL,
+    TRADER_ID INT NOT NULL COMMENT 'TRADER.ID',
     EXCHANGE_ID INT NOT NULL COMMENT 'EXCHANGE.ID',
     RESOURCE_TYPE ENUM('orders_today', 'volume_today', 'api_requests_minute', 'websocket_connections') NOT NULL,
     USED_VALUE DECIMAL(20, 8) NOT NULL DEFAULT 0,
@@ -139,10 +139,12 @@ CREATE TABLE IF NOT EXISTS TRADER_EXCHANGE_RESOURCE (
     RESET_AT TIMESTAMP NOT NULL COMMENT 'When USED_VALUE resets',
     
     UNIQUE KEY uk_resource (TRADER_ID, EXCHANGE_ID, RESOURCE_TYPE),
-    FOREIGN KEY (TRADER_ID) REFERENCES TRADER(TRADER_ID) ON DELETE CASCADE,
     INDEX idx_trader (TRADER_ID),
     INDEX idx_exchange (EXCHANGE_ID),
-    INDEX idx_availability (TRADER_ID, EXCHANGE_ID, RESOURCE_TYPE, USED_VALUE) COMMENT 'For scoring'
+    INDEX idx_availability (TRADER_ID, EXCHANGE_ID, RESOURCE_TYPE, USED_VALUE) COMMENT 'For scoring',
+    
+    CONSTRAINT fk_trader_resource_trader FOREIGN KEY (TRADER_ID) 
+        REFERENCES TRADER(ID) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Trader resource usage tracking (for load balancing)';
 
@@ -159,7 +161,7 @@ CREATE TABLE IF NOT EXISTS ARBITRAGE_ORDER (
     EXCHANGE_ID INT NOT NULL COMMENT 'EXCHANGE.ID',
     EXCHANGE_ACCOUNT_ID INT NOT NULL COMMENT 'EXCHANGE_ACCOUNTS.ID',
     EXCHANGE_ORDER_ID VARCHAR(255) NOT NULL COMMENT 'Order ID from exchange',
-    TRADER_ID VARCHAR(100) NOT NULL COMMENT 'Trader who executed',
+    TRADER_ID INT NOT NULL COMMENT 'TRADER.ID who executed',
     
     SIDE ENUM('buy', 'sell') NOT NULL,
     ORDER_TYPE ENUM('market', 'limit', 'stop_limit') NOT NULL,
@@ -179,13 +181,16 @@ CREATE TABLE IF NOT EXISTS ARBITRAGE_ORDER (
     FILLED_AT TIMESTAMP NULL COMMENT 'When fully filled',
     
     UNIQUE KEY uk_exchange_order (ARBITRAGE_TRANS_ID, EXCHANGE_ORDER_ID) COMMENT 'Deduplication',
-    FOREIGN KEY (ARBITRAGE_TRANS_ID) REFERENCES ARBITRAGE_TRANS(ID) ON DELETE CASCADE,
-    FOREIGN KEY (TRADER_ID) REFERENCES TRADER(TRADER_ID),
     INDEX idx_arbitrage (ARBITRAGE_TRANS_ID),
-    INDEX idx_exchange (EXCHANGE_ID),
+    INDEX idx_exchange (EXCHANGE_ID, STATUS),
     INDEX idx_trader (TRADER_ID),
     INDEX idx_status (STATUS),
-    INDEX idx_created (DATE_CREATE)
+    INDEX idx_created (DATE_CREATE),
+    
+    CONSTRAINT fk_arbitrage_order_trans FOREIGN KEY (ARBITRAGE_TRANS_ID) 
+        REFERENCES ARBITRAGE_TRANS(ID) ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT fk_arbitrage_order_trader FOREIGN KEY (TRADER_ID) 
+        REFERENCES TRADER(ID) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Orders per exchange (middle level of arbitrage)';
 
@@ -387,10 +392,10 @@ ON DUPLICATE KEY UPDATE DATE_MODIFY = CURRENT_TIMESTAMP;
 -- ============================================================================
 
 -- Insert sample trader
--- INSERT INTO TRADER (TRADER_ID, NAME, CERTIFICATE_CN, REGION, STATUS, MAX_TASKS)
+-- INSERT INTO TRADER (TRADER_NAME, CERTIFICATE_CN, REGION, STATUS, MAX_TASKS)
 -- VALUES 
---     ('trader-eu-1', 'EU Frankfurt Trader', 'trader-eu-1', 'eu', 'registered', 10),
---     ('trader-us-1', 'US New York Trader', 'trader-us-1', 'us', 'registered', 10);
+--     ('EU Frankfurt Trader', 'trader-eu-1.cts.internal', 'eu', 'registered', 10),
+--     ('US New York Trader', 'trader-us-1.cts.internal', 'us', 'registered', 10);
 
 -- ============================================================================
 -- Cleanup Jobs (Should be scheduled via cron or application)
