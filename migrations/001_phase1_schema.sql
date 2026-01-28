@@ -237,7 +237,6 @@ CREATE TABLE IF NOT EXISTS ARBITRAGE_ORDER_TRANS (
     
     UNIQUE KEY uk_exchange_tx (ARBITRAGE_ORDER_ID, EXCHANGE_TRANSACTION_ID) COMMENT 'Deduplication',
     FOREIGN KEY (ARBITRAGE_ORDER_ID) REFERENCES ARBITRAGE_ORDER(ID) ON DELETE CASCADE,
-    INDEX idx_order (ARBITRAGE_ORDER_ID),
     INDEX idx_timestamp (TIMESTAMP)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Individual fills/partials within ARBITRAGE_ORDER (bottom level)';
@@ -253,23 +252,25 @@ COMMENT='Individual fills/partials within ARBITRAGE_ORDER (bottom level)';
 CREATE TABLE IF NOT EXISTS AUDIT_LOG (
     ID BIGINT PRIMARY KEY AUTO_INCREMENT,
     TIMESTAMP TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-    USER_ID INT COMMENT 'USER.ID who performed action',
-    USERNAME VARCHAR(100),
+    UID INT COMMENT 'USER.ID who performed action',
     ACTION VARCHAR(100) NOT NULL COMMENT 'e.g., TRADER_DELETE, CONFIG_UPDATE',
     RESOURCE_TYPE VARCHAR(50) COMMENT 'e.g., trader, config, monitor',
     RESOURCE_ID VARCHAR(255) COMMENT 'e.g., trader-eu-1',
     OLD_VALUE JSON COMMENT 'State before change',
     NEW_VALUE JSON COMMENT 'State after change',
     IP_ADDRESS VARCHAR(45),
-    USER_AGENT TEXT,
+    USER_AGENT TEXT COMMENT 'HTTP User-Agent header (browser/client info)',
     SUCCESS BOOLEAN NOT NULL DEFAULT TRUE,
     ERROR_MESSAGE TEXT COMMENT 'If SUCCESS=FALSE',
     
-    INDEX idx_user (USER_ID),
+    INDEX idx_user (UID),
     INDEX idx_timestamp (TIMESTAMP),
     INDEX idx_action (ACTION),
     INDEX idx_resource (RESOURCE_TYPE, RESOURCE_ID),
-    INDEX idx_cleanup (TIMESTAMP) COMMENT 'For auto-cleanup (7 days)'
+    INDEX idx_cleanup (TIMESTAMP) COMMENT 'For auto-cleanup (7 days)',
+    
+    CONSTRAINT fk_audit_log_user FOREIGN KEY (UID) 
+        REFERENCES USER(ID) ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Audit trail (Phase 2, primary storage is JSON file)';
 
