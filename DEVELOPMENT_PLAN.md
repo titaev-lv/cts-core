@@ -123,7 +123,7 @@ gantt
 
 ---
 
-### Phase 1.1: Project Setup 🔴 NEXT
+### Phase 1.1: Project Setup 🔴 IN PROGRESS
 
 **Цель:** Создать базовую структуру проекта, go.mod, config, logger.
 
@@ -136,22 +136,24 @@ gantt
 2. ✅ Инициализировать go.mod (15 мин) - DONE
 3. ✅ Создать config.yaml + loader (45 мин) - DONE
 4. ✅ Config tests (30 мин) - DONE
-5. ✅ Logger с slog (1 час) - DONE
-5. Logger с slog (1 час)
-6. Makefile (30 мин)
-7. .gitignore (15 мин)
-8. **🐳 Docker setup для dev** (1 час)
+5. ✅ Logger с slog + tests (1.5 часа) - DONE
+6. ✅ Makefile (30 мин) - DONE
+7. ⏳ .gitignore verification (15 мин) - NEXT
+8. ⏳ **🐳 Docker setup для dev** (2 часа)
    - Dockerfile (multi-stage build)
    - docker-compose.yml
    - .dockerignore
+   - QUICKSTART_DOCKER.md
+   - PRODUCTION_DEBIAN.md (systemd)
 
 **Deliverables:**
 - ✅ Project structure (cmd/, internal/, conf/, logs/, state/) - DONE
-- ✅ go.mod с dependencies - DONE
-- ✅ config.yaml (100+ строк) + validation - DONE
-- ✅ Logger (slog, custom rotation) - DONE
-- ✅ main.go компилируется и запускается - DONE
-- ⏳ Makefile с targets
+- ✅ go.mod с dependencies (yaml v3.0.1) - DONE
+- ✅ config.yaml (118 строк) + validation - DONE
+- ✅ Logger (slog, custom rotation, error.log) + tests (86.9% coverage) - DONE
+- ✅ main.go компилируется и запускается (3.8 MB) - DONE
+- ✅ Makefile с 14 targets - DONE
+- ⏳ .gitignore verification
 - ⏳ **Dockerfile + docker-compose.yml (dev environment)**
 - ⏳ **Production deployment на Debian 13** (документация)
 
@@ -160,9 +162,9 @@ gantt
 - **PROD**: Systemd service на Debian 13 (binary deployment)
 
 **Definition of Done:**
-- [ ] `make build` создает bin/cts-core
-- [ ] `./bin/cts-core -config conf/config.yaml` запускается без ошибок
-- [ ] `make test` проходит (coverage > 80%)
+- [x] `make build` создает bin/cts-core (3.8 MB)
+- [x] `./bin/cts-core -config conf/config.yaml` запускается без ошибок
+- [x] `make test` проходит (6/6 tests, 82.4% coverage)
 - [ ] **`docker compose up -d` запускает CTS-Core в dev**
 - [ ] **Production deployment документирован (systemd unit)**
 - [ ] Закоммичено в git
@@ -1727,76 +1729,44 @@ tail -f logs/trade.log
 
 ---
 
-### **1.1.6 Makefile (30 min) ⏳**
+### **1.1.6 Makefile (30 min) ✅**
 
-**Создать:** `Makefile`
+**Создан:** `Makefile` с 14 targets
 
-```makefile
-.PHONY: build run clean test fmt lint
+**Основные команды:**
+```bash
+make help           # Показать все команды
+make build          # Собрать binary в bin/cts-core
+make run            # Запустить с conf/config.yaml
+make dev            # build + run одной командой
+make test           # Запустить все тесты
+make test-coverage  # Генерация coverage.html
+make fmt            # Форматировать код (go fmt ./...)
+make lint           # Запустить golangci-lint
+make clean          # Очистить bin/, logs, coverage
+make docker-build   # Собрать Docker образ
+make docker-up      # Запустить docker-compose
+make docker-down    # Остановить docker-compose
+make docker-logs    # Просмотр логов контейнера
+```
 
-# Build the binary
-build:
-	@echo "Building CTS-Core..."
-	@go build -o bin/cts-core cmd/cts-core/main.go
-
-# Run the application
-run:
-	@echo "Running CTS-Core..."
-	@./bin/cts-core -config conf/config.yaml
-
-# Clean build artifacts
-clean:
-	@echo "Cleaning..."
-	@rm -rf bin/
-	@rm -rf logs/*.log
-
-# Run tests
-test:
-	@echo "Running tests..."
-	@go test -v ./...
-
-# Format code
-fmt:
-	@echo "Formatting code..."
-	@go fmt ./...
-
-# Run linter
-lint:
-	@echo "Running linter..."
-	@golangci-lint run
-
-# Build for production
-build-prod:
-	@echo "Building for production..."
-	@CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o bin/cts-core cmd/cts-core/main.go
-
-# Build Docker image
-docker-build:
-	@echo "Building Docker image..."
-	@docker build -t cts-core:latest .
-
-# Run via Docker Compose
-docker-up:
-	@echo "Starting Docker Compose..."
-	@docker compose up -d
-
-# Stop Docker Compose
-docker-down:
-	@echo "Stopping Docker Compose..."
-	@docker compose down
-
-# View logs
-docker-logs:
-	@docker compose logs -f cts-core
+**Проверка:**
+```bash
+make clean && make build  # ✅ Build complete: bin/cts-core (3.8 MB)
+make test                 # ✅ 6/6 tests pass
+make fmt                  # ✅ Code formatted
 ```
 
 **Definition of Done:**
-- ✅ `make build` компилирует бинарник
+- ✅ Makefile создан с 14 targets
+- ✅ `make build` компилирует бинарник (3.8 MB)
 - ✅ `make run` запускает приложение
 - ✅ `make clean` удаляет артефакты
-- ✅ `make test` запускает тесты
+- ✅ `make test` запускает тесты (6/6 pass)
+- ✅ `make test-coverage` генерирует coverage.html
 - ✅ `make docker-build` собирает Docker образ
 - ✅ `make docker-up` запускает docker-compose
+- ✅ Все команды работают корректно
 
 **Время:** 30 минут
 

@@ -1,0 +1,523 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>cts-core: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/titaev-lv/cts-core/cmd/cts-core/main.go (0.0%)</option>
+				
+				<option value="file1">github.com/titaev-lv/cts-core/internal/config/config.go (82.4%)</option>
+				
+				<option value="file2">github.com/titaev-lv/cts-core/internal/logger/logger.go (86.9%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package main
+
+import (
+        "flag"
+        "fmt"
+        "os"
+
+        "github.com/titaev-lv/cts-core/internal/config"
+        "github.com/titaev-lv/cts-core/internal/logger"
+)
+
+func main() <span class="cov0" title="0">{
+        // Parse command line flags
+        configPath := flag.String("config", "conf/config.yaml", "Path to configuration file")
+        flag.Parse()
+
+        // Load configuration
+        cfg, err := config.Load(*configPath)
+        if err != nil </span><span class="cov0" title="0">{
+                fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+                os.Exit(1)
+        }</span>
+
+        // Initialize logger
+        <span class="cov0" title="0">if err := logger.Init(cfg.Logging.Level, cfg.Logging.Dir, cfg.Logging.MaxFileSizeMB); err != nil </span><span class="cov0" title="0">{
+                fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+                os.Exit(1)
+        }</span>
+        <span class="cov0" title="0">defer logger.Close()
+
+        // Get main logger
+        log := logger.Get("main")
+
+        log.Info("CTS-Core starting",
+                "environment", cfg.Environment,
+                "version", "0.0.1",
+                "log_level", cfg.Logging.Level)
+
+        // TODO: Phase 1.2 - Initialize MySQL pool
+        // TODO: Phase 1.3 - Initialize HSM client
+        // TODO: Phase 1.4 - Load state
+        // TODO: Phase 1.5 - Start REST server
+
+        log.Info("CTS-Core initialized successfully")
+        log.Info("CTS-Core is running. Press Ctrl+C to stop.")
+
+        // Keep running
+        select </span>{}
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package config
+
+import (
+        "fmt"
+        "os"
+
+        "gopkg.in/yaml.v3"
+)
+
+// Load reads configuration from file and validates it
+func Load(path string) (*Config, error) <span class="cov8" title="1">{
+        data, err := os.ReadFile(path)
+        if err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to read config file: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">var cfg Config
+        if err := yaml.Unmarshal(data, &amp;cfg); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("failed to parse config: %w", err)
+        }</span>
+
+        // Validate configuration
+        <span class="cov8" title="1">if err := cfg.Validate(); err != nil </span><span class="cov0" title="0">{
+                return nil, fmt.Errorf("invalid configuration: %w", err)
+        }</span>
+
+        // Override with environment variables (for production)
+        <span class="cov8" title="1">cfg.applyEnvOverrides()
+
+        return &amp;cfg, nil</span>
+}
+
+// Validate checks configuration values
+func (c *Config) Validate() error <span class="cov8" title="1">{
+        // Validate environment
+        if c.Environment != "development" &amp;&amp; c.Environment != "production" </span><span class="cov8" title="1">{
+                return fmt.Errorf("invalid environment: %s (must be 'development' or 'production')", c.Environment)
+        }</span>
+
+        // Validate server port
+        <span class="cov8" title="1">if c.Server.Port &lt; 1 || c.Server.Port &gt; 65535 </span><span class="cov8" title="1">{
+                return fmt.Errorf("invalid server port: %d (must be 1-65535)", c.Server.Port)
+        }</span>
+
+        // Validate MySQL settings
+        <span class="cov8" title="1">if c.MySQL.Database == "" </span><span class="cov8" title="1">{
+                return fmt.Errorf("mysql database cannot be empty")
+        }</span>
+
+        <span class="cov8" title="1">if c.MySQL.Port &lt; 1 || c.MySQL.Port &gt; 65535 </span><span class="cov0" title="0">{
+                return fmt.Errorf("invalid mysql port: %d (must be 1-65535)", c.MySQL.Port)
+        }</span>
+
+        // Validate state file path
+        <span class="cov8" title="1">if c.State.FilePath == "" </span><span class="cov0" title="0">{
+                return fmt.Errorf("state file path cannot be empty")
+        }</span>
+
+        // Validate logging level
+        <span class="cov8" title="1">validLevels := map[string]bool{
+                "debug": true,
+                "info":  true,
+                "warn":  true,
+                "error": true,
+        }
+        if !validLevels[c.Logging.Level] </span><span class="cov8" title="1">{
+                return fmt.Errorf("invalid log level: %s (must be debug, info, warn, or error)", c.Logging.Level)
+        }</span>
+
+        // Validate logging directory
+        <span class="cov8" title="1">if c.Logging.Dir == "" </span><span class="cov0" title="0">{
+                return fmt.Errorf("logging directory cannot be empty")
+        }</span>
+
+        <span class="cov8" title="1">return nil</span>
+}
+
+// applyEnvOverrides overrides config with environment variables
+func (c *Config) applyEnvOverrides() <span class="cov8" title="1">{
+        if env := os.Getenv("CTS_ENVIRONMENT"); env != "" </span><span class="cov8" title="1">{
+                c.Environment = env
+        }</span>
+
+        <span class="cov8" title="1">if mysqlPass := os.Getenv("CTS_MYSQL_PASSWORD"); mysqlPass != "" </span><span class="cov8" title="1">{
+                c.MySQL.Password = mysqlPass
+        }</span>
+
+        <span class="cov8" title="1">if logLevel := os.Getenv("CTS_LOG_LEVEL"); logLevel != "" </span><span class="cov8" title="1">{
+                c.Logging.Level = logLevel
+        }</span>
+}
+
+// IsDevelopment returns true if running in development mode
+func (c *Config) IsDevelopment() bool <span class="cov8" title="1">{
+        return c.Environment == "development"
+}</span>
+
+// IsProduction returns true if running in production mode
+func (c *Config) IsProduction() bool <span class="cov8" title="1">{
+        return c.Environment == "production"
+}</span>
+</pre>
+		
+		<pre class="file" id="file2" style="display: none">package logger
+
+import (
+        "context"
+        "fmt"
+        "io"
+        "log/slog"
+        "os"
+        "path/filepath"
+        "strings"
+        "sync"
+        "time"
+)
+
+var (
+        Log        *slog.Logger
+        logLevel   slog.Level
+        logDir     string
+        logFiles   map[string]io.WriteCloser
+        fileMutex  sync.RWMutex
+        maxLogSize int64
+)
+
+// rotatedFile - обертка с автоматической ротацией
+type rotatedFile struct {
+        file      *os.File
+        filePath  string
+        fileSize  int64
+        maxSize   int64
+        fileMutex sync.Mutex
+}
+
+func (rf *rotatedFile) Write(p []byte) (int, error) <span class="cov8" title="1">{
+        rf.fileMutex.Lock()
+        defer rf.fileMutex.Unlock()
+
+        // Check if rotation is needed
+        if rf.fileSize+int64(len(p)) &gt; rf.maxSize </span><span class="cov8" title="1">{
+                if err := rf.rotate(); err != nil </span><span class="cov0" title="0">{
+                        // If rotation fails, still try to write
+                        n, _ := rf.file.Write(p)
+                        rf.fileSize += int64(n)
+                        return n, nil
+                }</span>
+        }
+
+        <span class="cov8" title="1">n, err := rf.file.Write(p)
+        rf.fileSize += int64(n)
+        return n, err</span>
+}
+
+func (rf *rotatedFile) rotate() error <span class="cov8" title="1">{
+        // Close current file
+        if err := rf.file.Close(); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        // Create backup filename with timestamp
+        <span class="cov8" title="1">timestamp := time.Now().Format("20060102_150405")
+        dir := filepath.Dir(rf.filePath)
+        name := filepath.Base(rf.filePath)
+        ext := filepath.Ext(name)
+        base := strings.TrimSuffix(name, ext)
+        backupPath := filepath.Join(dir, fmt.Sprintf("%s.%s%s", base, timestamp, ext))
+
+        // Rename current file to backup
+        if err := os.Rename(rf.filePath, backupPath); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        // Open new file
+        <span class="cov8" title="1">f, err := os.OpenFile(rf.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+        if err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">rf.file = f
+        rf.fileSize = 0
+        return nil</span>
+}
+
+func (rf *rotatedFile) Close() error <span class="cov8" title="1">{
+        rf.fileMutex.Lock()
+        defer rf.fileMutex.Unlock()
+        return rf.file.Close()
+}</span>
+
+// plainTextHandler - кастомный handler для slog
+type plainTextHandler struct {
+        w      io.WriteCloser
+        level  slog.Level
+        module string
+}
+
+func (h *plainTextHandler) Enabled(ctx context.Context, level slog.Level) bool <span class="cov8" title="1">{
+        return level &gt;= h.level
+}</span>
+
+func (h *plainTextHandler) Handle(ctx context.Context, r slog.Record) error <span class="cov8" title="1">{
+        // Format: YYYY-MM-DD HH:MM:SS.000000 [LEVEL] [module] message key=value
+        timeStr := r.Time.Format("2006-01-02 15:04:05.000000")
+        levelStr := strings.ToUpper(r.Level.String())
+        msg := r.Message
+        module := h.module
+
+        // Extract additional attributes
+        var otherAttrs []string
+        r.Attrs(func(a slog.Attr) bool </span><span class="cov8" title="1">{
+                if a.Key == "module" </span><span class="cov0" title="0">{
+                        // Module already set
+                        return true
+                }</span> else<span class="cov8" title="1"> if a.Key != slog.TimeKey &amp;&amp; a.Key != slog.MessageKey </span><span class="cov8" title="1">{
+                        value := fmt.Sprint(a.Value.Any())
+                        otherAttrs = append(otherAttrs, fmt.Sprintf("%s=%s", a.Key, value))
+                }</span>
+                <span class="cov8" title="1">return true</span>
+        })
+
+        // Build output string
+        <span class="cov8" title="1">output := fmt.Sprintf("%s [%s] [%s] %s", timeStr, levelStr, module, msg)
+        if len(otherAttrs) &gt; 0 </span><span class="cov8" title="1">{
+                output += " " + strings.Join(otherAttrs, " ")
+        }</span>
+        <span class="cov8" title="1">output += "\n"
+
+        // Write to file
+        switch w := h.w.(type) </span>{
+        case *rotatedFile:<span class="cov8" title="1">
+                _, err := w.Write([]byte(output))
+                return err</span>
+        default:<span class="cov0" title="0">
+                _, err := io.WriteString(h.w, output)
+                return err</span>
+        }
+}
+
+func (h *plainTextHandler) WithAttrs(attrs []slog.Attr) slog.Handler <span class="cov8" title="1">{
+        newH := &amp;plainTextHandler{w: h.w, level: h.level, module: h.module}
+        for _, a := range attrs </span><span class="cov8" title="1">{
+                if a.Key == "module" </span><span class="cov8" title="1">{
+                        newH.module = fmt.Sprint(a.Value.Any())
+                }</span>
+        }
+        <span class="cov8" title="1">return newH</span>
+}
+
+func (h *plainTextHandler) WithGroup(name string) slog.Handler <span class="cov0" title="0">{
+        return h
+}</span>
+
+func init() <span class="cov8" title="1">{
+        logFiles = make(map[string]io.WriteCloser)
+}</span>
+
+// Init инициализирует систему логирования
+func Init(levelStr, dir string, maxFileSizeMB int) error <span class="cov8" title="1">{
+        // Create log directory
+        if err := os.MkdirAll(dir, 0755); err != nil </span><span class="cov0" title="0">{
+                return err
+        }</span>
+
+        <span class="cov8" title="1">logDir = dir
+        maxLogSize = int64(maxFileSizeMB) * 1024 * 1024
+
+        // Parse log level
+        switch strings.ToLower(levelStr) </span>{
+        case "debug":<span class="cov8" title="1">
+                logLevel = slog.LevelDebug</span>
+        case "info":<span class="cov8" title="1">
+                logLevel = slog.LevelInfo</span>
+        case "warn":<span class="cov8" title="1">
+                logLevel = slog.LevelWarn</span>
+        case "error":<span class="cov8" title="1">
+                logLevel = slog.LevelError</span>
+        default:<span class="cov8" title="1">
+                logLevel = slog.LevelInfo</span>
+        }
+
+        // Initialize error.log
+        <span class="cov8" title="1">errorLogPath := filepath.Join(filepath.Clean(dir), "error.log")
+        errorLogFile, err := os.OpenFile(errorLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+        if err != nil </span><span class="cov0" title="0">{
+                return fmt.Errorf("failed to open error.log: %w", err)
+        }</span>
+
+        <span class="cov8" title="1">errorRotated := &amp;rotatedFile{
+                file:     errorLogFile,
+                filePath: errorLogPath,
+                maxSize:  maxLogSize,
+        }
+        if info, err := errorLogFile.Stat(); err == nil </span><span class="cov8" title="1">{
+                errorRotated.fileSize = info.Size()
+        }</span>
+        <span class="cov8" title="1">logFiles["error"] = errorRotated
+
+        // Create logger
+        Log = slog.New(&amp;plainTextHandler{w: errorRotated, level: logLevel, module: "main"})
+
+        return nil</span>
+}
+
+// Get возвращает логгер для конкретного модуля
+func Get(module string) *slog.Logger <span class="cov8" title="1">{
+        if Log == nil </span><span class="cov8" title="1">{
+                // Fallback to stdout if not initialized
+                return slog.New(slog.NewTextHandler(os.Stdout, &amp;slog.HandlerOptions{Level: slog.LevelInfo}))
+        }</span>
+        <span class="cov8" title="1">return Log.With("module", module)</span>
+}
+
+// Debug logs debug message to error.log
+func Debug(msg string, args ...any) <span class="cov8" title="1">{
+        if Log != nil </span><span class="cov8" title="1">{
+                Log.Debug(msg, args...)
+        }</span>
+}
+
+// Info logs info message to error.log
+func Info(msg string, args ...any) <span class="cov8" title="1">{
+        if Log != nil </span><span class="cov8" title="1">{
+                Log.Info(msg, args...)
+        }</span>
+}
+
+// Warn logs warning message to error.log
+func Warn(msg string, args ...any) <span class="cov8" title="1">{
+        if Log != nil </span><span class="cov8" title="1">{
+                Log.Warn(msg, args...)
+        }</span>
+}
+
+// Error logs error message to error.log
+func Error(msg string, args ...any) <span class="cov8" title="1">{
+        if Log != nil </span><span class="cov8" title="1">{
+                Log.Error(msg, args...)
+        }</span>
+}
+
+// Close закрывает все открытые файлы логов
+func Close() error <span class="cov8" title="1">{
+        fileMutex.Lock()
+        defer fileMutex.Unlock()
+
+        var lastErr error
+        for name, f := range logFiles </span><span class="cov8" title="1">{
+                if err := f.Close(); err != nil </span><span class="cov0" title="0">{
+                        lastErr = err
+                }</span>
+                <span class="cov8" title="1">delete(logFiles, name)</span>
+        }
+        <span class="cov8" title="1">return lastErr</span>
+}
+
+// GetLevel возвращает текущий уровень логирования
+func GetLevel() slog.Level <span class="cov8" title="1">{
+        return logLevel
+}</span>
+
+// GetLogDir возвращает директорию логов
+func GetLogDir() string <span class="cov8" title="1">{
+        return logDir
+}</span>
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
