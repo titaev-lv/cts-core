@@ -748,9 +748,9 @@ cd /home/dev/docker/cts-core
 go mod init github.com/your-org/cts-core
 
 # Add dependencies (Phase 1.1)
-go get github.com/go-sql-driver/mysql@v1.7.1
+go get github.com/go-sql-driver/mysql@v1.9.3
 go get gopkg.in/yaml.v3@v3.0.1
-go get github.com/prometheus/client_golang@v1.17.0
+go get github.com/prometheus/client_golang@v1.23.2
 
 # NOTE: log/slog используется из stdlib Go 1.21+ (не требует установки)
 # NOTE: gin, websocket, limiter будут добавлены в Phase 1.5 (REST/WS API)
@@ -765,8 +765,8 @@ module github.com/your-org/cts-core
 go 1.21
 
 require (
-    github.com/go-sql-driver/mysql v1.7.1
-    github.com/prometheus/client_golang v1.17.0
+    github.com/go-sql-driver/mysql v1.9.3
+    github.com/prometheus/client_golang v1.23.2
     gopkg.in/yaml.v3 v3.0.1
 )
 

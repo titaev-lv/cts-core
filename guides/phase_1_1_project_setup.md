@@ -151,13 +151,13 @@ go mod init github.com/your-org/cts-core
 
 ```bash
 # Database
-go get github.com/go-sql-driver/mysql@v1.7.1
+go get github.com/go-sql-driver/mysql@v1.9.3
 
 # Config
 go get gopkg.in/yaml.v3@v3.0.1
 
 # Metrics (Phase 1.6)
-go get github.com/prometheus/client_golang@v1.17.0
+go get github.com/prometheus/client_golang@v1.23.2
 
 # NOTE: log/slog используется из stdlib Go 1.21+ (не требует установки)
 # NOTE: gin будет добавлен в Phase 1.5 (REST API)
@@ -182,8 +182,8 @@ module github.com/your-org/cts-core
 go 1.21
 
 require (
-    github.com/go-sql-driver/mysql v1.7.1
-    github.com/prometheus/client_golang v1.17.0
+    github.com/go-sql-driver/mysql v1.9.3
+    github.com/prometheus/client_golang v1.23.2
     gopkg.in/yaml.v3 v3.0.1
 )
 
