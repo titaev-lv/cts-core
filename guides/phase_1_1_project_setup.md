@@ -1,9 +1,9 @@
 # Phase 1.1: Project Setup - Детальный гайд
 
-> **Статус**: 🔵 Ready to Execute  
+> **Статус**: In Progress  
 > **Время**: ~1 день (8 часов)  
 > **Приоритет**: 🔴 Critical  
-> **Prerequisite**: Phase 0 completed
+> **Prerequisite**: Phase 0 completed ✅
 
 ---
 
@@ -12,31 +12,36 @@
 **Цель:** Создать базовую структуру проекта, go.mod, конфигурацию, logger.
 
 **Deliverables:**
-1. Project structure (cmd/, internal/, conf/, etc.)
-2. go.mod with dependencies
-3. config.yaml with full configuration
-4. Config loader with validation
-5. Logger with zerolog (hybrid text/json)
-6. Basic main.go (compiles and runs)
-7. Makefile with useful targets
-8. .gitignore
+1. ✅ Project structure (cmd/, internal/, conf/, etc.) - DONE
+2. ⏳ go.mod with dependencies
+3. ⏳ config.yaml with full configuration
+4. ⏳ Config loader with validation
+5. ⏳ Logger with slog (custom rotation)
+6. ⏳ Basic main.go (compiles and runs)
+7. ⏳ Makefile with useful targets
+8. ⏳ .gitignore
+9. ⏳ Dockerfile + docker-compose.yml (dev environment)
+10. ⏳ PRODUCTION_DEBIAN.md (systemd deployment)
 
 ---
 
 ## Содержание
 
-- [1.1.1 Структура директорий](#111-структура-директорий-30-минут)
+- [1.1.1 Структура директорий](#111-структура-директорий-30-минут) ✅ DONE
 - [1.1.2 Go модуль](#112-go-модуль-15-минут)
 - [1.1.3 Конфигурация](#113-конфигурация-45-минут)
 - [1.1.4 Config Tests](#114-config-tests-30-минут)
 - [1.1.5 Logger](#115-logger-1-час)
 - [1.1.6 Makefile](#116-makefile-30-минут)
 - [1.1.7 gitignore](#117-gitignore-15-минут)
+- [1.1.8 Docker setup](#118-docker-setup-2-часа)
 - [Summary](#phase-11-summary)
 
 ---
 
-## 1.1.1 Структура директорий (30 минут)
+## 1.1.1 Структура директорий (30 минут) ✅ DONE
+
+**Статус:** ✅ Создано вручную
 
 ### Создать директории
 
@@ -1173,6 +1178,1354 @@ git status
 
 **✅ Definition of Done:**
 - [x] .gitignore создан
+- [x] Бинарники игнорируются
+- [x] Логи и state файлы игнорируются
+- [x] Конфиги игнорируются (кроме .example)
+- [x] Git status чистый
+
+---
+
+## 1.1.8 Docker setup (2 часа)
+
+**Цель:** Настроить Docker для dev окружения (как hsm-service)
+
+**По аналогии с hsm-service:**
+- DEV: Docker Compose для разработки
+- PROD: Systemd service на Debian 13
+
+### Создать Dockerfile
+
+**File:** `/home/dev/docker/cts-core/Dockerfile`
+
+```dockerfile
+# Multi-stage build для минимального размера
+FROM golang:1.23-alpine AS builder
+
+# Установить зависимости для сборки
+RUN apk add --no-cache git make ca-certificates
+
+WORKDIR /build
+
+# Скопировать go.mod и go.sum
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Скопировать исходный код
+COPY . .
+
+# Собрать бинарник
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" \
+    -o cts-core \
+    cmd/cts-core/main.go
+
+# Final stage - минимальный образ
+FROM alpine:latest
+
+# Установить ca-certificates для HTTPS
+RUN apk --no-cache add ca-certificates tzdata
+
+# Создать non-root пользователя
+RUN addgroup -S ctscore && adduser -S ctscore -G ctscore
+
+WORKDIR /app
+
+# Скопировать бинарник из builder stage
+COPY --from=builder /build/cts-core .
+
+# Скопировать примеры конфигов (реальные будут через volume)
+COPY --chown=ctscore:ctscore conf/config.example.yaml ./conf/
+
+# Создать необходимые директории
+RUN mkdir -p logs state pki && \
+    chown -R ctscore:ctscore logs state pki
+
+# Переключиться на non-root пользователя
+USER ctscore
+
+# Expose порт для REST API (если будет)
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["./cts-core", "-health-check"] || exit 1
+
+# Запуск приложения
+ENTRYPOINT ["./cts-core"]
+CMD ["-config", "conf/config.yaml"]
+```
+
+**✅ Features:**
+- Multi-stage build (builder + runtime)
+- Minimal размер (alpine)
+- Non-root пользователь
+- Health check
+- ca-certificates для HTTPS
+
+### Создать docker-compose.yml
+
+**File:** `/home/dev/docker/cts-core/docker-compose.yml`
+
+```yaml
+version: '3.8'
+
+services:
+  # MySQL database
+  mysql:
+    image: mysql:9.0
+    container_name: cts-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password_change_me}
+      MYSQL_DATABASE: ct_system
+      MYSQL_USER: ctuser
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ctpass_change_me}
+    ports:
+      - "3307:3306"  # Host:Container (3307 чтобы не конфликтовать с локальным MySQL)
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./migrations:/docker-entrypoint-initdb.d:ro  # Auto-apply migrations
+    networks:
+      - cts-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_password_change_me}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # CTS-Core application
+  cts-core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cts-core
+    depends_on:
+      mysql:
+        condition: service_healthy  # Ждем пока MySQL будет готов
+    volumes:
+      # Config (read-only)
+      - ./conf:/app/conf:ro
+      # Logs (read-write)
+      - ./logs:/app/logs
+      # State (read-write)
+      - ./state:/app/state
+      # PKI certificates (read-only)
+      - ./pki:/app/pki:ro
+    networks:
+      - cts-net
+      - hsm-net  # Подключение к hsm-service
+    environment:
+      # Timezone
+      - TZ=Europe/Moscow
+      # Override config via ENV (optional)
+      # - DB_HOST=mysql
+      # - DB_PORT=3306
+      # - HSM_URL=https://hsm-service:8443
+    restart: unless-stopped
+    # Uncomment if REST API needed:
+    # ports:
+    #   - "8080:8080"
+
+# Networks
+networks:
+  cts-net:
+    driver: bridge
+  hsm-net:
+    external: true  # Предполагается что hsm-service уже создал эту сеть
+
+# Volumes
+volumes:
+  mysql_data:
+    driver: local
+```
+
+**✅ Features:**
+- MySQL 9.0 с auto-migration через /docker-entrypoint-initdb.d
+- Health check для MySQL (cts-core ждет готовности)
+- Volume mounts: conf (ro), logs (rw), state (rw), pki (ro)
+- Подключение к hsm-service через внешнюю сеть hsm-net
+- Restart policy: unless-stopped
+- Переменные окружения через .env
+
+### Создать .dockerignore
+
+**File:** `/home/dev/docker/cts-core/.dockerignore`
+
+```dockerignore
+# Git
+.git/
+.gitignore
+.github/
+
+# Binaries
+bin/
+*.exe
+
+# Logs (будут через volume)
+logs/
+*.log
+
+# State (будет через volume)
+state/
+*.state
+
+# Config (будут через volume)
+conf/config.yaml
+conf/config.ini
+
+# SSL/TLS certificates (будут через volume)
+pki/**/*.pem
+pki/**/*.key
+pki/**/*.crt
+
+# IDE
+.idea/
+.vscode/
+
+# Documentation
+*.md
+docs/
+guides/
+
+# Docker itself
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Tests
+*_test.go
+coverage.*
+
+# Temporary
+tmp/
+temp/
+*.tmp
+*.backup
+
+# Other sub-systems
+other-sub-system/
+```
+
+### Создать .env.example
+
+**File:** `/home/dev/docker/cts-core/.env.example`
+
+```bash
+# MySQL Configuration
+MYSQL_ROOT_PASSWORD=root_password_change_me
+MYSQL_PASSWORD=ctpass_change_me
+
+# Application Configuration
+# (override config.yaml via ENV)
+# DB_HOST=mysql
+# DB_PORT=3306
+# HSM_URL=https://hsm-service:8443
+```
+
+**Usage:**
+```bash
+cp .env.example .env
+# Edit .env with your passwords
+nano .env
+```
+
+### Обновить config.example.yaml
+
+Добавить комментарии для Docker:
+
+**File:** `/home/dev/docker/cts-core/conf/config.example.yaml`
+
+```yaml
+# CTS-Core Configuration Example
+# Copy to config.yaml and customize
+
+# Environment: development, staging, production
+environment: development
+
+# MySQL Database
+database:
+  # For Docker: use service name "mysql"
+  # For local: use "localhost" or "127.0.0.1"
+  host: mysql          # ← В Docker: имя сервиса из docker-compose.yml
+  port: 3306           # ← Внутренний порт контейнера (не 3307!)
+  user: ctuser
+  password: ctpass_change_me
+  database: ct_system
+  
+  # Connection pool settings
+  max_open_conns: 25
+  max_idle_conns: 10
+  conn_max_lifetime_minutes: 30
+  
+  # mTLS settings
+  ssl:
+    enabled: true
+    ca_file: pki/ca/ca-cert.pem
+    cert_file: pki/client/client-cert.pem
+    key_file: pki/client/client-key.pem
+    verify_server: true
+
+# HSM Service
+hsm:
+  # For Docker: use service name from hsm-service docker-compose
+  # For local: use "localhost" or external URL
+  url: https://hsm-service:8443  # ← В Docker: имя сервиса из hsm-net
+  timeout_seconds: 30
+  retry:
+    max_attempts: 3
+    initial_delay_ms: 100
+    max_delay_ms: 5000
+  
+  # mTLS settings
+  mtls:
+    enabled: true
+    ca_file: pki/ca/ca-cert.pem
+    cert_file: pki/client/client-cert.pem
+    key_file: pki/client/client-key.pem
+    verify_server: true
+
+# Logging
+logging:
+  level: debug         # debug, info, warn, error
+  dir: logs
+  max_file_size_mb: 100
+
+# REST API (optional, Phase 1.5)
+# api:
+#   host: 0.0.0.0
+#   port: 8080
+#   read_timeout_seconds: 30
+#   write_timeout_seconds: 30
+```
+
+### Создать QUICKSTART_DOCKER.md
+
+**File:** `/home/dev/docker/cts-core/QUICKSTART_DOCKER.md`
+
+```markdown
+# CTS-Core Docker Quickstart
+
+## Prerequisites
+
+- Docker Engine 20.10+
+- Docker Compose v2+
+- hsm-service запущен и создал сеть `hsm-net`
+
+## Quick Start
+
+### 1. Подготовка конфигурации
+
+```bash
+cd /home/dev/docker/cts-core
+
+# Create config from example
+cp conf/config.example.yaml conf/config.yaml
+
+# Create .env from example
+cp .env.example .env
+
+# Edit passwords
+nano .env  # Change MYSQL_ROOT_PASSWORD and MYSQL_PASSWORD
+
+# Edit config (настройте пути к сертификатам если нужно)
+nano conf/config.yaml
+```
+
+### 2. Запуск через Docker Compose
+
+```bash
+# Build and start all services
+docker compose up -d
+
+# Check logs
+docker compose logs -f cts-core
+
+# Check status
+docker compose ps
+```
+
+**Expected output:**
+```
+NAME        IMAGE              STATUS         PORTS
+cts-core    cts-core:latest    Up (healthy)   
+cts-mysql   mysql:9.0          Up (healthy)   0.0.0.0:3307->3306/tcp
+```
+
+### 3. Проверка работы
+
+```bash
+# Check MySQL connection
+docker compose exec mysql mysql -uctuser -pctpass_change_me ct_system -e "SHOW TABLES;"
+
+# Expected:
+# +---------------------------+
+# | Tables_in_ct_system       |
+# +---------------------------+
+# | ARBITRAGE_ORDER           |
+# | ARBITRAGE_ORDER_TRANS     |
+# | ARBITRAGE_TRANS           |
+# | ...                       |
+# +---------------------------+
+
+# Check CTS-Core logs
+docker compose exec cts-core tail -f /app/logs/error.log
+
+# Expected:
+# 2026-01-28 10:00:00.123456 [INFO] [main] CTS-Core starting environment=development version=0.0.1
+# 2026-01-28 10:00:00.456789 [INFO] [db] MySQL pool initialized successfully
+# 2026-01-28 10:00:01.123456 [INFO] [main] CTS-Core initialized successfully
+
+# Check state file
+docker compose exec cts-core ls -lh /app/state/
+
+# Check health
+docker inspect cts-core --format='{{.State.Health.Status}}'
+# Expected: healthy
+```
+
+### 4. Остановка
+
+```bash
+# Stop services (сохранить данные)
+docker compose down
+
+# Stop and remove volumes (удалить все данные)
+docker compose down -v
+```
+
+## Development Workflow
+
+### Rebuild after code changes
+
+```bash
+# Rebuild image
+docker compose build cts-core
+
+# Restart service
+docker compose up -d cts-core
+
+# View logs
+docker compose logs -f cts-core
+```
+
+### Hot reload (будет добавлено позже с Air)
+
+```bash
+# Use docker-compose.dev.yml with Air for hot reload
+docker compose -f docker-compose.dev.yml up
+```
+
+### Debugging
+
+```bash
+# Attach to running container
+docker compose exec cts-core sh
+
+# View logs in real-time
+docker compose logs -f cts-core
+
+# Inspect container
+docker inspect cts-core
+
+# Check resources
+docker stats cts-core
+```
+
+### Access MySQL from host
+
+```bash
+# Connect via port 3307 (mapped from container:3306)
+mysql -h 127.0.0.1 -P 3307 -uctuser -pctpass_change_me ct_system
+
+# Or via Docker
+docker compose exec mysql mysql -uctuser -pctpass_change_me ct_system
+```
+
+## Troubleshooting
+
+### MySQL connection failed
+
+**Symptom:**
+```
+[ERROR] [db] Failed to connect to MySQL: dial tcp 172.18.0.2:3306: connect: connection refused
+```
+
+**Solutions:**
+```bash
+# 1. Check MySQL is ready
+docker compose logs mysql | grep "ready for connections"
+
+# 2. Verify health check
+docker inspect cts-mysql --format='{{.State.Health.Status}}'
+
+# 3. Check network
+docker network inspect cts-net
+
+# 4. Wait longer (MySQL initialization takes time)
+docker compose up -d mysql
+sleep 30
+docker compose up -d cts-core
+```
+
+### HSM connection failed
+
+**Symptom:**
+```
+[ERROR] [hsm] Failed to connect: dial tcp: lookup hsm-service on 127.0.0.11:53: no such host
+```
+
+**Solutions:**
+```bash
+# 1. Check hsm-service is running
+docker ps | grep hsm-service
+
+# 2. Verify hsm-net exists
+docker network ls | grep hsm-net
+
+# 3. If hsm-net doesn't exist, create it:
+docker network create hsm-net
+
+# 4. Restart hsm-service with hsm-net
+cd /path/to/hsm-service
+docker compose up -d
+
+# 5. Test connectivity from cts-core
+docker compose exec cts-core ping hsm-service
+```
+
+### Certificate errors
+
+**Symptom:**
+```
+[ERROR] [hsm] TLS handshake failed: x509: certificate signed by unknown authority
+```
+
+**Solutions:**
+```bash
+# 1. Verify PKI files are mounted
+docker compose exec cts-core ls -la /app/pki/
+
+# Expected:
+# ca/ca-cert.pem
+# client/client-cert.pem
+# client/client-key.pem
+
+# 2. Check certificate validity
+docker compose exec cts-core \
+    sh -c "openssl x509 -in /app/pki/client/client-cert.pem -text -noout | grep 'Not After'"
+
+# 3. Verify CA cert matches hsm-service CA
+diff <(openssl x509 -in pki/ca/ca-cert.pem -noout -modulus) \
+     <(openssl x509 -in ../hsm-service/pki/ca/ca-cert.pem -noout -modulus)
+```
+
+### State file not persisting
+
+**Symptom:**
+State file disappears after container restart.
+
+**Solutions:**
+```bash
+# 1. Verify volume mount
+docker compose exec cts-core ls -la /app/state/
+
+# 2. Check permissions
+ls -la state/
+
+# 3. Fix permissions if needed
+chmod 700 state/
+```
+
+### Logs not appearing
+
+**Symptom:**
+No log files in `logs/` directory.
+
+**Solutions:**
+```bash
+# 1. Check volume mount
+docker compose exec cts-core ls -la /app/logs/
+
+# 2. Check logger configuration
+docker compose exec cts-core cat /app/conf/config.yaml | grep -A5 logging
+
+# 3. Check permissions
+ls -la logs/
+chmod 755 logs/
+```
+
+## Production Deployment
+
+**❌ Do NOT use Docker Compose in production!**
+
+For production deployment on Debian 13, see [PRODUCTION_DEBIAN.md](PRODUCTION_DEBIAN.md)
+
+## Environment Variables
+
+Override config.yaml settings via ENV:
+
+```yaml
+# docker-compose.yml
+services:
+  cts-core:
+    environment:
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=ctuser
+      - DB_PASSWORD=${MYSQL_PASSWORD}
+      - HSM_URL=https://hsm-service:8443
+      - LOG_LEVEL=info
+```
+
+See `internal/config/config.go` for ENV variable names.
+
+## Useful Commands
+
+```bash
+# View all logs
+docker compose logs
+
+# Follow specific service
+docker compose logs -f cts-core
+
+# Restart service
+docker compose restart cts-core
+
+# Exec into container
+docker compose exec cts-core sh
+
+# Check resources
+docker stats
+
+# Clean everything
+docker compose down -v
+docker system prune -a
+```
+
+## Network Diagram
+
+```
+┌─────────────────┐
+│   Host Machine  │
+│                 │
+│  localhost:3307 │◄──────┐
+└─────────────────┘        │
+                           │
+    ┌──────────────────────┴────────────────────────┐
+    │  cts-net (bridge)                             │
+    │                                               │
+    │  ┌──────────────┐           ┌──────────────┐ │
+    │  │  cts-mysql   │           │  cts-core    │ │
+    │  │  (MySQL 9.0) │◄──────────┤  (Go app)    │ │
+    │  │              │           │              │ │
+    │  │ :3306        │           └──────────────┘ │
+    │  └──────────────┘                   │        │
+    └────────────────────────────────────┼─────────┘
+                                         │
+    ┌────────────────────────────────────┼─────────┐
+    │  hsm-net (external)                │         │
+    │                                    │         │
+    │  ┌──────────────┐                 │         │
+    │  │ hsm-service  │◄────────────────┘         │
+    │  │              │                            │
+    │  │ :8443        │                            │
+    │  └──────────────┘                            │
+    └──────────────────────────────────────────────┘
+```
+```
+
+### Создать PRODUCTION_DEBIAN.md
+
+**File:** `/home/dev/docker/cts-core/PRODUCTION_DEBIAN.md`
+
+```markdown
+# CTS-Core Production Deployment on Debian 13
+
+## Prerequisites
+
+- Debian 13 (Trixie) server
+- Go 1.23+ (для сборки бинарника)
+- MySQL 9.0 (установлен и настроен отдельно)
+- systemd
+- Root or sudo access
+
+## Architecture
+
+```
+┌──────────────────────────────────────┐
+│  Debian 13 Server                    │
+│                                      │
+│  ┌────────────────────────────────┐  │
+│  │  systemd                       │  │
+│  │                                │  │
+│  │  ┌──────────────────────────┐  │  │
+│  │  │  cts-core.service        │  │  │
+│  │  │  (User: ctscore)         │  │  │
+│  │  │                          │  │  │
+│  │  │  /opt/cts-core/bin/      │  │  │
+│  │  │  ├── cts-core (binary)   │  │  │
+│  │  │  ├── conf/config.yaml    │  │  │
+│  │  │  ├── pki/                │  │  │
+│  │  │  ├── logs/               │  │  │
+│  │  │  └── state/              │  │  │
+│  │  └──────────────────────────┘  │  │
+│  └────────────────────────────────┘  │
+│                                      │
+│  MySQL 9.0 (localhost:3306)          │
+│  HSM Service (remote or localhost)   │
+└──────────────────────────────────────┘
+```
+
+## Installation Steps
+
+### 1. Build Binary on Development Machine
+
+```bash
+# On your dev machine (/home/dev/docker/cts-core)
+cd /home/dev/docker/cts-core
+
+# Build for Linux AMD64 (static binary)
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w" \
+    -o bin/cts-core \
+    cmd/cts-core/main.go
+
+# Verify binary
+file bin/cts-core
+# Expected: ELF 64-bit LSB executable, x86-64, statically linked, stripped
+
+ls -lh bin/cts-core
+# Expected: ~10-15 MB
+```
+
+### 2. Transfer Files to Production Server
+
+```bash
+# Create deployment package
+tar -czf cts-core-deploy.tar.gz \
+    bin/cts-core \
+    conf/config.example.yaml \
+    pki/ \
+    scripts/
+
+# Transfer to production server
+scp cts-core-deploy.tar.gz user@production-server:/tmp/
+
+# On production server
+ssh user@production-server
+cd /tmp
+tar -xzf cts-core-deploy.tar.gz
+```
+
+### 3. Setup Directory Structure
+
+```bash
+# Create system user
+sudo useradd -r -s /bin/false -d /opt/cts-core ctscore
+
+# Create directory structure
+sudo mkdir -p /opt/cts-core/{bin,conf,logs,state,pki}
+sudo mkdir -p /opt/cts-core/pki/{ca,server,client}
+
+# Copy binary
+sudo cp bin/cts-core /opt/cts-core/bin/
+
+# Copy configuration
+sudo cp conf/config.example.yaml /opt/cts-core/conf/config.yaml
+
+# Copy PKI certificates
+sudo cp -r pki/* /opt/cts-core/pki/
+
+# Set ownership
+sudo chown -R ctscore:ctscore /opt/cts-core
+
+# Set permissions
+sudo chmod 755 /opt/cts-core/bin/cts-core
+sudo chmod 600 /opt/cts-core/conf/config.yaml
+sudo chmod 700 /opt/cts-core/state
+sudo chmod 600 /opt/cts-core/pki/client/*.pem
+sudo chmod 600 /opt/cts-core/pki/client/*.key
+sudo chmod 644 /opt/cts-core/pki/ca/*.pem
+```
+
+### 4. Configure Application
+
+```bash
+# Edit configuration
+sudo nano /opt/cts-core/conf/config.yaml
+
+# Key settings for production:
+# environment: production
+# database.host: localhost (or MySQL server IP)
+# hsm.url: https://hsm-server:8443
+# logging.level: info (not debug!)
+```
+
+**Example production config:**
+```yaml
+environment: production
+
+database:
+  host: localhost
+  port: 3306
+  user: ctuser
+  password: CHANGE_ME
+  database: ct_system
+  max_open_conns: 50
+  max_idle_conns: 20
+  conn_max_lifetime_minutes: 60
+  ssl:
+    enabled: true
+    ca_file: /opt/cts-core/pki/ca/ca-cert.pem
+    cert_file: /opt/cts-core/pki/client/client-cert.pem
+    key_file: /opt/cts-core/pki/client/client-key.pem
+    verify_server: true
+
+hsm:
+  url: https://hsm-server:8443
+  timeout_seconds: 30
+  mtls:
+    enabled: true
+    ca_file: /opt/cts-core/pki/ca/ca-cert.pem
+    cert_file: /opt/cts-core/pki/client/client-cert.pem
+    key_file: /opt/cts-core/pki/client/client-key.pem
+
+logging:
+  level: info
+  dir: /opt/cts-core/logs
+  max_file_size_mb: 100
+```
+
+### 5. Create Systemd Service
+
+**File:** `/etc/systemd/system/cts-core.service`
+
+```ini
+[Unit]
+Description=CTS-Core Trading System
+Documentation=https://github.com/your-org/cts-core
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=ctscore
+Group=ctscore
+WorkingDirectory=/opt/cts-core
+
+# Command
+ExecStart=/opt/cts-core/bin/cts-core -config /opt/cts-core/conf/config.yaml
+
+# Restart policy
+Restart=on-failure
+RestartSec=10s
+StartLimitBurst=3
+StartLimitIntervalSec=60s
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/cts-core/logs /opt/cts-core/state
+ReadOnlyPaths=/opt/cts-core/conf /opt/cts-core/pki
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cts-core
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**Create service:**
+```bash
+# Copy service file
+sudo nano /etc/systemd/system/cts-core.service
+# (paste content above)
+
+# Set permissions
+sudo chmod 644 /etc/systemd/system/cts-core.service
+```
+
+### 6. Enable and Start Service
+
+```bash
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable auto-start on boot
+sudo systemctl enable cts-core
+
+# Start service
+sudo systemctl start cts-core
+
+# Check status
+sudo systemctl status cts-core
+
+# Expected output:
+# ● cts-core.service - CTS-Core Trading System
+#    Loaded: loaded (/etc/systemd/system/cts-core.service; enabled)
+#    Active: active (running) since ...
+#    Main PID: 1234 (cts-core)
+#    Memory: 50.0M
+#    CGroup: /system.slice/cts-core.service
+#            └─1234 /opt/cts-core/bin/cts-core -config /opt/cts-core/conf/config.yaml
+```
+
+### 7. Verify Installation
+
+```bash
+# Check logs
+sudo journalctl -u cts-core -f
+
+# Expected:
+# Jan 28 10:00:00 server cts-core[1234]: [INFO] [main] CTS-Core starting environment=production
+# Jan 28 10:00:01 server cts-core[1234]: [INFO] [db] MySQL pool initialized
+# Jan 28 10:00:02 server cts-core[1234]: [INFO] [main] CTS-Core initialized successfully
+
+# Check application logs
+sudo tail -f /opt/cts-core/logs/error.log
+
+# Check state file
+sudo ls -lh /opt/cts-core/state/
+
+# Check process
+ps aux | grep cts-core
+
+# Check resource usage
+sudo systemctl status cts-core
+
+# Check open files
+sudo lsof -u ctscore
+```
+
+### 8. Setup Log Rotation
+
+**File:** `/etc/logrotate.d/cts-core`
+
+```
+/opt/cts-core/logs/*.log {
+    daily
+    rotate 30
+    compress
+    delaycompress
+    notifempty
+    missingok
+    create 640 ctscore ctscore
+    sharedscripts
+    postrotate
+        systemctl reload cts-core > /dev/null 2>&1 || true
+    endscript
+}
+```
+
+**Create logrotate config:**
+```bash
+sudo nano /etc/logrotate.d/cts-core
+# (paste content above)
+
+# Set permissions
+sudo chmod 644 /etc/logrotate.d/cts-core
+
+# Test logrotate
+sudo logrotate -d /etc/logrotate.d/cts-core
+```
+
+### 9. Setup Monitoring
+
+**Check service health:**
+```bash
+#!/bin/bash
+# /opt/cts-core/scripts/health-check.sh
+
+SERVICE="cts-core"
+
+if ! systemctl is-active --quiet $SERVICE; then
+    echo "ERROR: $SERVICE is not running"
+    systemctl status $SERVICE
+    exit 1
+fi
+
+# Check if binary is responding (add health-check endpoint in Phase 1.5)
+# if ! curl -sf http://localhost:8080/health > /dev/null; then
+#     echo "ERROR: $SERVICE health check failed"
+#     exit 1
+# fi
+
+echo "OK: $SERVICE is healthy"
+exit 0
+```
+
+**Add to cron:**
+```bash
+# Run health check every 5 minutes
+*/5 * * * * /opt/cts-core/scripts/health-check.sh || systemctl restart cts-core
+```
+
+## Maintenance
+
+### Update Binary
+
+```bash
+# 1. Build new version on dev machine
+make build-prod
+
+# 2. Transfer to production
+scp bin/cts-core user@production-server:/tmp/cts-core-new
+
+# 3. On production server:
+sudo systemctl stop cts-core
+
+# 4. Backup current binary
+sudo cp /opt/cts-core/bin/cts-core /opt/cts-core/bin/cts-core.backup.$(date +%Y%m%d)
+
+# 5. Copy new binary
+sudo cp /tmp/cts-core-new /opt/cts-core/bin/cts-core
+sudo chown ctscore:ctscore /opt/cts-core/bin/cts-core
+sudo chmod 755 /opt/cts-core/bin/cts-core
+
+# 6. Start service
+sudo systemctl start cts-core
+
+# 7. Check logs
+sudo journalctl -u cts-core -f
+```
+
+### Update Configuration
+
+```bash
+# 1. Backup current config
+sudo cp /opt/cts-core/conf/config.yaml /opt/cts-core/conf/config.yaml.backup
+
+# 2. Edit config
+sudo nano /opt/cts-core/conf/config.yaml
+
+# 3. Restart service
+sudo systemctl restart cts-core
+
+# 4. Check logs
+sudo journalctl -u cts-core -n 50
+```
+
+### Backup State File
+
+```bash
+# Stop service
+sudo systemctl stop cts-core
+
+# Backup state
+sudo cp /opt/cts-core/state/daemon.state \
+       /backup/cts-core-state-$(date +%Y%m%d-%H%M%S).state
+
+# Start service
+sudo systemctl start cts-core
+```
+
+### View Logs
+
+```bash
+# Systemd journal (recommended)
+sudo journalctl -u cts-core -f
+sudo journalctl -u cts-core -n 100
+sudo journalctl -u cts-core --since "1 hour ago"
+
+# Application logs
+sudo tail -f /opt/cts-core/logs/error.log
+sudo tail -f /opt/cts-core/logs/trade.log
+
+# All logs
+sudo tail -f /opt/cts-core/logs/*.log
+```
+
+### Restart Service
+
+```bash
+# Restart
+sudo systemctl restart cts-core
+
+# Stop
+sudo systemctl stop cts-core
+
+# Start
+sudo systemctl start cts-core
+
+# Reload config (if supported)
+sudo systemctl reload cts-core
+```
+
+## Troubleshooting
+
+### Service won't start
+
+```bash
+# Check detailed status
+sudo systemctl status cts-core -l
+
+# Check logs
+sudo journalctl -u cts-core -xe
+
+# Check config syntax (add -validate flag in Phase 1.1.3)
+sudo -u ctscore /opt/cts-core/bin/cts-core -config /opt/cts-core/conf/config.yaml -validate
+
+# Check permissions
+sudo ls -la /opt/cts-core/
+sudo ls -la /opt/cts-core/bin/cts-core
+sudo ls -la /opt/cts-core/conf/config.yaml
+
+# Check if port is in use (if REST API enabled)
+sudo netstat -tlnp | grep 8080
+```
+
+### High CPU usage
+
+```bash
+# Check process stats
+sudo systemctl status cts-core
+
+# Check system resources
+top -u ctscore
+
+# Check application logs for errors
+sudo tail -f /opt/cts-core/logs/error.log
+
+# Restart service if needed
+sudo systemctl restart cts-core
+```
+
+### Database connection issues
+
+```bash
+# Test MySQL connection
+sudo mysql -h localhost -u ctuser -p ct_system -e "SELECT 1"
+
+# Check network
+sudo netstat -tlnp | grep 3306
+
+# Check certificates
+sudo ls -la /opt/cts-core/pki/client/
+sudo openssl x509 -in /opt/cts-core/pki/client/client-cert.pem -text -noout
+
+# Check application logs
+sudo grep -i "mysql\|database" /opt/cts-core/logs/error.log
+```
+
+### HSM connection issues
+
+```bash
+# Test HSM connectivity
+sudo -u ctscore curl -k https://hsm-server:8443/health
+
+# Check DNS
+nslookup hsm-server
+
+# Check firewall
+sudo iptables -L -n | grep 8443
+
+# Check certificates
+sudo openssl s_client -connect hsm-server:8443 \
+    -cert /opt/cts-core/pki/client/client-cert.pem \
+    -key /opt/cts-core/pki/client/client-key.pem \
+    -CAfile /opt/cts-core/pki/ca/ca-cert.pem
+```
+
+### State file corruption
+
+```bash
+# Stop service
+sudo systemctl stop cts-core
+
+# Check state file
+sudo ls -lh /opt/cts-core/state/daemon.state
+
+# If corrupted, restore from backup
+sudo cp /backup/cts-core-state-YYYYMMDD.state /opt/cts-core/state/daemon.state
+sudo chown ctscore:ctscore /opt/cts-core/state/daemon.state
+
+# If no backup, delete and let service recreate
+sudo rm /opt/cts-core/state/daemon.state
+
+# Start service
+sudo systemctl start cts-core
+```
+
+### Memory leak
+
+```bash
+# Check memory usage
+sudo systemctl status cts-core
+
+# Check Go GC stats (add /debug/pprof endpoint in Phase 1.5)
+# curl http://localhost:8080/debug/pprof/heap
+
+# Restart service as temporary fix
+sudo systemctl restart cts-core
+
+# Check logs for errors
+sudo journalctl -u cts-core --since "1 hour ago" | grep -i "error\|panic\|fatal"
+```
+
+## Security Checklist
+
+- [ ] Binary owned by `ctscore` user
+- [ ] Config file permissions: 600 (only ctscore can read)
+- [ ] Private keys permissions: 600
+- [ ] State directory permissions: 700
+- [ ] systemd service uses `NoNewPrivileges=true`
+- [ ] systemd service uses `ProtectSystem=strict`
+- [ ] Firewall configured (only necessary ports open)
+- [ ] Log rotation configured
+- [ ] Monitoring configured
+- [ ] Backup strategy in place
+
+## Performance Tuning
+
+### Systemd Limits
+
+Edit `/etc/systemd/system/cts-core.service`:
+
+```ini
+[Service]
+# File descriptors
+LimitNOFILE=65536
+
+# Processes
+LimitNPROC=4096
+
+# Memory
+MemoryLimit=2G
+```
+
+### MySQL Connection Pool
+
+Edit `/opt/cts-core/conf/config.yaml`:
+
+```yaml
+database:
+  max_open_conns: 100   # Increase for high load
+  max_idle_conns: 50
+  conn_max_lifetime_minutes: 60
+```
+
+### Kernel Tuning
+
+Edit `/etc/sysctl.conf`:
+
+```bash
+# TCP settings
+net.ipv4.tcp_tw_reuse = 1
+net.ipv4.tcp_fin_timeout = 30
+net.core.somaxconn = 65535
+net.ipv4.tcp_max_syn_backlog = 8192
+
+# File descriptors
+fs.file-max = 2097152
+```
+
+Apply:
+```bash
+sudo sysctl -p
+```
+
+## Uninstall
+
+```bash
+# Stop service
+sudo systemctl stop cts-core
+sudo systemctl disable cts-core
+
+# Remove service file
+sudo rm /etc/systemd/system/cts-core.service
+sudo systemctl daemon-reload
+
+# Remove application
+sudo rm -rf /opt/cts-core
+
+# Remove user
+sudo userdel ctscore
+
+# Remove logrotate config
+sudo rm /etc/logrotate.d/cts-core
+```
+
+## References
+
+- systemd service documentation: `man systemd.service`
+- systemd exec documentation: `man systemd.exec`
+- logrotate documentation: `man logrotate`
+- MySQL SSL documentation: https://dev.mysql.com/doc/refman/9.0/en/using-encrypted-connections.html
+```
+
+### Test Docker setup
+
+```bash
+cd /home/dev/docker/cts-core
+
+# 1. Build image
+docker build -t cts-core:latest .
+
+# Expected:
+# [+] Building 60.0s (15/15) FINISHED
+# => [builder 1/6] FROM golang:1.23-alpine
+# => [builder 6/6] RUN CGO_ENABLED=0 GOOS=linux go build...
+# => [stage-1 3/5] COPY --from=builder /build/cts-core .
+# => exporting to image
+# => => naming to docker.io/library/cts-core:latest
+
+# 2. Check image size
+docker images | grep cts-core
+
+# Expected: ~20-30 MB (multi-stage build)
+
+# 3. Start services
+docker compose up -d
+
+# 4. Check logs
+docker compose logs -f cts-core
+
+# Expected:
+# cts-core  | 2026-01-28 10:00:00.123456 [INFO] [main] CTS-Core starting environment=development
+# cts-core  | 2026-01-28 10:00:01.456789 [INFO] [db] MySQL pool initialized
+
+# 5. Test MySQL connection
+docker compose exec mysql mysql -uctuser -pctpass_change_me ct_system -e "SHOW TABLES;"
+
+# 6. Check health
+docker inspect cts-core --format='{{.State.Health.Status}}'
+# Expected: healthy
+
+# 7. Stop
+docker compose down
+```
+
+**✅ Definition of Done:**
+- [x] Dockerfile создан с multi-stage build
+- [x] docker-compose.yml с MySQL и hsm-net
+- [x] .dockerignore оптимизирован
+- [x] .env.example создан
+- [x] config.example.yaml обновлен с комментариями для Docker
+- [x] QUICKSTART_DOCKER.md создан с инструкциями
+- [x] PRODUCTION_DEBIAN.md создан с systemd service
+- [x] `docker build` проходит успешно
+- [x] `docker compose up -d` запускает все сервисы
+- [x] MySQL healthcheck работает
+- [x] CTS-Core healthcheck работает
+- [x] Volumes монтируются корректно (logs, state, pki)
+- [x] Подключение к MySQL работает
+- [x] Подключение к hsm-service возможно (через hsm-net)
+- [x] Systemd service файл готов для production
+
+**Время:** 2 часа
+
+---
+
+## Phase 1.1 Summary
 - [x] Sensitive files игнорируются
 - [x] Generated files игнорируются
 - [x] Git status clean
@@ -1195,36 +2548,80 @@ git status
 - [x] **1.1.3 Configuration** (45 min)
   - [x] config.yaml created (100+ lines)
   - [x] types.go with all structs
-  - [x] config.go with Load() + Validate()
-  - [x] config.example.yaml
+## Phase 1.1 Summary
 
-- [x] **1.1.4 Config tests** (30 min)
-  - [x] config_test.go
-  - [x] All tests pass
-  - [x] Coverage > 80%
+### ✅ Checklist
 
-- [x] **1.1.5 Logger** (1 hour)
-  - [x] logger.go with zerolog
-  - [x] Hybrid format (text/json)
-  - [x] Log rotation
-  - [x] main.go compiles and runs
+- [x] **1.1.1 Структура директорий** (30 min) ✅ DONE
+  - [x] cmd/, internal/, conf/, pki/, logs/, state/, scripts/
+  - [x] Все директории созданы вручную
 
-- [x] **1.1.6 Makefile** (30 min)
-  - [x] 15+ targets
-  - [x] All targets work
+- [ ] **1.1.2 Go модуль** (15 min)
+  - [ ] go.mod
+  - [ ] go.sum
+  - [ ] Dependencies: 8 packages
 
-- [x] **1.1.7 .gitignore** (15 min)
-  - [x] Sensitive files ignored
-  - [x] Git clean
+- [ ] **1.1.3 Конфигурация** (45 min)
+  - [ ] config.go with Load() + Validate()
+  - [ ] config.example.yaml
+
+- [ ] **1.1.4 Config tests** (30 min)
+  - [ ] config_test.go
+  - [ ] All tests pass
+  - [ ] Coverage > 80%
+
+- [ ] **1.1.5 Logger** (1 hour)
+  - [ ] logger.go with slog (как daemon2)
+  - [ ] Custom rotatedFile (не lumberjack)
+  - [ ] Separate logs: error.log, trade.log
+  - [ ] Modular: Get(module)
+  - [ ] main.go compiles and runs
+
+- [ ] **1.1.6 Makefile** (30 min)
+  - [ ] 15+ targets
+  - [ ] All targets work
+  - [ ] docker-build, docker-up, docker-down
+
+- [ ] **1.1.7 .gitignore** (15 min)
+  - [ ] Sensitive files ignored
+  - [ ] Git clean
+
+- [ ] **1.1.8 Docker setup** (2 hours) ⏳ NEW
+  - [ ] Dockerfile (multi-stage build)
+  - [ ] docker-compose.yml (MySQL + hsm-net)
+  - [ ] .dockerignore
+  - [ ] .env.example
+  - [ ] config.example.yaml (Docker-aware)
+  - [ ] QUICKSTART_DOCKER.md
+  - [ ] PRODUCTION_DEBIAN.md (systemd service)
+  - [ ] `docker compose up -d` работает
+  - [ ] Healthcheck работает
 
 ### 📊 Metrics
 
-**Total Time:** ~1 day (8 hours)  
-**Files Created:** 15+  
-**Lines of Code:** ~800  
+**Total Time:** ~10 часов (было 8, добавилось 2 для Docker)
+**Files Created:** 25+  
+**Lines of Code:** ~1500  
 **Go Packages:** 2 (config, logger)  
 **Tests:** 3 test functions  
-**Dependencies:** 8  
+**Dependencies:** 8 (go.mod)  
+**Docker Files:** Dockerfile, docker-compose.yml, .dockerignore, .env  
+**Documentation:** QUICKSTART_DOCKER.md, PRODUCTION_DEBIAN.md  
+
+### 🐳 Deployment Strategy
+
+**Development:**
+- Docker Compose (как hsm-service)
+- Команды: `docker compose up -d`, `docker compose logs -f`
+- Volumes: logs/, state/, conf/, pki/
+- Сети: cts-net (bridge), hsm-net (external)
+
+**Production:**
+- Systemd service на Debian 13
+- Binary в `/opt/cts-core/bin/cts-core`
+- User: `ctscore` (non-root)
+- Auto-restart: on-failure
+- Log rotation: logrotate
 
 ### 🎯 Next Phase
 
@@ -1237,17 +2634,20 @@ git status
 
 ```bash
 git add .
-git commit -m "feat(setup): phase 1.1 complete - project setup
+git commit -m "feat(setup): phase 1.1 complete - project setup with Docker
 
 - Project structure created (cmd/, internal/, conf/)
 - go.mod with 8 dependencies
 - Config system with validation and env overrides
-- Logger with zerolog (hybrid text/json, rotation)
+- Logger with slog (custom rotation, как daemon2)
 - Basic main.go (compiles and runs)
-- Makefile with 15+ targets
+- Makefile with docker targets
 - .gitignore configured
+- 🐳 Docker setup for DEV (docker-compose.yml)
+- 📄 Production deployment docs (PRODUCTION_DEBIAN.md)
 
-Tests: 3/3 passing, coverage: 85%"
+Tests: 3/3 passing, coverage: 85%
+Docker: ✅ Working (cts-core + MySQL + hsm-net)"
 
 git push
 ```
@@ -1256,17 +2656,29 @@ git push
 
 ## ❓ FAQ
 
-**Q: Почему Go 1.21, а не 1.24.9?**  
-A: В go.mod используется 1.21 для совместимости. Можете обновить до 1.24 если нужно.
+**Q: Почему slog, а не zerolog?**  
+A: daemon2 использует slog (Go 1.21+ stdlib) с кастомной ротацией. Следуем той же архитектуре.
 
-**Q: Можно ли использовать другой logger?**  
-A: Да, но zerolog быстрый и поддерживает hybrid format (text DEV, json PROD).
+**Q: Почему Docker только для DEV?**  
+A: По аналогии с hsm-service: DEV=Docker (удобство), PROD=systemd (производительность, контроль).
+
+**Q: Как подключиться к hsm-service из Docker?**  
+A: Через внешнюю сеть `hsm-net`. Убедитесь что hsm-service уже запущен и создал эту сеть.
+
+**Q: Где хранятся сертификаты PKI?**  
+A: В `pki/` директории, монтируется read-only в контейнер. Для production копируются в `/opt/cts-core/pki/`.
+
+**Q: Как обновить бинарник в production?**  
+A: См. раздел "Update Binary" в PRODUCTION_DEBIAN.md. Остановить → заменить → запустить.
 
 **Q: Нужно ли настраивать IDE?**  
 A: Рекомендуется VS Code с Go extension. `.vscode/` в .gitignore.
 
 **Q: Что если config.yaml не найден?**  
 A: Приложение завершится с ошибкой. Используйте `-config` flag для указания пути.
+
+**Q: Как проверить что Docker работает?**  
+A: `docker compose ps` → все сервисы `Up (healthy)`. `docker compose logs -f` → логи без ошибок.
 
 ---
 
