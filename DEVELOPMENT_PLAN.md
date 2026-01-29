@@ -92,36 +92,38 @@ gantt
 > **Примечание:** Для каждой фазы создан отдельный детальный гайд в `guides/`.  
 > После завершения фазы - удалите соответствующий гайд.
 
-### Phase 0: Database Schema 🔴 START HERE
+### Phase 0: Database Schema ✅ COMPLETE
 
-**Цель:** Применить SQL миграции для создания 11 таблиц Phase 1.
+**Цель:** Применить SQL миграции для создания 9 новых таблиц + 4 ALTER.
 
-**Время:** ~1.5 часа
+**Время:** 1.5 часа ✅
 
 **Детальный гайд:** [guides/phase_0_database_migrations.md](guides/phase_0_database_migrations.md)
 
-**Краткий план:**
-1. Проверить доступ к MySQL (15 мин)
-2. Применить migrations/001_phase1_schema.sql (30 мин)
-3. Верифицировать таблицы (15 мин)
-4. Тестировать операции (15 мин)
-5. Создать migration log (10 мин)
+**Результаты:**
+1. ✅ Применена миграция migrations/001_phase1_schema.sql
+2. ✅ Создано 9 новых таблиц (TRADER, TRADER_SESSION, ARBITRAGE_ORDER, и др.)
+3. ✅ Выполнено 4 ALTER (ARBITRAGE_TRANS, USER_2FA, MONITORING, TRADE)
+4. ✅ Добавлены 4 scheduler tasks
+5. ✅ Все foreign keys и UNIQUE constraints работают
 
 **Deliverables:**
-- ✅ 11 новых таблиц создано
-- ✅ USER_2FA обновлена (enc_key_version добавлен)
+- ✅ 9 новых таблиц создано
+- ✅ ARBITRAGE_TRANS.ID: INT→BIGINT (future-proof)
+- ✅ USER_2FA обновлена (enc_key_version, needs_reencryption)
+- ✅ MONITORING и TRADE обновлены (trader assignment)
 - ✅ 4 scheduler tasks инициализированы
-- ✅ Все foreign keys и UNIQUE constraints работают
+- ✅ 18 таблиц total (9 new + 4 altered + 5 existing)
 
 **Definition of Done:**
-- [ ] `mysql -e "SHOW TABLES;"` показывает 16 таблиц
-- [ ] Все тесты из гайда пройдены
-- [ ] Migration log создан
-- [ ] Закоммичено в git
+- ✅ `mysql -e "SHOW TABLES;"` показывает 18 таблиц
+- ✅ Все тесты из гайда пройдены
+- ✅ Migration успешно выполнена
+- ✅ Готово к Phase 1.1
 
 ---
 
-### Phase 1.1: Project Setup 🔴
+### Phase 1.1: Project Setup 🔴 NEXT
 
 **Цель:** Создать базовую структуру проекта, go.mod, config, logger.
 
@@ -1895,15 +1897,19 @@ cts-core/
 
 ## 6. Следующие шаги
 
-✅ **Архитектура готова - все решения приняты и задокументированы**
+✅ **Phase 0 завершена - готово к Phase 1**
 
 1. ✅ **Архитектура завершена** — см. [ARCHITECTURE.md](ARCHITECTURE.md) (25 Phase 1 решений)
-2. ✅ **Phase 0: Database Migrations** (ТЕКУЩАЯ)
+2. ✅ **Phase 0: Database Migrations** — COMPLETE
    - ✅ SQL migrations созданы (migrations/001_phase1_schema.sql)
-   - ⏳ Применить миграции: `mysql < migrations/001_phase1_schema.sql`
-   - ⏳ Проверить создание 11 таблиц
-3. ⏳ **Создание скелета проекта** — базовая структура CTS-Core (Phase 1.1)
-4. ⏳ **Phase 1 реализация** — config, logger, MySQL, HSM client
+   - ✅ Миграции применены: 9 новых таблиц + 4 ALTER
+   - ✅ Проверено: 18 таблиц total, все FK работают
+   - ✅ 4 scheduler tasks инициализированы
+3. 🔴 **Phase 1.1: Project Setup** (ТЕКУЩАЯ)
+   - ⏳ Создание структуры CTS-Core проекта
+   - ⏳ go.mod, config, logger
+   - ⏳ MySQL connection pool
+4. ⏳ **Phase 1.2-1.5**: HSM client, State, REST API, WebSocket
 5. ⏳ **Параллельно**: Обновление daemon2 для работы с CTS-Core
 
 ---
