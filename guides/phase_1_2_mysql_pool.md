@@ -24,11 +24,11 @@ import (
     "crypto/x509"
     "database/sql"
     "fmt"
+    "log/slog"
     "os"
     "time"
 
     _ "github.com/go-sql-driver/mysql"
-    "github.com/rs/zerolog"
 )
 
 type MySQLConfig struct {
@@ -50,11 +50,11 @@ type MySQLConfig struct {
 
 type MySQLClient struct {
     db     *sql.DB
-    logger *zerolog.Logger
+    logger *slog.Logger
 }
 
 // NewMySQLClient creates new MySQL client with mTLS
-func NewMySQLClient(cfg MySQLConfig, logger *zerolog.Logger) (*MySQLClient, error) {
+func NewMySQLClient(cfg MySQLConfig, logger *slog.Logger) (*MySQLClient, error) {
     // Load client certificate
     cert, err := tls.LoadX509KeyPair(cfg.CertPath, cfg.KeyPath)
     if err != nil {
@@ -112,7 +112,7 @@ func NewMySQLClient(cfg MySQLConfig, logger *zerolog.Logger) (*MySQLClient, erro
         return nil, fmt.Errorf("failed to ping database: %w", err)
     }
 
-    logger.Info().Msgf("MySQL connected to %s:%d (mTLS enabled)", cfg.Host, cfg.Port)
+    logger.Info("MySQL connected", "host", cfg.Host, "port", cfg.Port, "mtls", true)
 
     return &MySQLClient{
         db:     db,
@@ -200,11 +200,10 @@ func (c *MySQLClient) WithRetry(ctx context.Context, operation func() error) err
             wait = cfg.MaxWait
         }
 
-        c.logger.Warn().
-            Err(err).
-            Int("attempt", attempt).
-            Dur("retry_in", wait).
-            Msg("Operation failed, retrying...")
+        c.logger.Warn("Operation failed, retrying",
+            "error", err,
+            "attempt", attempt,
+            "retry_in", wait)
 
         // Wait before retry
         select {
@@ -299,13 +298,15 @@ func main() {
         ConnMaxIdleTime: time.Duration(cfg.Database.Pool.ConnMaxIdleTime) * time.Minute,
     }
 
-    dbClient, err := db.NewMySQLClient(mysqlCfg, logger)
+    dbLogger := logger.Get("database")
+    dbClient, err := db.NewMySQLClient(mysqlCfg, dbLogger)
     if err != nil {
-        logger.Fatal().Err(err).Msg("Failed to connect to MySQL")
+        logger.Error("Failed to connect to MySQL", "error", err)
+        os.Exit(1)
     }
     defer dbClient.Close()
 
-    logger.Info().Msg("MySQL connection established")
+    logger.Info("MySQL connection established")
 
     // ... rest of application
 }
@@ -901,18 +902,18 @@ package db
 import (
     "context"
     "database/sql"
+    "log/slog"
     "testing"
     "time"
 
     "github.com/your-org/cts-core/internal/db/models"
-    "github.com/rs/zerolog"
 )
 
 // NOTE: These are integration tests - require real MySQL connection
 // Run with: go test -tags=integration ./internal/db/...
 
 func setupTestDB(t *testing.T) *Repository {
-    logger := zerolog.Nop()
+    logger := slog.Default()
 
     cfg := MySQLConfig{
         Host:     "127.0.0.1",
@@ -929,7 +930,7 @@ func setupTestDB(t *testing.T) *Repository {
         ConnMaxIdleTime: 2 * time.Minute,
     }
 
-    client, err := NewMySQLClient(cfg, &logger)
+    client, err := NewMySQLClient(cfg, logger)
     if err != nil {
         t.Fatalf("Failed to connect to MySQL: %v", err)
     }
@@ -1080,9 +1081,9 @@ func main() {
     ctx := context.Background()
     traders, err := repo.ListActiveTraders(ctx)
     if err != nil {
-        logger.Warn().Err(err).Msg("Failed to list traders (database may be empty)")
+        logger.Warn("Failed to list traders (database may be empty)", "error", err)
     } else {
-        logger.Info().Msgf("Found %d active traders", len(traders))
+        logger.Info("Found active traders", "count", len(traders))
     }
 
     // ... rest of application
