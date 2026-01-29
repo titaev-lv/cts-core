@@ -19,7 +19,7 @@
 5. ✅ Logger with slog (custom rotation) - DONE
 6. ✅ Basic main.go (compiles and runs) - DONE
 7. ✅ Makefile with useful targets - DONE
-8. ⏳ .gitignore verification
+8. ✅ .gitignore verification - DONE
 9. ⏳ Dockerfile + docker-compose.yml (dev environment)
 10. ⏳ PRODUCTION_DEBIAN.md (systemd deployment)
 
@@ -33,7 +33,7 @@
 - [1.1.4 Config Tests](#114-config-tests-30-минут) ✅ DONE
 - [1.1.5 Logger](#115-logger-1-час) ✅ DONE
 - [1.1.6 Makefile](#116-makefile-30-минут) ✅ DONE
-- [1.1.7 gitignore](#117-gitignore-15-минут) ⏳ NEXT
+- [1.1.7 gitignore](#117-gitignore-15-минут) ✅ DONE
 - [1.1.8 Docker setup](#118-docker-setup-2-часа)
 - [Summary](#phase-11-summary)
 
@@ -1050,26 +1050,25 @@ ls -lh bin/cts-core
 
 ---
 
-## 1.1.7 .gitignore (15 минут)
+## 1.1.7 .gitignore (15 минут) ✅
 
-### .gitignore
+**STATUS:** DONE
+
+### Проблемы найдены и исправлены:
+1. ❌ `coverage.out` и `coverage.html` были в git (добавлены в .gitignore и удалены)
+2. ❌ `conf/config.yaml` был в git (удален, должен быть только config.example.yaml)
+3. ✅ `.gitignore` дополнен всеми необходимыми правилами
+
+### Полный .gitignore
 
 ```gitignore
-# Binaries
-bin/
-*.exe
-*.dll
-*.so
-*.dylib
+other-sub-system
+gpt.txt
+shema-go.txt
 
-# Test
-*.test
-*.out
-coverage.html
-coverage.out
-
-# Go
-go.work
+# Config files (keep examples)
+conf/config.yaml
+!conf/config.example.yaml
 
 # Logs
 logs/*.log
@@ -1079,15 +1078,22 @@ logs/*.log.*
 state/*.state
 state/*.backup
 
-# Certificates (generated)
-pki/server/*.crt
-pki/server/*.key
-pki/client/*.crt
-pki/client/*.key
+# Binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
 
-# Config
-conf/config.yaml
-!conf/config.example.yaml
+# Test files
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go
+go.work
+go.sum
 
 # IDE
 .idea/
@@ -1100,42 +1106,48 @@ conf/config.yaml
 .DS_Store
 Thumbs.db
 
-# Backups
-*.backup
-backup_*.sql
-
 # Temporary
 tmp/
 temp/
+*.tmp
 
-# Guides (delete after completion)
-guides/
+# Backups
+*.backup
+backup_*.sql
 ```
 
-### Test .gitignore
+### Проверка
 
 ```bash
-# Check git status
-git status
+# Удалены из git
+git rm --cached coverage.out coverage.html conf/config.yaml
 
-# Should NOT show:
-# - logs/*.log
-# - state/*.state
-# - conf/config.yaml (unless added explicitly)
-# - bin/
+# Проверка статуса
+git status --short
+# M  .gitignore
+# D  conf/config.yaml
+# D  coverage.html
+# D  coverage.out
 
-# Should show:
-# - conf/config.example.yaml
-# - internal/**/*.go
-# - cmd/**/*.go
+# Проверка tracked файлов
+git ls-files | grep -E "(coverage|config\.yaml|bin/|logs/)" 
+# Только conf/config.example.yaml ✅
+
+# Проверка важных файлов в git
+git ls-files | grep "\.go$" | wc -l
+# 5 файлов ✅ (main.go, config.go, config_test.go, logger.go, logger_test.go)
 ```
 
 **✅ Definition of Done:**
-- [x] .gitignore создан
-- [x] Бинарники игнорируются
-- [x] Логи и state файлы игнорируются
-- [x] Конфиги игнорируются (кроме .example)
-- [x] Git status чистый
+- [x] .gitignore дополнен всеми правилами
+- [x] Бинарники игнорируются (bin/, *.exe, *.dll, *.so)
+- [x] Test артефакты игнорируются (coverage.out, coverage.html, *.test)
+- [x] Логи игнорируются (logs/*.log)
+- [x] State файлы игнорируются (state/*.state)
+- [x] conf/config.yaml игнорируется (но config.example.yaml tracked)
+- [x] IDE и OS файлы игнорируются (.idea/, .vscode/, .DS_Store)
+- [x] Ненужные файлы удалены из git (coverage.*, config.yaml)
+- [x] Git status чистый (только .gitignore staged)
 
 ---
 
@@ -2539,9 +2551,12 @@ docker compose down
   - [x] make test → 6/6 tests pass
   - [x] docker-build, docker-up, docker-down, docker-logs
 
-- [ ] **1.1.7 .gitignore** (15 min) ⏳ NEXT
-  - [ ] Verify all sensitive files ignored
-  - [ ] Git status clean
+- [x] **1.1.7 .gitignore** (15 min) ✅ DONE
+  - [x] .gitignore complete with all rules
+  - [x] coverage.out, coverage.html removed from git
+  - [x] conf/config.yaml removed from git
+  - [x] Only config.example.yaml tracked
+  - [x] Git clean (ready to commit)
 
 - [ ] **1.1.8 Docker setup** (2 hours) ⏳ NEW
   - [ ] Dockerfile (multi-stage build)

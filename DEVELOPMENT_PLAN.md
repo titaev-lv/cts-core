@@ -138,8 +138,8 @@ gantt
 4. ✅ Config tests (30 мин) - DONE
 5. ✅ Logger с slog + tests (1.5 часа) - DONE
 6. ✅ Makefile (30 мин) - DONE
-7. ⏳ .gitignore verification (15 мин) - NEXT
-8. ⏳ **🐳 Docker setup для dev** (2 часа)
+7. ✅ .gitignore verification (15 мин) - DONE
+8. ⏳ **🐳 Docker setup для dev** (2 часа) - NEXT
    - Dockerfile (multi-stage build)
    - docker-compose.yml
    - .dockerignore
