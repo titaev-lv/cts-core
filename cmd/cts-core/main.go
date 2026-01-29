@@ -4,8 +4,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/titaev-lv/cts-core/internal/config"
+	"github.com/titaev-lv/cts-core/internal/db"
 	"github.com/titaev-lv/cts-core/internal/logger"
 )
 
@@ -36,7 +38,33 @@ func main() {
 		"version", "0.0.1",
 		"log_level", cfg.Logging.Level)
 
-	// TODO: Phase 1.2 - Initialize MySQL pool
+	// Phase 1.2 - Initialize MySQL pool
+	mysqlCfg := db.MySQLConfig{
+		Host:            cfg.MySQL.Host,
+		Port:            cfg.MySQL.Port,
+		User:            cfg.MySQL.User,
+		Password:        cfg.MySQL.Password,
+		Database:        cfg.MySQL.Database,
+		TLSEnabled:      cfg.MySQL.TLS.Enabled,
+		CertPath:        cfg.MySQL.TLS.CertFile,
+		KeyPath:         cfg.MySQL.TLS.KeyFile,
+		CAPath:          cfg.MySQL.TLS.CAFile,
+		MaxOpenConns:    cfg.MySQL.Pool.MaxOpenConns,
+		MaxIdleConns:    cfg.MySQL.Pool.MaxIdleConns,
+		ConnMaxLifetime: cfg.MySQL.Pool.ConnMaxLifetime,
+		ConnMaxIdleTime: 2 * time.Minute, // Fixed value for now
+	}
+
+	dbLogger := logger.Get("database")
+	dbClient, err := db.NewMySQLClient(mysqlCfg, dbLogger)
+	if err != nil {
+		log.Error("Failed to connect to MySQL", "error", err)
+		os.Exit(1)
+	}
+	defer dbClient.Close()
+
+	log.Info("MySQL connection established")
+
 	// TODO: Phase 1.3 - Initialize HSM client
 	// TODO: Phase 1.4 - Load state
 	// TODO: Phase 1.5 - Start REST server

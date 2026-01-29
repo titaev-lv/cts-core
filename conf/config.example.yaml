@@ -36,7 +36,7 @@ mysql:
     conn_max_lifetime: 300s      # 5 minutes
     
   tls:
-    enabled: true
+    enabled: false               # Set to true for production with mTLS certificates
     ca_file: "pki/ca/ca.crt"
     cert_file: "pki/client/cts-core-mysql.crt"
     key_file: "pki/client/cts-core-mysql.key"

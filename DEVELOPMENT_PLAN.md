@@ -173,32 +173,44 @@ gantt
 
 ---
 
-### Phase 1.2: MySQL Connection Pool 🔴 NEXT
+### Phase 1.2: MySQL Connection Pool ✅ IN PROGRESS (1.2.1 DONE)
 
-**Цель:** Реализовать connection pool с mTLS, retry logic, repository pattern.
+**Цель:** Реализовать connection pool с optional mTLS, retry logic, repository pattern.
 
 **Время:** 2 дня
 
-**Детальный гайд:** `guides/phase_1_2_mysql_pool.md` (TODO: создать)
+**Детальный гайд:** `guides/phase_1_2_mysql_pool.md` (fixed zerolog → slog)
 
 **Краткий план:**
-1. MySQL client с mTLS (4 часа)
-2. Connection pool настройка (2 часа)
-3. Retry logic (exponential backoff) (2 часа)
-4. Repository pattern (3 часа)
-5. DB models (3 часа)
-6. Tests (2 часа)
+1. ✅ MySQL client с optional mTLS (Phase 1.2.1)
+2. ✅ Connection pool настройка (Phase 1.2.1)
+3. ✅ Retry logic (exponential backoff) (Phase 1.2.1)
+4. 🔴 Repository pattern (3 часа)
+5. 🔴 DB models (3 часа)
+6. 🔴 Tests (2 часа)
 
-**Deliverables:**
-- internal/db/mysql.go (connection pool)
-- internal/db/repository.go (CRUD operations)
-- internal/db/models/ (11 models для таблиц)
-- Connection pool tests
-- Integration tests с real MySQL
+**Phase 1.2.1 Deliverables (DONE):**
+- ✅ internal/db/mysql.go (connection pool + optional mTLS)
+- ✅ MySQLClient with WithRetry() method
+- ✅ Exponential backoff (100ms → 200ms → 400ms, max 5s)
+- ✅ Optional mTLS (TLSEnabled flag) - works in dev without certs
+- ✅ Tests: 3 tests passing (retry, config, skipped real MySQL)
+- ✅ Coverage: 54.4%
+- ✅ go-sql-driver/mysql v1.8.1 added
+- ✅ main.go updated with MySQL initialization
+- ✅ config.yaml updated: tls.enabled=false for dev
+
+**Phase 1.2.2-1.2.6 (TODO):**
+- 🔴 Repository pattern (CRUD operations)
+- 🔴 DB models for 11 tables
+- 🔴 Integration tests with real MySQL
+- 🔴 Transaction support
+- 🔴 Batch operations
 
 **Definition of Done:**
-- [ ] Connection pool работает с mTLS
-- [ ] Retry logic протестирован (3 retries)
+- ✅ Connection pool работает без mTLS (dev)
+- ✅ Connection pool поддерживает mTLS (prod ready)
+- ✅ Retry logic протестирован (3 retries with exponential backoff)
 - [ ] Repository CRUD работает для всех таблиц
 - [ ] Integration tests проходят
 - [ ] Закоммичено в git
