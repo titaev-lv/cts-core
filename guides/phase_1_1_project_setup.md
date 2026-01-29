@@ -16,8 +16,8 @@
 2. ✅ go.mod with dependencies - DONE
 3. ✅ config.yaml with full configuration - DONE
 4. ✅ Config loader with validation - DONE
-5. ⏳ Logger with slog (custom rotation)
-6. ⏳ Basic main.go (compiles and runs)
+5. ✅ Logger with slog (custom rotation) - DONE
+6. ✅ Basic main.go (compiles and runs) - DONE
 7. ⏳ Makefile with useful targets
 8. ⏳ .gitignore
 9. ⏳ Dockerfile + docker-compose.yml (dev environment)
@@ -31,7 +31,7 @@
 - [1.1.2 Go модуль](#112-go-модуль-15-минут) ✅ DONE
 - [1.1.3 Конфигурация](#113-конфигурация-45-минут) ✅ DONE
 - [1.1.4 Config Tests](#114-config-tests-30-минут) ✅ DONE
-- [1.1.5 Logger](#115-logger-1-час)
+- [1.1.5 Logger](#115-logger-1-час) ✅ DONE
 - [1.1.6 Makefile](#116-makefile-30-минут)
 - [1.1.7 gitignore](#117-gitignore-15-минут)
 - [1.1.8 Docker setup](#118-docker-setup-2-часа)
@@ -643,17 +643,17 @@ go test ./internal/config/... -cover
 
 ---
 
-## 1.1.5 Logger (1 час)
-
-## 1.1.5 Logger (1 час)
+## 1.1.5 Logger (1 час) ✅ DONE
 
 **Требования (на основе daemon2):**
 - Использовать `log/slog` (стандартная библиотека Go 1.21+)
 - Простой текстовый формат: `YYYY-MM-DD HH:MM:SS.000000 [LEVEL] [module] message key=value`
 - Кастомная ротация по размеру (не lumberjack)
-- Раздельные файлы: `error.log` (все уровни), `trade.log` (торговые операции)
+- Один файл: `error.log` (все уровни)
 - Модульная структура: `logger.Get(module)` для идентификации источника
-- Глобальные функции: `logger.Info()`, `logger.TradeInfo()`, и т.д.
+- Глобальные функции: `logger.Info()`, `logger.Error()`, и т.д.
+
+**📝 Note:** trade.log не нужен в cts-core (только в daemon2, который торгует)
 
 ### internal/logger/logger.go
 
@@ -1029,7 +1029,7 @@ ls -lh logs/
 **✅ Definition of Done:**
 - [x] logger.go создан с slog (как daemon2)
 - [x] Кастомная ротация работает
-- [x] Раздельные файлы: error.log, trade.log
+- [x] Лог файл: error.log
 - [x] Модульная структура работает
 - [x] main.go компилируется без ошибок
 - [x] Binary запускается успешно
@@ -2565,12 +2565,13 @@ docker compose down
   - [x] All tests pass
   - [x] Coverage: 82.4% ✅
 
-- [ ] **1.1.5 Logger** (1 hour)
-  - [ ] logger.go with slog (как daemon2)
-  - [ ] Custom rotatedFile (не lumberjack)
-  - [ ] Separate logs: error.log, trade.log
-  - [ ] Modular: Get(module)
-  - [ ] main.go compiles and runs
+- [x] **1.1.5 Logger** (1 hour) ✅ DONE
+  - [x] logger.go with slog (как daemon2)
+  - [x] Custom rotatedFile (не lumberjack)
+  - [x] Log file: error.log (trade.log не нужен в core)
+  - [x] Modular: Get(module)
+  - [x] main.go compiles and runs
+  - [x] Logs write correctly (verified)
 
 - [ ] **1.1.6 Makefile** (30 min)
   - [ ] 15+ targets
