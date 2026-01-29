@@ -123,11 +123,11 @@ gantt
 
 ---
 
-### Phase 1.1: Project Setup 🔴 IN PROGRESS
+### Phase 1.1: Project Setup ✅ DONE
 
 **Цель:** Создать базовую структуру проекта, go.mod, config, logger.
 
-**Время:** 1 день
+**Время:** 1 день (завершено)
 
 **Детальный гайд:** [guides/phase_1_1_project_setup.md](guides/phase_1_1_project_setup.md)
 
@@ -140,11 +140,9 @@ gantt
 6. ✅ Makefile (30 мин) - DONE
 7. ✅ .gitignore verification (15 мин) - DONE
 8. ✅ **🐳 Docker setup для dev** (2 часа) - DONE
-   - Dockerfile (multi-stage build)
-   - docker-compose.yml
+   - Dockerfile (multi-stage build, 20.5 MB)
+   - docker-compose.yml (без MySQL)
    - .dockerignore
-   - QUICKSTART_DOCKER.md
-   - PRODUCTION_DEBIAN.md (systemd)
 
 **Deliverables:**
 - ✅ Project structure (cmd/, internal/, conf/, logs/, state/) - DONE
@@ -153,25 +151,29 @@ gantt
 - ✅ Logger (slog, custom rotation, error.log) + tests (86.9% coverage) - DONE
 - ✅ main.go компилируется и запускается (3.8 MB) - DONE
 - ✅ Makefile с 14 targets - DONE
-- ✅ .gitignore verification - DONE
+- ✅ .gitignore verification (coverage.*, config.yaml removed from git) - DONE
 - ✅ **Dockerfile + docker-compose.yml (dev environment)** - DONE
-- ⏳ **Production deployment на Debian 13** (документация)
 
-**🐳 Deployment Strategy (как hsm-service):**
-- **DEV**: Docker Compose (hot reload, logs, easy debugging)
-- **PROD**: Systemd service на Debian 13 (binary deployment)
+**🐳 Deployment Strategy:**
+- **DEV**: Docker Compose (MySQL на хосте через host.docker.internal)
+- **PROD**: Systemd service на Debian 13 (binary deployment) - документация позже
 
 **Definition of Done:**
 - [x] `make build` создает bin/cts-core (3.8 MB)
 - [x] `./bin/cts-core -config conf/config.yaml` запускается без ошибок
 - [x] `make test` проходит (14/14 tests, config: 82.4%, logger: 86.9%)
 - [x] **`docker compose build` собирает образ (20.5 MB)**
-- [ ] Production deployment документирован (systemd unit)
 - [x] Закоммичено в git
+
+**📊 Результаты:**
+- **Тесты:** 14/14 pass (6 config + 8 logger)
+- **Coverage:** config 82.4%, logger 86.9%
+- **Binary size:** 3.8 MB (native), 20.5 MB (Docker image)
+- **Files:** 9 Go files, 3 config files, 4 Docker files
 
 ---
 
-### Phase 1.2: MySQL Connection Pool 🔴
+### Phase 1.2: MySQL Connection Pool 🔴 NEXT
 
 **Цель:** Реализовать connection pool с mTLS, retry logic, repository pattern.
 
