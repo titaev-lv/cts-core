@@ -22,7 +22,9 @@ server:
 
 # MySQL Database configuration
 mysql:
-  host: "127.0.0.1"              # Use "mysql" for Docker
+  # Docker: use "host.docker.internal" (Docker Desktop) or "172.17.0.1" (Linux bridge)
+  # Local: use "127.0.0.1" or "localhost"
+  host: "host.docker.internal"   # ← Docker: access MySQL on host
   port: 3306
   user: "root"
   password: "CHANGE_ME"          # TODO: Use env var CTS_MYSQL_PASSWORD in production

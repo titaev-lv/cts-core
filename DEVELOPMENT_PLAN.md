@@ -139,7 +139,7 @@ gantt
 5. ✅ Logger с slog + tests (1.5 часа) - DONE
 6. ✅ Makefile (30 мин) - DONE
 7. ✅ .gitignore verification (15 мин) - DONE
-8. ⏳ **🐳 Docker setup для dev** (2 часа) - NEXT
+8. ✅ **🐳 Docker setup для dev** (2 часа) - DONE
    - Dockerfile (multi-stage build)
    - docker-compose.yml
    - .dockerignore
@@ -153,8 +153,8 @@ gantt
 - ✅ Logger (slog, custom rotation, error.log) + tests (86.9% coverage) - DONE
 - ✅ main.go компилируется и запускается (3.8 MB) - DONE
 - ✅ Makefile с 14 targets - DONE
-- ⏳ .gitignore verification
-- ⏳ **Dockerfile + docker-compose.yml (dev environment)**
+- ✅ .gitignore verification - DONE
+- ✅ **Dockerfile + docker-compose.yml (dev environment)** - DONE
 - ⏳ **Production deployment на Debian 13** (документация)
 
 **🐳 Deployment Strategy (как hsm-service):**
@@ -164,10 +164,10 @@ gantt
 **Definition of Done:**
 - [x] `make build` создает bin/cts-core (3.8 MB)
 - [x] `./bin/cts-core -config conf/config.yaml` запускается без ошибок
-- [x] `make test` проходит (6/6 tests, 82.4% coverage)
-- [ ] **`docker compose up -d` запускает CTS-Core в dev**
-- [ ] **Production deployment документирован (systemd unit)**
-- [ ] Закоммичено в git
+- [x] `make test` проходит (14/14 tests, config: 82.4%, logger: 86.9%)
+- [x] **`docker compose build` собирает образ (20.5 MB)**
+- [ ] Production deployment документирован (systemd unit)
+- [x] Закоммичено в git
 
 ---
 

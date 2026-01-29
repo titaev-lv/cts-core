@@ -1,0 +1,51 @@
+# Git
+.git/
+.gitignore
+.github/
+
+# Binaries (compiled on host)
+bin/
+*.exe
+
+# Logs (will be via volume)
+logs/
+*.log
+
+# State (will be via volume)
+state/
+*.state
+
+# Config (will be via volume, keep only example)
+conf/config.yaml
+conf/config.ini
+
+# PKI certificates (will be via volume)
+pki/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Documentation
+*.md
+docs/
+guides/
+
+# Docker itself
+.dockerignore
+
+# Tests
+*_test.go
+coverage.*
+*.test
+*.out
+
+# Temporary
+tmp/
+temp/
+*.tmp
+*.backup
+
+# Other sub-systems
+other-sub-system/
