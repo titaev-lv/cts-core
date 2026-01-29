@@ -1,0 +1,112 @@
+# CTS-Core Configuration Example
+# Copy this file to config.yaml and customize for your environment
+
+# Environment: development | production
+environment: development
+
+# Server configuration (REST API - Phase 1.5)
+server:
+  host: "0.0.0.0"
+  port: 8443
+  
+  tls:
+    enabled: true
+    cert_file: "pki/server/cts-core.crt"
+    key_file: "pki/server/cts-core.key"
+    ca_file: "pki/ca/ca.crt"
+    
+  timeouts:
+    read: 30s
+    write: 30s
+    idle: 120s
+
+# MySQL Database configuration
+mysql:
+  host: "127.0.0.1"              # Use "mysql" for Docker
+  port: 3306
+  user: "root"
+  password: "CHANGE_ME"          # TODO: Use env var CTS_MYSQL_PASSWORD in production
+  database: "ct_system"
+  
+  pool:
+    max_open_conns: 25
+    max_idle_conns: 10
+    conn_max_lifetime: 300s      # 5 minutes
+    
+  tls:
+    enabled: true
+    ca_file: "pki/ca/ca.crt"
+    cert_file: "pki/client/cts-core-mysql.crt"
+    key_file: "pki/client/cts-core-mysql.key"
+    
+  retry:
+    max_attempts: 3
+    initial_delay: 100ms
+    max_delay: 5s
+    multiplier: 2.0
+
+# HSM Service configuration
+hsm:
+  url: "https://hsm-service:8443"
+  
+  tls:
+    enabled: true
+    ca_file: "pki/ca/ca.crt"
+    cert_file: "pki/client/cts-core-hsm.crt"
+    key_file: "pki/client/cts-core-hsm.key"
+    
+  timeout: 10s
+  
+  retry:
+    max_attempts: 5
+    initial_delay: 200ms
+    max_delay: 10s
+    multiplier: 2.0
+
+# State management
+state:
+  file_path: "state/daemon.state"
+  sync_interval: 30s             # Sync to MySQL every 30 seconds
+  backup_count: 3                # Keep 3 backup copies
+
+# Logging configuration
+logging:
+  level: debug                   # debug | info | warn | error
+  dir: logs                      # Directory for log files
+  max_file_size_mb: 100          # Rotate when file reaches 100 MB
+
+# Session management (Phase 1.4)
+session:
+  heartbeat_interval: 5s
+  heartbeat_timeout: 15s         # 3 missed heartbeats
+  grace_period: 60s
+  cleanup_interval: 300s         # 5 minutes
+
+# Task scheduler (Phase 1.4)
+scheduler:
+  task_assignment_interval: 1s
+  latency_check_interval: 60s
+  resource_check_interval: 30s
+
+# Rate limiting (Phase 1.5)
+rate_limiting:
+  rest:
+    requests_per_minute: 1000
+    burst: 100
+    
+  websocket:
+    messages_per_minute: 10000
+    burst: 1000
+
+# Prometheus metrics (Phase 1.6)
+metrics:
+  enabled: true
+  port: 9090
+  path: "/metrics"
+
+# Audit logging
+audit:
+  enabled: true
+  file_path: "logs/audit.log"
+  mysql_enabled: false           # Phase 2: store in MySQL
+  retention_days: 30

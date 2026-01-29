@@ -133,9 +133,10 @@ gantt
 
 **Краткий план:**
 1. ✅ Создать структуру директорий (30 мин) - DONE
-2. Инициализировать go.mod (15 мин)
-3. Создать config.yaml + loader (45 мин)
-4. Config tests (30 мин)
+2. ✅ Инициализировать go.mod (15 мин) - DONE
+3. ✅ Создать config.yaml + loader (45 мин) - DONE
+4. ✅ Config tests (30 мин) - DONE
+5. Logger с slog (1 час)
 5. Logger с slog (1 час)
 6. Makefile (30 мин)
 7. .gitignore (15 мин)
@@ -146,8 +147,8 @@ gantt
 
 **Deliverables:**
 - ✅ Project structure (cmd/, internal/, conf/, logs/, state/) - DONE
-- ⏳ go.mod с dependencies
-- ⏳ config.yaml (100+ строк) + validation
+- ✅ go.mod с dependencies - DONE
+- ✅ config.yaml (100+ строк) + validation - DONE
 - ⏳ Logger (slog, custom rotation)
 - ⏳ main.go компилируется и запускается
 - ⏳ Makefile с targets

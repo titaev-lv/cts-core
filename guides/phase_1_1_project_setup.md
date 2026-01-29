@@ -13,9 +13,9 @@
 
 **Deliverables:**
 1. ✅ Project structure (cmd/, internal/, conf/, etc.) - DONE
-2. ⏳ go.mod with dependencies
-3. ⏳ config.yaml with full configuration
-4. ⏳ Config loader with validation
+2. ✅ go.mod with dependencies - DONE
+3. ✅ config.yaml with full configuration - DONE
+4. ✅ Config loader with validation - DONE
 5. ⏳ Logger with slog (custom rotation)
 6. ⏳ Basic main.go (compiles and runs)
 7. ⏳ Makefile with useful targets
@@ -28,9 +28,9 @@
 ## Содержание
 
 - [1.1.1 Структура директорий](#111-структура-директорий-30-минут) ✅ DONE
-- [1.1.2 Go модуль](#112-go-модуль-15-минут)
-- [1.1.3 Конфигурация](#113-конфигурация-45-минут)
-- [1.1.4 Config Tests](#114-config-tests-30-минут)
+- [1.1.2 Go модуль](#112-go-модуль-15-минут) ✅ DONE
+- [1.1.3 Конфигурация](#113-конфигурация-45-минут) ✅ DONE
+- [1.1.4 Config Tests](#114-config-tests-30-минут) ✅ DONE
 - [1.1.5 Logger](#115-logger-1-час)
 - [1.1.6 Makefile](#116-makefile-30-минут)
 - [1.1.7 gitignore](#117-gitignore-15-минут)
@@ -137,7 +137,7 @@ ls -la pki/*/
 
 ---
 
-## 1.1.2 Go модуль (15 минут)
+## 1.1.2 Go модуль (15 минут) ✅ DONE
 
 ### Инициализация
 
@@ -207,13 +207,15 @@ go list -m all | head -15
 
 **✅ Definition of Done:**
 - [x] go.mod создан
-- [x] 8 dependencies добавлены
+- [x] 1 dependency добавлена (yaml v3.0.1)
 - [x] go.sum сгенерирован
 - [x] `go mod verify` успешно
 
+**📝 Note:** mysql и prometheus будут добавлены позже (Phase 1.2 и 1.6) когда понадобятся
+
 ---
 
-## 1.1.3 Конфигурация (45 минут)
+## 1.1.3 Конфигурация (45 минут) ✅ DONE
 
 ### conf/config.yaml
 
@@ -452,7 +454,7 @@ cp conf/config.yaml conf/config.example.yaml
 
 ---
 
-## 1.1.4 Config Tests (30 минут)
+## 1.1.4 Config Tests (30 минут) ✅ DONE
 
 ### internal/config/config_test.go
 
@@ -2544,20 +2546,24 @@ docker compose down
   - [x] cmd/, internal/, conf/, pki/, logs/, state/, scripts/
   - [x] Все директории созданы вручную
 
-- [ ] **1.1.2 Go модуль** (15 min)
-  - [ ] go.mod
-  - [ ] go.sum
-  - [ ] Dependencies: 3 packages (mysql, prometheus, yaml)
-  - [ ] slog из stdlib (не требует установки)
+- [x] **1.1.2 Go модуль** (15 min) ✅ DONE
+  - [x] go.mod
+  - [x] go.sum
+  - [x] Dependencies: 1 package (yaml v3.0.1)
+  - [x] slog из stdlib (не требует установки)
+  - [x] mysql и prometheus будут добавлены в Phase 1.2 и 1.6
 
-- [ ] **1.1.3 Конфигурация** (45 min)
-  - [ ] config.go with Load() + Validate()
-  - [ ] config.example.yaml
+- [x] **1.1.3 Конфигурация** (45 min) ✅ DONE
+  - [x] config.go with Load() + Validate()
+  - [x] config.example.yaml
+  - [x] config.yaml (скопирован из example)
+  - [x] types.go с 15 структурами
+  - [x] ENV overrides (CTS_ENVIRONMENT, CTS_MYSQL_PASSWORD, CTS_LOG_LEVEL)
 
-- [ ] **1.1.4 Config tests** (30 min)
-  - [ ] config_test.go
-  - [ ] All tests pass
-  - [ ] Coverage > 80%
+- [x] **1.1.4 Config tests** (30 min) ✅ DONE
+  - [x] config_test.go (6 тестов)
+  - [x] All tests pass
+  - [x] Coverage: 82.4% ✅
 
 - [ ] **1.1.5 Logger** (1 hour)
   - [ ] logger.go with slog (как daemon2)

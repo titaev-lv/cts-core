@@ -1,3 +1,22 @@
 other-sub-system
 gpt.txt
 shema-go.txt
+
+# Config files (keep examples)
+conf/config.yaml
+!conf/config.example.yaml
+
+# Logs
+logs/*.log
+logs/*.log.*
+
+# State files
+state/*.state
+state/*.backup
+
+# Binaries
+bin/
+*.exe
+
+# Go
+go.work
