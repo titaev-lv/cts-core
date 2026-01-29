@@ -1324,129 +1324,400 @@ go test ./internal/config/... -v
 
 ##### 1.1.5 Logger Setup (1 час)
 
+**Требования (на основе daemon2):**
+- Использовать `log/slog` (стандартная библиотека Go 1.21+)
+- Простой текстовый формат: `YYYY-MM-DD HH:MM:SS.000000 [LEVEL] [module] message key=value`
+- Кастомная ротация по размеру (не lumberjack)
+- Раздельные файлы: `error.log` (все уровни), `trade.log` (торговые операции)
+- Модульная структура: `logger.Get(module)` для идентификации источника
+- Глобальные функции: `logger.Info()`, `logger.TradeInfo()`, и т.д.
+
 **internal/logger/logger.go:**
 ```go
 package logger
 
 import (
+    "context"
+    "fmt"
     "io"
+    "log/slog"
     "os"
     "path/filepath"
+    "strings"
+    "sync"
     "time"
-    
-    "github.com/rs/zerolog"
-    "github.com/rs/zerolog/log"
-    "gopkg.in/natefinch/lumberjack.v2"
 )
 
-type LoggerConfig struct {
-    Level      string
-    Format     string // "text" or "json"
-    Console    bool
-    File       bool
-    FilePath   string
-    MaxSize    int  // MB
-    MaxAge     int  // days
-    MaxBackups int
-    Compress   bool
+var (
+    Log       *slog.Logger  // Основной логгер (error.log)
+    Trade     *slog.Logger  // Торговый логгер (trade.log)
+    logLevel  slog.Level
+    logDir    string
+    logFiles  map[string]io.WriteCloser
+    fileMutex sync.RWMutex
+    maxLogSize int64
+)
+
+// rotatedFile - обертка с автоматической ротацией
+type rotatedFile struct {
+    file      *os.File
+    filePath  string
+    fileSize  int64
+    maxSize   int64
+    fileMutex sync.Mutex
 }
 
-// Init initializes the global logger
-func Init(cfg LoggerConfig) error {
-    // Set log level
-    level, err := zerolog.ParseLevel(cfg.Level)
+func (rf *rotatedFile) Write(p []byte) (int, error) {
+    rf.fileMutex.Lock()
+    defer rf.fileMutex.Unlock()
+
+    // Проверяем нужна ли ротация
+    if rf.fileSize+int64(len(p)) > rf.maxSize {
+        if err := rf.rotate(); err != nil {
+            // Если ротация не удалась, пытаемся записать
+            n, _ := rf.file.Write(p)
+            rf.fileSize += int64(n)
+            return n, nil
+        }
+    }
+
+    n, err := rf.file.Write(p)
+    rf.fileSize += int64(n)
+    return n, err
+}
+
+func (rf *rotatedFile) rotate() error {
+    if err := rf.file.Close(); err != nil {
+        return err
+    }
+
+    // Создаем backup с timestamp: debug.20260128_150405.log
+    timestamp := time.Now().Format("20060102_150405")
+    dir := filepath.Dir(rf.filePath)
+    name := filepath.Base(rf.filePath)
+    ext := filepath.Ext(name)
+    base := strings.TrimSuffix(name, ext)
+    backupPath := filepath.Join(dir, fmt.Sprintf("%s.%s%s", base, timestamp, ext))
+
+    if err := os.Rename(rf.filePath, backupPath); err != nil {
+        return err
+    }
+
+    f, err := os.OpenFile(rf.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
     if err != nil {
         return err
     }
-    zerolog.SetGlobalLevel(level)
-    
-    // Configure writers
-    var writers []io.Writer
-    
-    // Console output
-    if cfg.Console {
-        var consoleWriter io.Writer
-        if cfg.Format == "text" {
-            // Pretty console output for development
-            consoleWriter = zerolog.ConsoleWriter{
-                Out:        os.Stdout,
-                TimeFormat: time.RFC3339,
-            }
-        } else {
-            // JSON output for production
-            consoleWriter = os.Stdout
-        }
-        writers = append(writers, consoleWriter)
-    }
-    
-    // File output with rotation
-    if cfg.File {
-        // Ensure log directory exists
-        logDir := filepath.Dir(cfg.FilePath)
-        if err := os.MkdirAll(logDir, 0755); err != nil {
-            return err
-        }
-        
-        fileWriter := &lumberjack.Logger{
-            Filename:   cfg.FilePath,
-            MaxSize:    cfg.MaxSize,
-            MaxAge:     cfg.MaxAge,
-            MaxBackups: cfg.MaxBackups,
-            Compress:   cfg.Compress,
-        }
-        writers = append(writers, fileWriter)
-    }
-    
-    // Create multi-writer
-    multiWriter := io.MultiWriter(writers...)
-    
-    // Set global logger
-    log.Logger = zerolog.New(multiWriter).
-        With().
-        Timestamp().
-        Caller().
-        Logger()
-    
-    log.Info().
-        Str("level", cfg.Level).
-        Str("format", cfg.Format).
-        Bool("console", cfg.Console).
-        Bool("file", cfg.File).
-        Msg("Logger initialized")
-    
+
+    rf.file = f
+    rf.fileSize = 0
     return nil
 }
 
-// GetLogger returns the global logger
-func GetLogger() *zerolog.Logger {
-    return &log.Logger
+func (rf *rotatedFile) Close() error {
+    rf.fileMutex.Lock()
+    defer rf.fileMutex.Unlock()
+    return rf.file.Close()
 }
 
-// Debug logs a debug message
-func Debug(msg string) *zerolog.Event {
-    return log.Debug().Msg(msg)
+// plainTextHandler - кастомный handler для простого текстового формата
+type plainTextHandler struct {
+    w      io.WriteCloser
+    level  slog.Level
+    module string
 }
 
-// Info logs an info message
-func Info(msg string) *zerolog.Event {
-    return log.Info().Msg(msg)
+func (h *plainTextHandler) Enabled(ctx context.Context, level slog.Level) bool {
+    return level >= h.level
 }
 
-// Warn logs a warning message
-func Warn(msg string) *zerolog.Event {
-    return log.Warn().Msg(msg)
+func (h *plainTextHandler) Handle(ctx context.Context, r slog.Record) error {
+    // Format: YYYY-MM-DD HH:MM:SS.000000 [LEVEL] [module] message [key=value...]
+    timeStr := r.Time.Format("2006-01-02 15:04:05.000000")
+    levelStr := strings.ToUpper(r.Level.String())
+    msg := r.Message
+    module := h.module
+
+    var otherAttrs []string
+    r.Attrs(func(a slog.Attr) bool {
+        if a.Key == "module" {
+            return true
+        } else if a.Key != slog.TimeKey && a.Key != slog.MessageKey {
+            value := fmt.Sprint(a.Value.Any())
+            otherAttrs = append(otherAttrs, fmt.Sprintf("%s=%s", a.Key, value))
+        }
+        return true
+    })
+
+    output := fmt.Sprintf("%s [%s] [%s] %s", timeStr, levelStr, module, msg)
+    if len(otherAttrs) > 0 {
+        output += " " + strings.Join(otherAttrs, " ")
+    }
+    output += "\n"
+
+    switch w := h.w.(type) {
+    case *rotatedFile:
+        _, err := w.Write([]byte(output))
+        return err
+    default:
+        _, err := io.WriteString(h.w, output)
+        return err
+    }
 }
 
-// Error logs an error message
-func Error(err error, msg string) *zerolog.Event {
-    return log.Error().Err(err).Msg(msg)
+func (h *plainTextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+    newH := &plainTextHandler{w: h.w, level: h.level, module: h.module}
+    for _, a := range attrs {
+        if a.Key == "module" {
+            newH.module = fmt.Sprint(a.Value.Any())
+        }
+    }
+    return newH
 }
 
-// Fatal logs a fatal message and exits
-func Fatal(err error, msg string) {
-    log.Fatal().Err(err).Msg(msg)
+func (h *plainTextHandler) WithGroup(name string) slog.Handler {
+    return h
+}
+
+func init() {
+    logFiles = make(map[string]io.WriteCloser)
+}
+
+// Init инициализирует систему логирования
+// levelStr: "debug", "info", "warn", "error"
+// dir: папка для логов
+// maxFileSizeMB: максимальный размер одного файла
+func Init(levelStr, dir string, maxFileSizeMB int) error {
+    if err := os.MkdirAll(dir, 0755); err != nil {
+        return err
+    }
+
+    logDir = dir
+    maxLogSize = int64(maxFileSizeMB) * 1024 * 1024
+
+    switch strings.ToLower(levelStr) {
+    case "debug":
+        logLevel = slog.LevelDebug
+    case "info":
+        logLevel = slog.LevelInfo
+    case "warn":
+        logLevel = slog.LevelWarn
+    case "error":
+        logLevel = slog.LevelError
+    default:
+        logLevel = slog.LevelInfo
+    }
+
+    // Error Log (все уровни)
+    errorLogFile, err := os.OpenFile(filepath.Join(filepath.Clean(dir), "error.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        return err
+    }
+
+    errorRotated := &rotatedFile{
+        file:     errorLogFile,
+        filePath: filepath.Join(filepath.Clean(dir), "error.log"),
+        maxSize:  maxLogSize,
+    }
+    if info, err := errorLogFile.Stat(); err == nil {
+        errorRotated.fileSize = info.Size()
+    }
+    logFiles["error"] = errorRotated
+
+    // Trade Log (торговые операции отдельно)
+    tradeLogFile, err := os.OpenFile(filepath.Join(filepath.Clean(dir), "trade.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        return err
+    }
+
+    tradeRotated := &rotatedFile{
+        file:     tradeLogFile,
+        filePath: filepath.Join(filepath.Clean(dir), "trade.log"),
+        maxSize:  maxLogSize,
+    }
+    if info, err := tradeLogFile.Stat(); err == nil {
+        tradeRotated.fileSize = info.Size()
+    }
+    logFiles["trade"] = tradeRotated
+
+    // Создаем глобальные логгеры
+    Log = slog.New(&plainTextHandler{w: errorRotated, level: logLevel, module: "main"})
+    Trade = slog.New(&plainTextHandler{w: tradeRotated, level: logLevel, module: "trade"})
+
+    return nil
+}
+
+// Get возвращает логгер для конкретного модуля
+// Используется: log := logger.Get("session")
+func Get(module string) *slog.Logger {
+    if Log == nil {
+        return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+    }
+    return Log.With("module", module)
+}
+
+// GetTrade возвращает торговый логгер с контекстом модуля
+func GetTrade(module string) *slog.Logger {
+    if Trade == nil {
+        return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+    }
+    return Trade.With("module", module)
+}
+
+// Глобальные функции для удобства
+func Debug(msg string, args ...any) {
+    if Log != nil {
+        Log.Debug(msg, args...)
+    }
+}
+
+func Info(msg string, args ...any) {
+    if Log != nil {
+        Log.Info(msg, args...)
+    }
+}
+
+func Warn(msg string, args ...any) {
+    if Log != nil {
+        Log.Warn(msg, args...)
+    }
+}
+
+func Error(msg string, args ...any) {
+    if Log != nil {
+        Log.Error(msg, args...)
+    }
+}
+
+func TradeInfo(msg string, args ...any) {
+    if Trade != nil {
+        Trade.Info(msg, args...)
+    }
+}
+
+func TradeWarn(msg string, args ...any) {
+    if Trade != nil {
+        Trade.Warn(msg, args...)
+    }
+}
+
+func TradeError(msg string, args ...any) {
+    if Trade != nil {
+        Trade.Error(msg, args...)
+    }
+}
+
+// Close закрывает все открытые файлы логирования
+func Close() error {
+    fileMutex.Lock()
+    defer fileMutex.Unlock()
+
+    var lastErr error
+    for name, f := range logFiles {
+        if err := f.Close(); err != nil {
+            lastErr = err
+        }
+        delete(logFiles, name)
+    }
+    return lastErr
+}
+
+// GetLevel возвращает текущий уровень логирования
+func GetLevel() slog.Level {
+    return logLevel
+}
+
+// GetLogDir возвращает директорию логов
+func GetLogDir() string {
+    return logDir
 }
 ```
+
+**cmd/cts-core/main.go (initial version):**
+```go
+package main
+
+import (
+    "flag"
+    
+    "github.com/your-org/cts-core/internal/config"
+    "github.com/your-org/cts-core/internal/logger"
+)
+
+func main() {
+    configPath := flag.String("config", "conf/config.yaml", "Path to configuration file")
+    flag.Parse()
+    
+    cfg, err := config.Load(*configPath)
+    if err != nil {
+        panic("Failed to load configuration: " + err.Error())
+    }
+    
+    // Initialize logger (level, dir, maxFileSizeMB)
+    if err := logger.Init(cfg.Logging.Level, "logs", 100); err != nil {
+        panic("Failed to initialize logger: " + err.Error())
+    }
+    defer logger.Close()
+    
+    log := logger.Get("main")
+    
+    log.Info("CTS-Core starting", 
+        "environment", cfg.Environment, 
+        "version", "0.0.1")
+    
+    // TODO: Phase 1.2 - Initialize MySQL pool
+    // TODO: Phase 1.3 - Initialize HSM client
+    // TODO: Phase 1.4 - Load state
+    // TODO: Phase 1.5 - Start REST server
+    
+    log.Info("CTS-Core initialized successfully")
+    
+    // Keep running
+    select {}
+}
+```
+
+**conf/config.yaml (обновить секцию logging):**
+```yaml
+logging:
+  level: debug           # debug, info, warn, error
+  dir: logs             # Директория для логов
+  max_file_size_mb: 100 # Максимальный размер файла перед ротацией
+```
+
+**Test run:**
+```bash
+cd /home/dev/docker/cts-core
+go build -o bin/cts-core cmd/cts-core/main.go
+
+./bin/cts-core -config conf/config.yaml
+
+# Expected console output:
+# (логи в файл, console output опционален)
+
+# Check logs:
+tail -f logs/error.log
+# 2026-01-28 10:00:00.123456 [INFO] [main] CTS-Core starting environment=development version=0.0.1
+# 2026-01-28 10:00:00.123789 [INFO] [main] CTS-Core initialized successfully
+
+tail -f logs/trade.log
+# (пустой пока нет торговых операций)
+
+# Stop with Ctrl+C
+```
+
+**Definition of Done:**
+- ✅ Logger package реализован с slog (как в daemon2)
+- ✅ Кастомная ротация по размеру работает
+- ✅ Раздельные файлы: error.log, trade.log
+- ✅ Модульная структура: Get(module) возвращает логгер с [module] prefix
+- ✅ Простой текстовый формат: timestamp [LEVEL] [module] message key=value
+- ✅ main.go компилируется и запускается
+- ✅ Логи пишутся в файлы корректно
+- ✅ Ротация работает при достижении лимита
+
+**Время:** 1 час
+
+---
 
 **cmd/cts-core/main.go (initial version):**
 ```go
