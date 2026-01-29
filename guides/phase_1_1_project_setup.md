@@ -150,29 +150,20 @@ go mod init github.com/your-org/cts-core
 ### Добавить dependencies
 
 ```bash
-# Web framework
-go get github.com/gin-gonic/gin@v1.9.1
-
-# WebSocket
-go get github.com/gorilla/websocket@v1.5.1
-
-# Logging
-go get github.com/rs/zerolog@v1.31.0
-
 # Database
 go get github.com/go-sql-driver/mysql@v1.7.1
-
-# Metrics
-go get github.com/prometheus/client_golang@v1.17.0
 
 # Config
 go get gopkg.in/yaml.v3@v3.0.1
 
-# Rate limiting
-go get github.com/ulule/limiter/v3@v3.11.2
+# Metrics (Phase 1.6)
+go get github.com/prometheus/client_golang@v1.17.0
 
-# Log rotation
-go get gopkg.in/natefinch/lumberjack.v2@v2.2.1
+# NOTE: log/slog используется из stdlib Go 1.21+ (не требует установки)
+# NOTE: gin будет добавлен в Phase 1.5 (REST API)
+# NOTE: websocket будет добавлен в Phase 1.5 (WebSocket API)
+# NOTE: rate limiter будет добавлен в Phase 1.5 (API protection)
+# NOTE: log rotation реализована вручную (не используем lumberjack)
 
 # Clean up
 go mod tidy
@@ -191,18 +182,18 @@ module github.com/your-org/cts-core
 go 1.21
 
 require (
-    github.com/gin-gonic/gin v1.9.1
     github.com/go-sql-driver/mysql v1.7.1
-    github.com/gorilla/websocket v1.5.1
     github.com/prometheus/client_golang v1.17.0
-    github.com/rs/zerolog v1.31.0
-    github.com/ulule/limiter/v3 v3.11.2
-    gopkg.in/natefinch/lumberjack.v2 v2.2.1
     gopkg.in/yaml.v3 v3.0.1
 )
 
-// indirect dependencies...
+// indirect dependencies автоматически добавятся при go mod tidy
 ```
+
+**📝 Note:** 
+- `log/slog` - часть stdlib Go 1.21+, не требует отдельной зависимости
+- `gin`, `websocket`, `limiter` будут добавлены в Phase 1.5
+- Кастомная log rotation реализована в коде (не используем внешние библиотеки)
 
 ### Verify
 
@@ -2106,39 +2097,39 @@ sudo systemctl status cts-core
 sudo lsof -u ctscore
 ```
 
-### 8. Setup Log Rotation
+### 8. Log Rotation (встроена в код)
 
-**File:** `/etc/logrotate.d/cts-core`
+**✅ Log rotation уже реализована в `internal/logger/logger.go`:**
 
-```
-/opt/cts-core/logs/*.log {
-    daily
-    rotate 30
-    compress
-    delaycompress
-    notifempty
-    missingok
-    create 640 ctscore ctscore
-    sharedscripts
-    postrotate
-        systemctl reload cts-core > /dev/null 2>&1 || true
-    endscript
-}
+- Автоматическая ротация по размеру (maxFileSizeMB)
+- Новый файл создается когда старый достигает лимита
+- Формат: `error.log`, `error.log.1`, `error.log.2`, ...
+- Старые файлы автоматически переименовываются
+- Настраивается через `config.yaml`:
+
+```yaml
+logging:
+  level: info
+  dir: /opt/cts-core/logs
+  max_file_size_mb: 100  # Ротация при достижении 100 MB
 ```
 
-**Create logrotate config:**
+**❌ НЕ нужен logrotate:**
+Ротация реализована в коде (как в daemon2), системный logrotate не требуется.
+
+**Проверка ротации:**
 ```bash
-sudo nano /etc/logrotate.d/cts-core
-# (paste content above)
+# Проверить текущие файлы логов
+sudo ls -lh /opt/cts-core/logs/
 
-# Set permissions
-sudo chmod 644 /etc/logrotate.d/cts-core
-
-# Test logrotate
-sudo logrotate -d /etc/logrotate.d/cts-core
+# Expected:
+# error.log       (текущий файл)
+# error.log.1     (предыдущий, после ротации)
+# trade.log       (текущий)
+# trade.log.1     (предыдущий)
 ```
 
-### 9. Setup Monitoring
+### 9. Setup Monitoring (опционально)
 
 **Check service health:**
 ```bash
@@ -2380,8 +2371,8 @@ sudo journalctl -u cts-core --since "1 hour ago" | grep -i "error\|panic\|fatal"
 - [ ] systemd service uses `NoNewPrivileges=true`
 - [ ] systemd service uses `ProtectSystem=strict`
 - [ ] Firewall configured (only necessary ports open)
-- [ ] Log rotation configured
-- [ ] Monitoring configured
+- [ ] Log rotation: ✅ Встроена в код (не требует настройки)
+- [ ] Monitoring configured (опционально)
 - [ ] Backup strategy in place
 
 ## Performance Tuning
@@ -2449,17 +2440,14 @@ sudo rm -rf /opt/cts-core
 
 # Remove user
 sudo userdel ctscore
-
-# Remove logrotate config
-sudo rm /etc/logrotate.d/cts-core
 ```
 
 ## References
 
 - systemd service documentation: `man systemd.service`
 - systemd exec documentation: `man systemd.exec`
-- logrotate documentation: `man logrotate`
 - MySQL SSL documentation: https://dev.mysql.com/doc/refman/9.0/en/using-encrypted-connections.html
+- Go slog documentation: https://pkg.go.dev/log/slog
 ```
 
 ### Test Docker setup
@@ -2559,7 +2547,8 @@ docker compose down
 - [ ] **1.1.2 Go модуль** (15 min)
   - [ ] go.mod
   - [ ] go.sum
-  - [ ] Dependencies: 8 packages
+  - [ ] Dependencies: 3 packages (mysql, prometheus, yaml)
+  - [ ] slog из stdlib (не требует установки)
 
 - [ ] **1.1.3 Конфигурация** (45 min)
   - [ ] config.go with Load() + Validate()
@@ -2604,7 +2593,8 @@ docker compose down
 **Lines of Code:** ~1500  
 **Go Packages:** 2 (config, logger)  
 **Tests:** 3 test functions  
-**Dependencies:** 8 (go.mod)  
+**Dependencies:** 3 (go.mod: mysql, prometheus, yaml)  
+**Logger:** log/slog из stdlib (не требует зависимости)
 **Docker Files:** Dockerfile, docker-compose.yml, .dockerignore, .env  
 **Documentation:** QUICKSTART_DOCKER.md, PRODUCTION_DEBIAN.md  
 
@@ -2621,7 +2611,7 @@ docker compose down
 - Binary в `/opt/cts-core/bin/cts-core`
 - User: `ctscore` (non-root)
 - Auto-restart: on-failure
-- Log rotation: logrotate
+- Log rotation: ✅ Встроена в код (custom rotatedFile)
 
 ### 🎯 Next Phase
 
@@ -2658,6 +2648,9 @@ git push
 
 **Q: Почему slog, а не zerolog?**  
 A: daemon2 использует slog (Go 1.21+ stdlib) с кастомной ротацией. Следуем той же архитектуре.
+
+**Q: Почему нет gin, websocket, rate limiter в зависимостях?**  
+A: Они не нужны для Phase 1.1-1.4. gin и websocket будут добавлены в Phase 1.5 (REST/WS API), rate limiter - тоже там. Сейчас фокус на базовой инфраструктуре (config, logger, DB pool, HSM client).
 
 **Q: Почему Docker только для DEV?**  
 A: По аналогии с hsm-service: DEV=Docker (удобство), PROD=systemd (производительность, контроль).

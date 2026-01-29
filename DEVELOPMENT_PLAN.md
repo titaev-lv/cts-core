@@ -747,14 +747,13 @@ cd /home/dev/docker/cts-core
 
 go mod init github.com/your-org/cts-core
 
-# Add dependencies
-go get github.com/gin-gonic/gin@v1.9.1
-go get github.com/gorilla/websocket@v1.5.1
-go get github.com/rs/zerolog@v1.31.0
+# Add dependencies (Phase 1.1)
 go get github.com/go-sql-driver/mysql@v1.7.1
-go get github.com/prometheus/client_golang@v1.17.0
 go get gopkg.in/yaml.v3@v3.0.1
-go get github.com/ulule/limiter/v3@v3.11.2
+go get github.com/prometheus/client_golang@v1.17.0
+
+# NOTE: log/slog используется из stdlib Go 1.21+ (не требует установки)
+# NOTE: gin, websocket, limiter будут добавлены в Phase 1.5 (REST/WS API)
 
 go mod tidy
 ```
@@ -766,13 +765,9 @@ module github.com/your-org/cts-core
 go 1.21
 
 require (
-    github.com/gin-gonic/gin v1.9.1
-    github.com/gorilla/websocket v1.5.1
-    github.com/rs/zerolog v1.31.0
     github.com/go-sql-driver/mysql v1.7.1
     github.com/prometheus/client_golang v1.17.0
     gopkg.in/yaml.v3 v3.0.1
-    github.com/ulule/limiter/v3 v3.11.2
 )
 
 // indirect dependencies will be added by go mod tidy
