@@ -25,6 +25,8 @@ help:
 	@echo "  docker-up      - Start Docker Compose"
 	@echo "  docker-down    - Stop Docker Compose"
 	@echo "  docker-logs    - View Docker logs"
+	@echo "  db-ping        - Check MySQL database connection"
+	@echo "  db-test        - Run database integration tests"
 
 # Install dependencies
 install:
@@ -103,3 +105,16 @@ docker-down:
 # View Docker logs
 docker-logs:
 	@docker compose logs -f $(BINARY_NAME)
+
+# Database operations
+.PHONY: db-ping db-test
+
+# Ping database
+db-ping:
+	@echo "Pinging MySQL database..."
+	@mysql -h 127.0.0.1 -P 3306 -u root -proot -e "SELECT 1 AS 'Connection OK';" ct_system || echo "Failed to connect. Check MySQL credentials in conf/config.yaml"
+
+# Run integration tests
+db-test:
+	@echo "Running database integration tests..."
+	@MYSQL_HOST=127.0.0.1 MYSQL_USER=root MYSQL_PASSWORD=root MYSQL_DATABASE=ct_system go test -v -tags=integration ./internal/db/...

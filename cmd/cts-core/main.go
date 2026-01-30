@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/titaev-lv/cts-core/internal/config"
 	"github.com/titaev-lv/cts-core/internal/db"
+	"github.com/titaev-lv/cts-core/internal/db/repository"
 	"github.com/titaev-lv/cts-core/internal/logger"
 )
 
@@ -64,6 +67,19 @@ func main() {
 	defer dbClient.Close()
 
 	log.Info("MySQL connection established")
+
+	// Phase 1.2.4 - Initialize Repository
+	sqlxDB := sqlx.NewDb(dbClient.DB(), "mysql")
+	repo := repository.New(sqlxDB)
+
+	// Test database connection with repository
+	ctx := context.Background()
+	traders, err := repo.Trader().List(ctx, nil)
+	if err != nil {
+		log.Warn("Failed to list traders (database may be empty)", "error", err)
+	} else {
+		log.Info("Found traders", "count", len(traders))
+	}
 
 	// TODO: Phase 1.3 - Initialize HSM client
 	// TODO: Phase 1.4 - Load state
