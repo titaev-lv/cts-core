@@ -396,7 +396,7 @@ COMMENT='Scheduled background tasks for CTS-Core';
 -- Insert default scheduled tasks
 INSERT INTO SCHEDULER_TASKS (TASK_NAME, TASK_TYPE, SCHEDULE_CRON, ENABLED, CONFIG) VALUES
     ('cleanup_trader_sessions', 'cleanup', '0 2 * * *', TRUE, '{"retention_days": 7}'),
-    ('cleanup_audit_logs', 'cleanup', '0 3 * * *', TRUE, '{"retention_days": 7}'),
+    ('cleanup_audit_logs', 'cleanup', '0 3 * * *', TRUE, '{"retention_days": 180}'),
     ('reset_daily_limits', 'maintenance', '0 0 * * *', TRUE, '{}'),
     ('check_reencryption_jobs', 'reencryption', NULL, TRUE, '{"check_interval_sec": 60}')
 ON DUPLICATE KEY UPDATE DATE_MODIFY = CURRENT_TIMESTAMP;

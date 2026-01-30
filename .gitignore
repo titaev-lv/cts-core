@@ -6,6 +6,20 @@ shema-go.txt
 conf/config.yaml
 !conf/config.example.yaml
 
+# PKI - Certificates and Private Keys (SECURITY)
+*.key
+*.crt
+*.pem
+*.p12
+*.pfx
+*.cer
+*.der
+pki/**/*.key
+pki/**/*.crt
+pki/**/*.pem
+!pki/ca/ca.crt
+!pki/scripts/
+
 # Logs
 logs/*.log
 logs/*.log.*
@@ -26,6 +40,7 @@ bin/
 *.out
 coverage.out
 coverage.html
+coverage_models.html
 
 # Go
 go.work
