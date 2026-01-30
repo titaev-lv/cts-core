@@ -27,6 +27,7 @@ help:
 	@echo "  docker-logs    - View Docker logs"
 	@echo "  db-ping        - Check MySQL database connection"
 	@echo "  db-test        - Run database integration tests"
+	@echo "  hsm-test       - Run HSM integration tests"
 
 # Install dependencies
 install:
@@ -107,15 +108,21 @@ docker-logs:
 	@docker compose logs -f $(BINARY_NAME)
 
 # Database operations
-.PHONY: db-ping db-test
+.PHONY: db-ping db-test hsm-test
 
 # Ping database
 db-ping:
 	@echo "Pinging MySQL database..."
 	@mysql -h 127.0.0.1 -P 3306 -u root -proot -e "SELECT 1 AS 'Connection OK';" ct_system || echo "Failed to connect. Check MySQL credentials in conf/config.yaml"
 
-# Run integration tests
+# Run database tests
 db-test:
 	@echo "Running database integration tests..."
 	@echo "Note: Tests requiring MySQL will be skipped if MYSQL_HOST is not set"
 	@go test -v ./internal/db/...
+
+# Run HSM integration tests
+hsm-test:
+	@echo "Running HSM integration tests..."
+	@echo "Note: Requires HSM service at https://192.168.50.4:8443"
+	@HSM_URL=https://192.168.50.4:8443 go test -v -tags=integration ./internal/hsm/...
