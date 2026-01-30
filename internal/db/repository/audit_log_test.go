@@ -55,7 +55,7 @@ func TestAuditLogRepository_List_WithFilters(t *testing.T) {
 	uid := int32(1)
 	action := "CREATE"
 	resourceType := "trader"
-	
+
 	rows := sqlmock.NewRows([]string{
 		"ID", "TIMESTAMP", "UID", "ACTION", "RESOURCE_TYPE", "RESOURCE_ID",
 		"OLD_VALUE", "NEW_VALUE", "IP_ADDRESS", "USER_AGENT", "SUCCESS", "ERROR_MESSAGE",

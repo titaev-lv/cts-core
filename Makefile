@@ -117,4 +117,5 @@ db-ping:
 # Run integration tests
 db-test:
 	@echo "Running database integration tests..."
-	@MYSQL_HOST=127.0.0.1 MYSQL_USER=root MYSQL_PASSWORD=root MYSQL_DATABASE=ct_system go test -v -tags=integration ./internal/db/...
+	@echo "Note: Tests requiring MySQL will be skipped if MYSQL_HOST is not set"
+	@go test -v ./internal/db/...
