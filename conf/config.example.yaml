@@ -22,12 +22,10 @@ server:
 
 # MySQL Database configuration
 mysql:
-  # Docker: use "host.docker.internal" (Docker Desktop) or "172.17.0.1" (Linux bridge)
-  # Local: use "127.0.0.1" or "localhost"
-  host: "host.docker.internal"   # ← Docker: access MySQL on host
+  host: "127.0.0.1"              # Use "mysql" for Docker
   port: 3306
   user: "root"
-  password: "CHANGE_ME"          # TODO: Use env var CTS_MYSQL_PASSWORD in production
+  password: "root"          # TODO: Use env var CTS_MYSQL_PASSWORD in production
   database: "ct_system"
   
   pool:
@@ -48,15 +46,9 @@ mysql:
     multiplier: 2.0
 
 # HSM Service configuration
+# Two contexts: Trading (exchange keys) + 2FA (user secrets)
 hsm:
-  url: "https://hsm-service:8443"
-  
-  tls:
-    enabled: true
-    ca_file: "pki/ca/ca.crt"
-    cert_file: "pki/client/cts-core-hsm.crt"
-    key_file: "pki/client/cts-core-hsm.key"
-    
+  url: "https://192.168.50.4:8443"
   timeout: 10s
   
   retry:
@@ -64,6 +56,24 @@ hsm:
     initial_delay: 200ms
     max_delay: 10s
     multiplier: 2.0
+  
+  # Trading context (exchange API keys encryption)
+  trading:
+    context: "exchange-key"
+    tls:
+      enabled: true
+      ca_file: "pki/ca/ca.crt"
+      cert_file: "pki/client/hsm-trading-client-1.crt"
+      key_file: "pki/client/hsm-trading-client-1.key"
+  
+  # 2FA context (user 2FA secrets - for re-encryption job only)
+  two_fa:
+    context: "2fa"
+    tls:
+      enabled: true
+      ca_file: "pki/ca/ca.crt"
+      cert_file: "pki/client/hsm-2fa-client-1.crt"
+      key_file: "pki/client/hsm-2fa-client-1.key"
 
 # State management
 state:

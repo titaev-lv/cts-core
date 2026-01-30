@@ -68,11 +68,19 @@ type RetryConfig struct {
 }
 
 // HSMConfig contains HSM service connection settings
+// Supports two contexts: Trading (exchange keys) + 2FA (user secrets)
 type HSMConfig struct {
-	URL     string        `yaml:"url"`
-	TLS     TLSConfig     `yaml:"tls"`
-	Timeout time.Duration `yaml:"timeout"`
-	Retry   RetryConfig   `yaml:"retry"`
+	URL     string            `yaml:"url"`
+	Timeout time.Duration     `yaml:"timeout"`
+	Retry   RetryConfig       `yaml:"retry"`
+	Trading HSMContextConfig  `yaml:"trading"`
+	TwoFA   HSMContextConfig  `yaml:"two_fa"`
+}
+
+// HSMContextConfig contains settings for a specific HSM context
+type HSMContextConfig struct {
+	Context string    `yaml:"context"`
+	TLS     TLSConfig `yaml:"tls"`
 }
 
 // StateConfig contains state file settings

@@ -82,12 +82,15 @@ func main() {
 		log.Info("Found traders", "count", len(traders))
 	}
 
-	// Phase 1.3 - Initialize HSM client
-	hsmCfg := hsm.ClientConfig{
+	// Phase 1.3 - Initialize HSM clients (Trading + 2FA contexts)
+	hsmLogger := logger.Get("hsm")
+
+	// 1. Trading context (exchange API keys)
+	hsmTradingCfg := hsm.ClientConfig{
 		BaseURL:        cfg.HSM.URL,
-		CertPath:       cfg.HSM.TLS.CertFile,
-		KeyPath:        cfg.HSM.TLS.KeyFile,
-		CAPath:         cfg.HSM.TLS.CAFile,
+		CertPath:       cfg.HSM.Trading.TLS.CertFile,
+		KeyPath:        cfg.HSM.Trading.TLS.KeyFile,
+		CAPath:         cfg.HSM.Trading.TLS.CAFile,
 		RequestTimeout: cfg.HSM.Timeout,
 		RetryConfig: hsm.RetryConfig{
 			MaxAttempts: cfg.HSM.Retry.MaxAttempts,
@@ -97,32 +100,74 @@ func main() {
 		},
 	}
 
-	hsmLogger := logger.Get("hsm")
-	hsmClient, err := hsm.NewClient(hsmCfg, hsmLogger)
+	hsmTradingClient, err := hsm.NewClient(hsmTradingCfg, hsmLogger)
 	if err != nil {
-		log.Error("Failed to create HSM client", "error", err)
+		log.Error("Failed to create HSM Trading client", "error", err)
 		os.Exit(1)
 	}
-	defer hsmClient.Close()
+	defer hsmTradingClient.Close()
 
-	// Test HSM connection with encrypt/decrypt
-	testPlaintext := []byte("test-credential")
-	keyID, ciphertext, err := hsmClient.Encrypt(ctx, "exchange-key", testPlaintext)
+	// Test Trading context
+	testPlaintext := []byte("binance_api_key=test123")
+	keyID, ciphertext, err := hsmTradingClient.Encrypt(ctx, cfg.HSM.Trading.Context, testPlaintext)
 	if err != nil {
-		log.Warn("HSM encrypt test failed (HSM service may be unavailable)", "error", err)
+		log.Warn("HSM Trading encrypt test failed (HSM service may be unavailable)", "error", err, "context", cfg.HSM.Trading.Context)
 	} else {
-		log.Info("HSM encrypt successful", "key_id", keyID)
+		log.Info("HSM Trading encrypt successful", "key_id", keyID, "context", cfg.HSM.Trading.Context)
 
 		// Test decrypt
-		decrypted, err := hsmClient.Decrypt(ctx, "exchange-key", keyID, ciphertext)
+		decrypted, err := hsmTradingClient.Decrypt(ctx, cfg.HSM.Trading.Context, keyID, ciphertext)
 		if err != nil {
-			log.Warn("HSM decrypt test failed", "error", err)
+			log.Warn("HSM Trading decrypt test failed", "error", err)
 		} else if string(decrypted) == string(testPlaintext) {
-			log.Info("HSM decrypt successful - round-trip verified")
+			log.Info("HSM Trading decrypt successful - round-trip verified")
 		} else {
-			log.Warn("HSM decrypt mismatch", "expected", string(testPlaintext), "got", string(decrypted))
+			log.Warn("HSM Trading decrypt mismatch", "expected", string(testPlaintext), "got", string(decrypted))
 		}
 	}
+
+	// 2. 2FA context (for re-encryption job only, not used in normal operation)
+	hsm2FACfg := hsm.ClientConfig{
+		BaseURL:        cfg.HSM.URL,
+		CertPath:       cfg.HSM.TwoFA.TLS.CertFile,
+		KeyPath:        cfg.HSM.TwoFA.TLS.KeyFile,
+		CAPath:         cfg.HSM.TwoFA.TLS.CAFile,
+		RequestTimeout: cfg.HSM.Timeout,
+		RetryConfig: hsm.RetryConfig{
+			MaxAttempts: cfg.HSM.Retry.MaxAttempts,
+			InitialWait: cfg.HSM.Retry.InitialDelay,
+			MaxWait:     cfg.HSM.Retry.MaxDelay,
+			Multiplier:  cfg.HSM.Retry.Multiplier,
+		},
+	}
+
+	hsm2FAClient, err := hsm.NewClient(hsm2FACfg, hsmLogger)
+	if err != nil {
+		log.Error("Failed to create HSM 2FA client", "error", err)
+		os.Exit(1)
+	}
+	defer hsm2FAClient.Close()
+
+	// Test 2FA context
+	test2FAPlaintext := []byte("totp_secret=JBSWY3DPEHPK3PXP")
+	keyID2FA, ciphertext2FA, err := hsm2FAClient.Encrypt(ctx, cfg.HSM.TwoFA.Context, test2FAPlaintext)
+	if err != nil {
+		log.Warn("HSM 2FA encrypt test failed (HSM service may be unavailable)", "error", err, "context", cfg.HSM.TwoFA.Context)
+	} else {
+		log.Info("HSM 2FA encrypt successful", "key_id", keyID2FA, "context", cfg.HSM.TwoFA.Context)
+
+		// Test decrypt
+		decrypted2FA, err := hsm2FAClient.Decrypt(ctx, cfg.HSM.TwoFA.Context, keyID2FA, ciphertext2FA)
+		if err != nil {
+			log.Warn("HSM 2FA decrypt test failed", "error", err)
+		} else if string(decrypted2FA) == string(test2FAPlaintext) {
+			log.Info("HSM 2FA decrypt successful - round-trip verified")
+		} else {
+			log.Warn("HSM 2FA decrypt mismatch", "expected", string(test2FAPlaintext), "got", string(decrypted2FA))
+		}
+	}
+
+	log.Info("HSM clients initialized", "trading_context", cfg.HSM.Trading.Context, "2fa_context", cfg.HSM.TwoFA.Context)
 
 	// TODO: Phase 1.4 - Load state
 	// TODO: Phase 1.5 - Start REST server
