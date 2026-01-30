@@ -17,7 +17,6 @@ conf/config.yaml
 pki/**/*.key
 pki/**/*.crt
 pki/**/*.pem
-!pki/ca/ca.crt
 !pki/scripts/
 
 # Logs
