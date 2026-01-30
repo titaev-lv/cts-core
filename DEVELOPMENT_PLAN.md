@@ -1,8 +1,8 @@
 # CTS-Core & Trader Daemon Development Plan
 
-> **Версия документа**: 1.1.0  
-> **Дата**: 2026-01-28  
-> **Статус**: Готов к реализации (все архитектурные решения приняты)  
+> **Версия документа**: 1.2.0  
+> **Дата**: 2026-01-31  
+> **Статус**: Phase 1.3 Complete | Phase 1.4 In Progress  
 > **Связанные документы**: [ARCHITECTURE.md](ARCHITECTURE.md), [CONTEXT.md](CONTEXT.md), [API_SPECIFICATION.md](API_SPECIFICATION.md)
 
 ---
@@ -21,17 +21,17 @@
 
 ```mermaid
 gantt
-    title CTS-Core Development Plan
+    title CTS-Core Development Plan (Updated: 2026-01-31)
     dateFormat  YYYY-MM-DD
-    section Phase 0: Database
-    SQL migrations (7 tables)         :p0a, 2026-01-28, 2d
+    section Phase 0: Database ✅
+    SQL migrations                    :done, p0a, 2026-01-28, 1d
     
-    section Phase 1: Foundation
-    Project setup, config, logger     :p1a, after p0a, 3d
-    MySQL connection pool             :p1b, after p1a, 2d
-    HSM client (mTLS)                 :p1c, after p1a, 2d
-    State management (daemon.state)   :p1d, after p1b, 2d
-    Basic REST API server             :p1e, after p1b, 2d
+    section Phase 1: Foundation ⚡
+    Project setup, config, logger     :done, p1a, 2026-01-28, 2d
+    MySQL connection pool + repo      :done, p1b, 2026-01-29, 2d
+    HSM client (dual context)         :done, p1c, 2026-01-30, 2d
+    State management (daemon.state)   :active, p1d, 2026-01-31, 2d
+    Basic REST API server             :p1e, after p1d, 2d
     
     section Phase 2: Core Features
     WebSocket server (traders)        :p2a, after p1e, 3d
@@ -94,185 +94,55 @@ gantt
 
 ### Phase 0: Database Schema ✅ COMPLETE
 
-**Цель:** Применить SQL миграции для создания 9 новых таблиц + 4 ALTER.
+**Время:** 1 день ✅ | **Гайд:** [guides/phase_0_database_migrations.md](guides/phase_0_database_migrations.md)
 
-**Время:** 1.5 часа ✅
-
-**Детальный гайд:** [guides/phase_0_database_migrations.md](guides/phase_0_database_migrations.md)
-
-**Результаты:**
-1. ✅ Применена миграция migrations/001_phase1_schema.sql
-2. ✅ Создано 9 новых таблиц (TRADER, TRADER_SESSION, ARBITRAGE_ORDER, и др.)
-3. ✅ Выполнено 4 ALTER (ARBITRAGE_TRANS, USER_2FA, MONITORING, TRADE)
-4. ✅ Добавлены 4 scheduler tasks
-5. ✅ Все foreign keys и UNIQUE constraints работают
-
-**Deliverables:**
-- ✅ 9 новых таблиц создано
-- ✅ ARBITRAGE_TRANS.ID: INT→BIGINT (future-proof)
-- ✅ USER_2FA обновлена (enc_key_version, needs_reencryption)
-- ✅ MONITORING и TRADE обновлены (trader assignment)
+**Что сделано:**
+- ✅ 9 новых таблиц (TRADER, TRADER_SESSION, ARBITRAGE_ORDER, и др.)
+- ✅ 4 ALTER (ARBITRAGE_TRANS→BIGINT, USER_2FA, MONITORING, TRADE)
 - ✅ 4 scheduler tasks инициализированы
-- ✅ 18 таблиц total (9 new + 4 altered + 5 existing)
-
-**Definition of Done:**
-- ✅ `mysql -e "SHOW TABLES;"` показывает 18 таблиц
-- ✅ Все тесты из гайда пройдены
-- ✅ Migration успешно выполнена
-- ✅ Готово к Phase 1.1
+- ✅ Всего 18 таблиц в БД
 
 ---
 
-### Phase 1.1: Project Setup ✅ DONE
+### Phase 1.1: Project Setup ✅ COMPLETE
 
-**Цель:** Создать базовую структуру проекта, go.mod, config, logger.
+**Время:** 2 дня ✅ | **Гайд:** [guides/phase_1_1_project_setup.md](guides/phase_1_1_project_setup.md)
 
-**Время:** 1 день (завершено)
-
-**Детальный гайд:** [guides/phase_1_1_project_setup.md](guides/phase_1_1_project_setup.md)
-
-**Краткий план:**
-1. ✅ Создать структуру директорий (30 мин) - DONE
-2. ✅ Инициализировать go.mod (15 мин) - DONE
-3. ✅ Создать config.yaml + loader (45 мин) - DONE
-4. ✅ Config tests (30 мин) - DONE
-5. ✅ Logger с slog + tests (1.5 часа) - DONE
-6. ✅ Makefile (30 мин) - DONE
-7. ✅ .gitignore verification (15 мин) - DONE
-8. ✅ **🐳 Docker setup для dev** (2 часа) - DONE
-   - Dockerfile (multi-stage build, 20.5 MB)
-   - docker-compose.yml (без MySQL)
-   - .dockerignore
-
-**Deliverables:**
-- ✅ Project structure (cmd/, internal/, conf/, logs/, state/) - DONE
-- ✅ go.mod с dependencies (yaml v3.0.1) - DONE
-- ✅ config.yaml (118 строк) + validation - DONE
-- ✅ Logger (slog, custom rotation, error.log) + tests (86.9% coverage) - DONE
-- ✅ main.go компилируется и запускается (3.8 MB) - DONE
-- ✅ Makefile с 14 targets - DONE
-- ✅ .gitignore verification (coverage.*, config.yaml removed from git) - DONE
-- ✅ **Dockerfile + docker-compose.yml (dev environment)** - DONE
-
-**🐳 Deployment Strategy:**
-- **DEV**: Docker Compose (MySQL на хосте через host.docker.internal)
-- **PROD**: Systemd service на Debian 13 (binary deployment) - документация позже
-
-**Definition of Done:**
-- [x] `make build` создает bin/cts-core (3.8 MB)
-- [x] `./bin/cts-core -config conf/config.yaml` запускается без ошибок
-- [x] `make test` проходит (14/14 tests, config: 82.4%, logger: 86.9%)
-- [x] **`docker compose build` собирает образ (20.5 MB)**
-- [x] Закоммичено в git
-
-**📊 Результаты:**
-- **Тесты:** 14/14 pass (6 config + 8 logger)
-- **Coverage:** config 82.4%, logger 86.9%
-- **Binary size:** 3.8 MB (native), 20.5 MB (Docker image)
-- **Files:** 9 Go files, 3 config files, 4 Docker files
+**Что сделано:**
+- ✅ Project structure (cmd/, internal/, conf/, logs/, state/)
+- ✅ Config.yaml + validation + logger (slog с rotation)
+- ✅ Makefile (14 targets) + Dockerfile + docker-compose.yml
+- ✅ Tests: 14/14 pass (config 82.4%, logger 86.9%)
+- ✅ Binary: 3.8 MB (native), Docker: 20.5 MB
 
 ---
 
 ### Phase 1.2: MySQL Connection Pool ✅ COMPLETE
 
-**Цель:** Реализовать connection pool с optional mTLS, retry logic, repository pattern.
+**Время:** 2 дня ✅ | **Гайд:** ~~guides/phase_1_2_mysql_pool.md~~ (DELETED - phase complete)
 
-**Время:** 2 дня ✅ DONE
-
-**Детальный гайд:** ~~guides/phase_1_2_mysql_pool.md~~ (DELETED - phase complete)
-
-**Краткий план:**
-1. ✅ MySQL client с optional mTLS (Phase 1.2.1)
-2. ✅ Connection pool настройка (Phase 1.2.1)
-3. ✅ Retry logic (exponential backoff) (Phase 1.2.1)
-4. ✅ Database models (Phase 1.2.2)
-5. ✅ Repository pattern (Phase 1.2.3)
-6. ✅ Repository integration + health check (Phase 1.2.4)
-7. ✅ Tests (71 tests: 59 passing, 12 skipped)
-
-**Deliverables:**
-- ✅ internal/db/mysql.go (209 lines, connection pool + optional mTLS)
-- ✅ MySQLClient with WithRetry() method (exponential backoff)
-- ✅ 6 database models: Trader, TraderSession, TraderResource, ArbitrageOrder, AuditLog, ReencryptionJob
-- ✅ 8 repositories: Trader, TraderSession, TraderResource, ArbitrageOrder, AuditLog, ReencryptionJob, ReencryptionProgress, SchedulerTask
-- ✅ Repository integration in main.go (sqlx wrapper)
-- ✅ Health check endpoint (internal/api/rest/health.go)
-- ✅ Makefile targets: db-ping, db-test
-- ✅ Tests: 71 tests (59 passing, 12 skipped)
-- ✅ Dependencies: jmoiron/sqlx, gin-gonic/gin
-
-**Definition of Done:**
-- ✅ Connection pool работает без mTLS (dev)
-- ✅ Connection pool поддерживает mTLS (prod ready)
-- ✅ Retry logic протестирован (3 retries with exponential backoff)
-- ✅ Repository CRUD работает для всех таблиц (1941 lines implementation)
-- ✅ Unit tests проходят (59/71 pass, 12 skipped for NamedExec)
-- ✅ Health check endpoint готов для Phase 1.5
-- ✅ Закоммичено в git (commit 9c643cd)
+**Что сделано:**
+- ✅ MySQL client с optional mTLS + retry logic (exponential backoff)
+- ✅ 6 database models + 8 repositories (CRUD)
+- ✅ Repository integration в main.go (sqlx wrapper)
+- ✅ Tests: 71 total (59 passing, 12 skipped)
+- ✅ Makefile: db-ping, db-test
+- ✅ 1941 строка implementation
 
 ---
 
 ### Phase 1.3: HSM Client ✅ COMPLETE
 
-**Цель:** Реализовать mTLS client для hsm-service с поддержкой двух контекстов.
+**Время:** 2 дня ✅ | **Гайд:** ~~guides/phase_1_3_hsm_client.md~~ (DELETED - phase complete)
 
-**Время:** 2 дня ✅ DONE
-
-**Детальный гайд:** ~~guides/phase_1_3_hsm_client.md~~ (DELETED - phase complete)
-
-**Краткий план:**
-1. ✅ HSM types (EncryptRequest/Response, DecryptRequest/Response)
-2. ✅ mTLS HTTP client с retry logic (exponential backoff)
-3. ✅ Encrypt/Decrypt methods
-4. ✅ **Dual HSM clients (Trading + 2FA contexts)**
-5. ✅ Integration tests с реальным HSM service
-6. ✅ Unit tests (backoff, base64, config)
-7. ✅ Config tests для dual-context structure
-8. ✅ Полная документация (ARCHITECTURE.md + README_TESTS.md)
-
-**Deliverables:**
-- ✅ internal/hsm/types.go (39 строк) - API types
-- ✅ internal/hsm/client.go (265 строк) - mTLS client с retry
-- ✅ internal/hsm/client_test.go (85 строк, 3 unit tests)
-- ✅ internal/hsm/integration_test.go (178 строк, 6 integration tests)
-- ✅ internal/hsm/ARCHITECTURE.md (241 строка) - полная документация
-- ✅ internal/hsm/README_TESTS.md (140 строк) - testing guide
-- ✅ **Два HSM клиента в main.go:**
-  - hsmTradingClient (OU=Trading, context=exchange-key)
-  - hsm2FAClient (OU=2FA, context=2fa)
-- ✅ Config: dual-context structure (trading + two_fa)
-- ✅ Config tests: TestHSMDualContext() с 4 subtests
-- ✅ Test encrypt/decrypt для обоих контекстов при старте
-- ✅ Makefile: hsm-test target для integration tests
-
-**🔐 Security Model:**
-- HSM ACL isolation: Trading cert CANNOT access 2fa context (403 Forbidden)
-- 2FA cert CANNOT access exchange-key context (403 Forbidden)
-- Both KEK keys functional: kek-exchange-key-v1, kek-2fa-v1
-- Re-encryption job support: CTS-Core может перекодировать обе таблицы (EXCHANGE_ACCOUNTS + USER_2FA)
-
-**Tests:**
-- ✅ Unit tests: 3/3 passing (calculateBackoff, base64, config)
-- ✅ Integration tests: 6/6 passing (Trading context, 2FA context, ACL isolation)
-- ✅ Config tests: 6/6 passing (includes TestHSMDualContext)
-- ✅ Total: 9/9 HSM tests passing
-
-**Definition of Done:**
-- ✅ mTLS connection к hsm-service работает с двумя сертификатами
-- ✅ Encrypt() и Decrypt() методы реализованы с context parameter
-- ✅ Retry logic с exponential backoff (5 retries, 200ms→10s, 2.0x)
-- ✅ Unit tests проходят (3/3)
-- ✅ Integration tests с реальным HSM (6/6) + ACL verification
-- ✅ Config tests для dual-context (6/6)
-- ✅ Graceful handling когда HSM unavailable
-- ✅ Документация (ARCHITECTURE.md + README_TESTS.md)
-- ✅ Закоммичено в git (commits: ab938ed, 760c970, 6407dce, adc63df, 9d67de7)
-
-**📊 Metrics:**
-- Code: 569 строк (types + client + tests)
-- Documentation: 381 строка (ARCHITECTURE + README_TESTS)
-- Total: 950+ строк
-- Test coverage: 9/9 tests passing
+**Что сделано:**
+- ✅ **Dual HSM clients** (Trading + 2FA contexts) в main.go
+- ✅ mTLS client с exponential backoff retry (5 attempts, 200ms→10s)
+- ✅ Encrypt/Decrypt methods с context parameter
+- ✅ ACL isolation: Trading cert ≠ 2fa context (403 Forbidden)
+- ✅ Tests: 9/9 pass (3 unit + 6 integration + config tests)
+- ✅ Docs: ARCHITECTURE.md (241 lines) + README_TESTS.md (140 lines)
+- ✅ 950+ строк (569 code + 381 docs)
 
 ---
 
