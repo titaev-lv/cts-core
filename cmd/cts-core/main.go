@@ -11,6 +11,7 @@ import (
 	"github.com/titaev-lv/cts-core/internal/config"
 	"github.com/titaev-lv/cts-core/internal/db"
 	"github.com/titaev-lv/cts-core/internal/db/repository"
+	"github.com/titaev-lv/cts-core/internal/hsm"
 	"github.com/titaev-lv/cts-core/internal/logger"
 )
 
@@ -81,7 +82,48 @@ func main() {
 		log.Info("Found traders", "count", len(traders))
 	}
 
-	// TODO: Phase 1.3 - Initialize HSM client
+	// Phase 1.3 - Initialize HSM client
+	hsmCfg := hsm.ClientConfig{
+		BaseURL:        cfg.HSM.URL,
+		CertPath:       cfg.HSM.TLS.CertFile,
+		KeyPath:        cfg.HSM.TLS.KeyFile,
+		CAPath:         cfg.HSM.TLS.CAFile,
+		RequestTimeout: cfg.HSM.Timeout,
+		RetryConfig: hsm.RetryConfig{
+			MaxAttempts: cfg.HSM.Retry.MaxAttempts,
+			InitialWait: cfg.HSM.Retry.InitialDelay,
+			MaxWait:     cfg.HSM.Retry.MaxDelay,
+			Multiplier:  cfg.HSM.Retry.Multiplier,
+		},
+	}
+
+	hsmLogger := logger.Get("hsm")
+	hsmClient, err := hsm.NewClient(hsmCfg, hsmLogger)
+	if err != nil {
+		log.Error("Failed to create HSM client", "error", err)
+		os.Exit(1)
+	}
+	defer hsmClient.Close()
+
+	// Test HSM connection with encrypt/decrypt
+	testPlaintext := []byte("test-credential")
+	keyID, ciphertext, err := hsmClient.Encrypt(ctx, "exchange-key", testPlaintext)
+	if err != nil {
+		log.Warn("HSM encrypt test failed (HSM service may be unavailable)", "error", err)
+	} else {
+		log.Info("HSM encrypt successful", "key_id", keyID)
+
+		// Test decrypt
+		decrypted, err := hsmClient.Decrypt(ctx, "exchange-key", keyID, ciphertext)
+		if err != nil {
+			log.Warn("HSM decrypt test failed", "error", err)
+		} else if string(decrypted) == string(testPlaintext) {
+			log.Info("HSM decrypt successful - round-trip verified")
+		} else {
+			log.Warn("HSM decrypt mismatch", "expected", string(testPlaintext), "got", string(decrypted))
+		}
+	}
+
 	// TODO: Phase 1.4 - Load state
 	// TODO: Phase 1.5 - Start REST server
 
