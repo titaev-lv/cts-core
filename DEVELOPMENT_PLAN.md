@@ -214,34 +214,65 @@ gantt
 
 ### Phase 1.3: HSM Client ✅ COMPLETE
 
-**Цель:** Реализовать mTLS client для hsm-service.
+**Цель:** Реализовать mTLS client для hsm-service с поддержкой двух контекстов.
 
 **Время:** 2 дня ✅ DONE
 
-**Детальный гайд:** `guides/phase_1_3_hsm_client.md` (частично использован)
+**Детальный гайд:** ~~guides/phase_1_3_hsm_client.md~~ (DELETED - phase complete)
 
 **Краткий план:**
 1. ✅ HSM types (EncryptRequest/Response, DecryptRequest/Response)
-2. ✅ mTLS HTTP client с retry logic
+2. ✅ mTLS HTTP client с retry logic (exponential backoff)
 3. ✅ Encrypt/Decrypt methods
-4. ✅ Integration в main.go
-5. ✅ Tests (backoff, base64, config)
+4. ✅ **Dual HSM clients (Trading + 2FA contexts)**
+5. ✅ Integration tests с реальным HSM service
+6. ✅ Unit tests (backoff, base64, config)
+7. ✅ Config tests для dual-context structure
+8. ✅ Полная документация (ARCHITECTURE.md + README_TESTS.md)
 
 **Deliverables:**
-- ✅ internal/hsm/types.go (41 строк)
-- ✅ internal/hsm/client.go (274 строки)
-- ✅ internal/hsm/client_test.go (88 строк, 3 теста)
-- ✅ HSM client интегрирован в main.go
-- ✅ Config: hsm-trading-client-1 certs, exchange-key context
-- ✅ Test encrypt/decrypt round-trip на старте
+- ✅ internal/hsm/types.go (39 строк) - API types
+- ✅ internal/hsm/client.go (265 строк) - mTLS client с retry
+- ✅ internal/hsm/client_test.go (85 строк, 3 unit tests)
+- ✅ internal/hsm/integration_test.go (178 строк, 6 integration tests)
+- ✅ internal/hsm/ARCHITECTURE.md (241 строка) - полная документация
+- ✅ internal/hsm/README_TESTS.md (140 строк) - testing guide
+- ✅ **Два HSM клиента в main.go:**
+  - hsmTradingClient (OU=Trading, context=exchange-key)
+  - hsm2FAClient (OU=2FA, context=2fa)
+- ✅ Config: dual-context structure (trading + two_fa)
+- ✅ Config tests: TestHSMDualContext() с 4 subtests
+- ✅ Test encrypt/decrypt для обоих контекстов при старте
+- ✅ Makefile: hsm-test target для integration tests
+
+**🔐 Security Model:**
+- HSM ACL isolation: Trading cert CANNOT access 2fa context (403 Forbidden)
+- 2FA cert CANNOT access exchange-key context (403 Forbidden)
+- Both KEK keys functional: kek-exchange-key-v1, kek-2fa-v1
+- Re-encryption job support: CTS-Core может перекодировать обе таблицы (EXCHANGE_ACCOUNTS + USER_2FA)
+
+**Tests:**
+- ✅ Unit tests: 3/3 passing (calculateBackoff, base64, config)
+- ✅ Integration tests: 6/6 passing (Trading context, 2FA context, ACL isolation)
+- ✅ Config tests: 6/6 passing (includes TestHSMDualContext)
+- ✅ Total: 9/9 HSM tests passing
 
 **Definition of Done:**
-- ✅ mTLS connection к hsm-service работает (hsm-trading-client-1.crt/key)
-- ✅ Encrypt() и Decrypt() методы реализованы
+- ✅ mTLS connection к hsm-service работает с двумя сертификатами
+- ✅ Encrypt() и Decrypt() методы реализованы с context parameter
 - ✅ Retry logic с exponential backoff (5 retries, 200ms→10s, 2.0x)
 - ✅ Unit tests проходят (3/3)
+- ✅ Integration tests с реальным HSM (6/6) + ACL verification
+- ✅ Config tests для dual-context (6/6)
 - ✅ Graceful handling когда HSM unavailable
-- ✅ Закоммичено в git (commit ab938ed)
+- ✅ Документация (ARCHITECTURE.md + README_TESTS.md)
+- ✅ Закоммичено в git (commits: ab938ed, 760c970, 6407dce, adc63df, 9d67de7)
+
+**📊 Metrics:**
+- Code: 569 строк (types + client + tests)
+- Documentation: 381 строка (ARCHITECTURE + README_TESTS)
+- Total: 950+ строк
+- Test coverage: 9/9 tests passing
 
 ---
 
