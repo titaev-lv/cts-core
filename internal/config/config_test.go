@@ -28,6 +28,27 @@ func TestLoad(t *testing.T) {
 	if cfg.Logging.Level != "debug" {
 		t.Errorf("Expected log level=debug, got %s", cfg.Logging.Level)
 	}
+
+	// Test HSM dual-context configuration
+	if cfg.HSM.URL != "https://192.168.50.4:8443" {
+		t.Errorf("Expected HSM URL=https://192.168.50.4:8443, got %s", cfg.HSM.URL)
+	}
+
+	if cfg.HSM.Trading.Context != "exchange-key" {
+		t.Errorf("Expected HSM Trading context=exchange-key, got %s", cfg.HSM.Trading.Context)
+	}
+
+	if cfg.HSM.Trading.TLS.CertFile != "pki/client/hsm-trading-client-1.crt" {
+		t.Errorf("Expected Trading cert=hsm-trading-client-1.crt, got %s", cfg.HSM.Trading.TLS.CertFile)
+	}
+
+	if cfg.HSM.TwoFA.Context != "2fa" {
+		t.Errorf("Expected HSM 2FA context=2fa, got %s", cfg.HSM.TwoFA.Context)
+	}
+
+	if cfg.HSM.TwoFA.TLS.CertFile != "pki/client/hsm-2fa-client-1.crt" {
+		t.Errorf("Expected 2FA cert=hsm-2fa-client-1.crt, got %s", cfg.HSM.TwoFA.TLS.CertFile)
+	}
 }
 
 func TestValidate(t *testing.T) {
@@ -157,4 +178,109 @@ func TestIsProduction(t *testing.T) {
 	if cfg.IsProduction() {
 		t.Error("Expected IsProduction() to return false")
 	}
+}
+
+func TestHSMDualContext(t *testing.T) {
+	// Load config with HSM dual-context configuration
+	cfg, err := Load("../../conf/config.example.yaml")
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Test base HSM configuration
+	if cfg.HSM.URL == "" {
+		t.Error("HSM URL should not be empty")
+	}
+
+	if cfg.HSM.Timeout == 0 {
+		t.Error("HSM timeout should not be zero")
+	}
+
+	// Test Trading context
+	t.Run("Trading Context", func(t *testing.T) {
+		if cfg.HSM.Trading.Context == "" {
+			t.Error("Trading context should not be empty")
+		}
+
+		if cfg.HSM.Trading.Context != "exchange-key" {
+			t.Errorf("Expected Trading context=exchange-key, got %s", cfg.HSM.Trading.Context)
+		}
+
+		if !cfg.HSM.Trading.TLS.Enabled {
+			t.Error("Trading TLS should be enabled")
+		}
+
+		if cfg.HSM.Trading.TLS.CertFile == "" {
+			t.Error("Trading cert file should not be empty")
+		}
+
+		if cfg.HSM.Trading.TLS.KeyFile == "" {
+			t.Error("Trading key file should not be empty")
+		}
+
+		if cfg.HSM.Trading.TLS.CAFile == "" {
+			t.Error("Trading CA file should not be empty")
+		}
+	})
+
+	// Test 2FA context
+	t.Run("2FA Context", func(t *testing.T) {
+		if cfg.HSM.TwoFA.Context == "" {
+			t.Error("2FA context should not be empty")
+		}
+
+		if cfg.HSM.TwoFA.Context != "2fa" {
+			t.Errorf("Expected 2FA context=2fa, got %s", cfg.HSM.TwoFA.Context)
+		}
+
+		if !cfg.HSM.TwoFA.TLS.Enabled {
+			t.Error("2FA TLS should be enabled")
+		}
+
+		if cfg.HSM.TwoFA.TLS.CertFile == "" {
+			t.Error("2FA cert file should not be empty")
+		}
+
+		if cfg.HSM.TwoFA.TLS.KeyFile == "" {
+			t.Error("2FA key file should not be empty")
+		}
+
+		if cfg.HSM.TwoFA.TLS.CAFile == "" {
+			t.Error("2FA CA file should not be empty")
+		}
+	})
+
+	// Test that contexts are different
+	t.Run("Context Isolation", func(t *testing.T) {
+		if cfg.HSM.Trading.Context == cfg.HSM.TwoFA.Context {
+			t.Error("Trading and 2FA contexts should be different")
+		}
+
+		if cfg.HSM.Trading.TLS.CertFile == cfg.HSM.TwoFA.TLS.CertFile {
+			t.Error("Trading and 2FA should use different certificates")
+		}
+
+		if cfg.HSM.Trading.TLS.KeyFile == cfg.HSM.TwoFA.TLS.KeyFile {
+			t.Error("Trading and 2FA should use different keys")
+		}
+	})
+
+	// Test retry configuration
+	t.Run("Retry Config", func(t *testing.T) {
+		if cfg.HSM.Retry.MaxAttempts == 0 {
+			t.Error("HSM retry max attempts should not be zero")
+		}
+
+		if cfg.HSM.Retry.InitialDelay == 0 {
+			t.Error("HSM retry initial delay should not be zero")
+		}
+
+		if cfg.HSM.Retry.MaxDelay == 0 {
+			t.Error("HSM retry max delay should not be zero")
+		}
+
+		if cfg.HSM.Retry.Multiplier == 0 {
+			t.Error("HSM retry multiplier should not be zero")
+		}
+	})
 }
