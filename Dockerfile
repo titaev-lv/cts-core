@@ -29,7 +29,7 @@ FROM alpine:latest
 RUN apk --no-cache add ca-certificates tzdata
 
 # Создать non-root пользователя
-RUN addgroup -S ctscore && adduser -S ctscore -G ctscore
+#RUN addgroup -S ctscore && adduser -S ctscore -G ctscore
 
 WORKDIR /app
 
@@ -37,14 +37,14 @@ WORKDIR /app
 COPY --from=builder /build/cts-core .
 
 # Скопировать примеры конфигов (реальные будут через volume)
-COPY --chown=ctscore:ctscore conf/config.example.yaml ./conf/
+#COPY --chown=ctscore:ctscore conf/config.example.yaml ./conf/
 
 # Создать необходимые директории
-RUN mkdir -p logs state pki && \
-    chown -R ctscore:ctscore logs state pki
+#RUN mkdir -p logs state pki && \
+#    chown -R ctscore:ctscore logs state pki
 
 # Переключиться на non-root пользователя
-USER ctscore
+#USER ctscore
 
 # Expose порт для REST API (Phase 1.5)
 EXPOSE 8080

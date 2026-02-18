@@ -82,34 +82,7 @@
 - ✅ Error message details
 - ✅ Job and Progress relationship
 
-### 5. audit_test.go
-**Purpose**: Test `AuditLog` struct  
-**Tests**: 19  
-**Coverage**:
-- ✅ JSON marshaling/unmarshaling
-- ✅ AuditAction constants (17 actions)
-  - TRADER_CREATE/DELETE/SUSPEND/RESUME/UPDATE
-  - MONITOR_ASSIGN/UNASSIGN/PAUSE/RESUME
-  - USER_CREATE/DELETE/UPDATE/LOGIN/LOGOUT
-  - CONFIG_UPDATE
-  - KEY_ROTATION
-  - REENCRYPTION_JOB
-- ✅ ResourceType constants (7 types)
-  - trader, monitor, user, config, exchange_account, hsm, scheduler
-- ✅ Audit with user (UID set)
-- ✅ System action (UID=NULL)
-- ✅ Change tracking (old_value → new_value)
-- ✅ IP address tracking (IPv4, IPv6, localhost)
-- ✅ User agent tracking (Chrome, Firefox, Safari, API clients, curl)
-- ✅ Successful vs Failed actions
-- ✅ Critical operations audit
-- ✅ Timestamp precision
-- ✅ Complete audit trail
-- ✅ JSON value extraction
-- ✅ USER_GROUP operations (CREATE/UPDATE/DELETE/ASSIGN/UNASSIGN)
-- ✅ Exchange account audit
-
-### 6. scheduler_test.go
+### 5. scheduler_test.go
 **Purpose**: Test `SchedulerTask` struct  
 **Tests**: 14  
 **Coverage**:

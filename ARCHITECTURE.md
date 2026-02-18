@@ -1745,17 +1745,17 @@ PRODUCTION (VM Debian):
 
 ```yaml
 PRIMARY: JSON файл
-  Path: logs/audit.log
-  Format: JSON lines (one event per line)
-  Write: Synchronous append-only
-  Rotation: logrotate (30 days локально)
-  Permissions: 0600 (read/write только daemon)
+    Path: logs/audit.log
+    Format: JSON lines (one event per line)
+    Write: Synchronous append-only
+    Rotation: logrotate (30 days локально)
+    Permissions: 0600 (read/write только daemon)
   
 SECONDARY: MySQL (Phase 2)
-  Table: AUDIT_LOG
-  Purpose: UI для admin панели, быстрые запросы
-  Retention: последние 7 дней
-  Sync: async worker читает файл → пишет в БД
+    Table: AUDIT_LOG
+    Purpose: UI для admin панели, быстрые запросы
+    Retention: последние 7 дней
+    Sync: async worker читает файл → пишет в БД
 ```
 
 **Logged actions:**
@@ -1768,18 +1768,18 @@ SECONDARY: MySQL (Phase 2)
 **JSON формат:**
 ```json
 {
-  "timestamp": "2026-01-28T15:04:05.123456Z",
-  "user_id": 5,
-  "username": "admin",
-  "action": "TRADER_DELETE",
-  "resource_type": "trader",
-  "resource_id": "trader-eu-1",
-  "old_value": {"id": "trader-eu-1", "status": "active"},
-  "new_value": null,
-  "ip_address": "192.168.1.10",
-  "user_agent": "Mozilla/5.0...",
-  "success": true,
-  "error_message": null
+    "timestamp": "2026-01-28T15:04:05.123456Z",
+    "user_id": 5,
+    "username": "admin",
+    "action": "TRADER_DELETE",
+    "resource_type": "trader",
+    "resource_id": "trader-eu-1",
+    "old_value": {"id": "trader-eu-1", "status": "active"},
+    "new_value": null,
+    "ip_address": "192.168.1.10",
+    "user_agent": "Mozilla/5.0...",
+    "success": true,
+    "error_message": null
 }
 ```
 

@@ -122,39 +122,24 @@ gantt
 | Параметр | CTS-Core | HSM v2.0.0 |
 |----------|----------|------------|
 | **Библиотека** | ✅ slog | ✅ slog |
-| **Формат** | ❌ Plain text | ✅ JSON |
-| **Stdout вывод** | ❌ MISSING | ✅ Есть |
-| **Ротация** | ❌ Custom | ✅ lumberjack |
+| **Формат** | ✅ JSON | ✅ JSON |
+| **Stdout вывод** | ✅ Есть | ✅ Есть |
+| **Ротация** | ✅ lumberjack | ✅ lumberjack |
 | **request_id** | ❌ Нет | ✅ Есть |
-| **Fail-fast проверка логов** | ❌ Нет | ✅ Есть |
+| **Fail-fast проверка логов** | ✅ Есть | ✅ Есть |
 | **Разделение логов** | ❌ Нет | ✅ audit/error |
-| **Видно в docker logs** | ❌ НЕТ | ✅ Да |
+| **Видно в docker logs** | ✅ Да | ✅ Да |
 
 ### ✅ Требуемые изменения (1-2 дня)
 
-**1) Перейти на JSON + stdout + lumberjack**
-```go
-// internal/logger/logger.go
-logFile := &lumberjack.Logger{...}
-w := io.MultiWriter(os.Stdout, logFile)
-handler := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: logLevel})
-```
-
-**2) Добавить request_id**
+**1) Добавить request_id**
 - Заголовок `X-Request-ID` (если нет — сгенерировать)
 - Проброс в access/error/out_request
 
-**3) Разделить логи на потоки**
+**2) Разделить логи на потоки**
 - error: основной системный лог
 - access: входящие HTTP запросы
 - out_request: исходящие HTTP запросы
-
-**4) Fail-fast при недоступной директории логов**
-- Проверка mkdir + write/rename
-- Права директории 0750
-
-**5) Единый формат времени**
-- UTC RFC3339 microseconds через ReplaceAttr
 
 ### 📝 Конфигурация (пример)
 
@@ -433,7 +418,6 @@ mysql -u root -proot -h 127.0.0.1 ct_system -e "SHOW TABLES;"
 -- ARBITRAGE_ORDER           (NEW)
 -- ARBITRAGE_TRANS           (existing)
 -- AUDIT_LOG                 (NEW)
--- EXCHANGE_ACCOUNTS         (existing)
 -- EXCHANGE_LIMITS           (NEW)
 -- MONITORING                (existing, ALTER applied)
 -- ORDER_TRANSACTION         (NEW)
@@ -931,10 +915,10 @@ metrics:
   path: "/metrics"
 
 audit:
-  enabled: true
-  file_path: "logs/audit.log"
-  mysql_enabled: false  # Phase 2
-  retention_days: 30
+    enabled: true
+    file_path: "logs/audit.log"
+    mysql_enabled: false  # Phase 2
+    retention_days: 30
 ```
 
 **internal/config/types.go:**
@@ -1069,6 +1053,7 @@ type AuditConfig struct {
     MySQLEnabled  bool   `yaml:"mysql_enabled"`
     RetentionDays int    `yaml:"retention_days"`
 }
+
 ```
 
 **internal/config/config.go:**
