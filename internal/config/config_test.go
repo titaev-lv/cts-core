@@ -28,6 +28,21 @@ func TestLoad(t *testing.T) {
 	if cfg.Logging.Level != "debug" {
 		t.Errorf("Expected log level=debug, got %s", cfg.Logging.Level)
 	}
+	if cfg.Logging.Dir != "logs" {
+		t.Errorf("Expected log dir=logs, got %s", cfg.Logging.Dir)
+	}
+	if cfg.Logging.MaxFileSizeMB != 100 {
+		t.Errorf("Expected max_file_size_mb=100, got %d", cfg.Logging.MaxFileSizeMB)
+	}
+	if cfg.Logging.MaxBackups != 10 {
+		t.Errorf("Expected max_backups=10, got %d", cfg.Logging.MaxBackups)
+	}
+	if cfg.Logging.MaxAgeDays != 30 {
+		t.Errorf("Expected max_age_days=30, got %d", cfg.Logging.MaxAgeDays)
+	}
+	if !cfg.Logging.Compress {
+		t.Error("Expected compress=true")
+	}
 
 	// Test HSM dual-context configuration
 	if cfg.HSM.URL != "https://192.168.50.4:8443" {

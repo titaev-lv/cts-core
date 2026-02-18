@@ -28,7 +28,14 @@ func main() {
 	}
 
 	// Initialize logger
-	if err := logger.Init(cfg.Logging.Level, cfg.Logging.Dir, cfg.Logging.MaxFileSizeMB); err != nil {
+	if err := logger.Init(
+		cfg.Logging.Level,
+		cfg.Logging.Dir,
+		cfg.Logging.MaxFileSizeMB,
+		cfg.Logging.MaxBackups,
+		cfg.Logging.MaxAgeDays,
+		cfg.Logging.Compress,
+	); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}
@@ -36,6 +43,8 @@ func main() {
 
 	// Get main logger
 	log := logger.Get("main")
+	log.Debug("Logger configured", "level", cfg.Logging.Level, "dir", cfg.Logging.Dir)
+	log.Debug("Loaded configuration", "path", *configPath, "environment", cfg.Environment)
 
 	log.Info("CTS-Core starting",
 		"environment", cfg.Environment,
@@ -58,6 +67,7 @@ func main() {
 		ConnMaxLifetime: cfg.MySQL.Pool.ConnMaxLifetime,
 		ConnMaxIdleTime: 2 * time.Minute, // Fixed value for now
 	}
+	log.Debug("MySQL config", "host", mysqlCfg.Host, "port", mysqlCfg.Port, "database", mysqlCfg.Database, "tls", mysqlCfg.TLSEnabled)
 
 	dbLogger := logger.Get("database")
 	dbClient, err := db.NewMySQLClient(mysqlCfg, dbLogger)
@@ -99,6 +109,7 @@ func main() {
 			Multiplier:  cfg.HSM.Retry.Multiplier,
 		},
 	}
+	log.Debug("HSM trading config", "url", hsmTradingCfg.BaseURL, "context", cfg.HSM.Trading.Context, "timeout", hsmTradingCfg.RequestTimeout)
 
 	hsmTradingClient, err := hsm.NewClient(hsmTradingCfg, hsmLogger)
 	if err != nil {
@@ -140,6 +151,7 @@ func main() {
 			Multiplier:  cfg.HSM.Retry.Multiplier,
 		},
 	}
+	log.Debug("HSM 2FA config", "url", hsm2FACfg.BaseURL, "context", cfg.HSM.TwoFA.Context, "timeout", hsm2FACfg.RequestTimeout)
 
 	hsm2FAClient, err := hsm.NewClient(hsm2FACfg, hsmLogger)
 	if err != nil {

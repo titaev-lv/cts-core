@@ -8,6 +8,8 @@ import (
 "os"
 "testing"
 "time"
+
+"github.com/titaev-lv/cts-core/internal/logger"
 )
 
 // TestHSMIntegration_TradingContext tests real HSM service with Trading OU certificate
@@ -17,6 +19,8 @@ hsmURL := os.Getenv("HSM_URL")
 if hsmURL == "" {
 t.Skip("Skipping integration test: HSM_URL not set")
 }
+
+log := initTestLogger(t)
 
 cfg := ClientConfig{
 BaseURL:        hsmURL,
@@ -32,8 +36,7 @@ Multiplier:  2.0,
 },
 }
 
-logger := slog.Default()
-client, err := NewClient(cfg, logger)
+client, err := NewClient(cfg, log)
 if err != nil {
 t.Fatalf("Failed to create HSM client: %v", err)
 }
@@ -96,6 +99,8 @@ if hsmURL == "" {
 t.Skip("Skipping integration test: HSM_URL not set")
 }
 
+log := initTestLogger(t)
+
 cfg := ClientConfig{
 BaseURL:        hsmURL,
 CertPath:       "../../pki/client/hsm-2fa-client-1.crt",
@@ -110,8 +115,7 @@ Multiplier:  2.0,
 },
 }
 
-logger := slog.Default()
-client, err := NewClient(cfg, logger)
+client, err := NewClient(cfg, log)
 if err != nil {
 t.Fatalf("Failed to create HSM client: %v", err)
 }
@@ -126,6 +130,16 @@ plaintext := []byte("totp_secret=JBSWY3DPEHPK3PXP")
 keyID, ciphertext, err := client.Encrypt(ctx, "2fa", plaintext)
 if err != nil {
 t.Fatalf("Encrypt failed: %v", err)
+}
+
+func initTestLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+	logDir := t.TempDir()
+	if err := logger.Init("debug", logDir, 10, 3, 7, false); err != nil {
+		t.Fatalf("Failed to init logger: %v", err)
+	}
+	t.Cleanup(func() { _ = logger.Close() })
+	return logger.Get("hsm-test")
 }
 
 if keyID == "" {

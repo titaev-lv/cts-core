@@ -1,13 +1,13 @@
 package logger
 
 import (
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
+
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 func TestInit(t *testing.T) {
@@ -16,6 +16,9 @@ func TestInit(t *testing.T) {
 		level         string
 		dir           string
 		maxFileSizeMB int
+		maxBackups    int
+		maxAgeDays    int
+		compress      bool
 		expectedLevel slog.Level
 		expectError   bool
 	}{
@@ -24,6 +27,9 @@ func TestInit(t *testing.T) {
 			level:         "debug",
 			dir:           t.TempDir(),
 			maxFileSizeMB: 10,
+			maxBackups:    3,
+			maxAgeDays:    7,
+			compress:      true,
 			expectedLevel: slog.LevelDebug,
 			expectError:   false,
 		},
@@ -32,6 +38,9 @@ func TestInit(t *testing.T) {
 			level:         "info",
 			dir:           t.TempDir(),
 			maxFileSizeMB: 10,
+			maxBackups:    3,
+			maxAgeDays:    7,
+			compress:      true,
 			expectedLevel: slog.LevelInfo,
 			expectError:   false,
 		},
@@ -40,6 +49,9 @@ func TestInit(t *testing.T) {
 			level:         "warn",
 			dir:           t.TempDir(),
 			maxFileSizeMB: 10,
+			maxBackups:    3,
+			maxAgeDays:    7,
+			compress:      true,
 			expectedLevel: slog.LevelWarn,
 			expectError:   false,
 		},
@@ -48,6 +60,9 @@ func TestInit(t *testing.T) {
 			level:         "error",
 			dir:           t.TempDir(),
 			maxFileSizeMB: 10,
+			maxBackups:    3,
+			maxAgeDays:    7,
+			compress:      true,
 			expectedLevel: slog.LevelError,
 			expectError:   false,
 		},
@@ -56,6 +71,9 @@ func TestInit(t *testing.T) {
 			level:         "unknown",
 			dir:           t.TempDir(),
 			maxFileSizeMB: 10,
+			maxBackups:    3,
+			maxAgeDays:    7,
+			compress:      true,
 			expectedLevel: slog.LevelInfo,
 			expectError:   false,
 		},
@@ -64,6 +82,9 @@ func TestInit(t *testing.T) {
 			level:         "DEBUG",
 			dir:           t.TempDir(),
 			maxFileSizeMB: 10,
+			maxBackups:    3,
+			maxAgeDays:    7,
+			compress:      true,
 			expectedLevel: slog.LevelDebug,
 			expectError:   false,
 		},
@@ -71,7 +92,7 @@ func TestInit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Init(tt.level, tt.dir, tt.maxFileSizeMB)
+			err := Init(tt.level, tt.dir, tt.maxFileSizeMB, tt.maxBackups, tt.maxAgeDays, tt.compress)
 			if (err != nil) != tt.expectError {
 				t.Errorf("Init() error = %v, expectError %v", err, tt.expectError)
 				return
@@ -93,14 +114,25 @@ func TestInit(t *testing.T) {
 					t.Errorf("GetLogDir() = %v, want %v", GetLogDir(), tt.dir)
 				}
 
-				// Check error.log file exists
+				switch tt.expectedLevel {
+				case slog.LevelDebug:
+					Debug("init test message")
+				case slog.LevelWarn:
+					Warn("init test message")
+				case slog.LevelError:
+					Error("init test message")
+				default:
+					Info("init test message")
+				}
+				if err := Close(); err != nil {
+					t.Errorf("Close() error = %v", err)
+				}
+
+				// Check error.log file exists after first write
 				errorLogPath := filepath.Join(tt.dir, "error.log")
 				if _, err := os.Stat(errorLogPath); os.IsNotExist(err) {
 					t.Errorf("error.log does not exist at %s", errorLogPath)
 				}
-
-				// Cleanup
-				Close()
 			}
 		})
 	}
@@ -108,10 +140,10 @@ func TestInit(t *testing.T) {
 
 func TestLogLevels(t *testing.T) {
 	logDir := t.TempDir()
-	if err := Init("debug", logDir, 10); err != nil {
+	if err := Init("debug", logDir, 10, 3, 7, true); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
-	defer Close()
+	t.Cleanup(func() { _ = Close() })
 
 	// Test Debug
 	Debug("debug message", "key", "value")
@@ -124,6 +156,10 @@ func TestLogLevels(t *testing.T) {
 
 	// Test Error
 	Error("error message", "key", "value")
+
+	if err := Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
 
 	// Read log file
 	errorLogPath := filepath.Join(logDir, "error.log")
@@ -148,36 +184,40 @@ func TestLogLevels(t *testing.T) {
 		t.Error("error message not found in log")
 	}
 
-	// Check log format contains [DEBUG], [INFO], [WARN], [ERROR]
-	if !strings.Contains(logContent, "[DEBUG]") {
-		t.Error("[DEBUG] level not found in log")
+	// Check JSON fields are present
+	if !strings.Contains(logContent, "\"level\":\"DEBUG\"") {
+		t.Error("DEBUG level not found in JSON log")
 	}
-	if !strings.Contains(logContent, "[INFO]") {
-		t.Error("[INFO] level not found in log")
+	if !strings.Contains(logContent, "\"level\":\"INFO\"") {
+		t.Error("INFO level not found in JSON log")
 	}
-	if !strings.Contains(logContent, "[WARN]") {
-		t.Error("[WARN] level not found in log")
+	if !strings.Contains(logContent, "\"level\":\"WARN\"") {
+		t.Error("WARN level not found in JSON log")
 	}
-	if !strings.Contains(logContent, "[ERROR]") {
-		t.Error("[ERROR] level not found in log")
+	if !strings.Contains(logContent, "\"level\":\"ERROR\"") {
+		t.Error("ERROR level not found in JSON log")
 	}
 
-	// Check key=value attributes are present
-	if !strings.Contains(logContent, "key=value") {
-		t.Error("key=value attributes not found in log")
+	// Check attributes are present
+	if !strings.Contains(logContent, "\"key\":\"value\"") {
+		t.Error("key=value attributes not found in JSON log")
 	}
 }
 
 func TestLogLevelFiltering(t *testing.T) {
 	logDir := t.TempDir()
 	// Set level to INFO (should filter out DEBUG)
-	if err := Init("info", logDir, 10); err != nil {
+	if err := Init("info", logDir, 10, 3, 7, true); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
-	defer Close()
+	t.Cleanup(func() { _ = Close() })
 
 	Debug("debug message should not appear")
 	Info("info message should appear")
+
+	if err := Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
 
 	// Read log file
 	errorLogPath := filepath.Join(logDir, "error.log")
@@ -201,10 +241,10 @@ func TestLogLevelFiltering(t *testing.T) {
 
 func TestModularLogger(t *testing.T) {
 	logDir := t.TempDir()
-	if err := Init("info", logDir, 10); err != nil {
+	if err := Init("info", logDir, 10, 3, 7, true); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
-	defer Close()
+	t.Cleanup(func() { _ = Close() })
 
 	// Get modular loggers
 	mainLogger := Get("main")
@@ -216,6 +256,10 @@ func TestModularLogger(t *testing.T) {
 	dbLogger.Info("message from database")
 	apiLogger.Info("message from api")
 
+	if err := Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
 	// Read log file
 	errorLogPath := filepath.Join(logDir, "error.log")
 	content, err := os.ReadFile(errorLogPath)
@@ -226,14 +270,14 @@ func TestModularLogger(t *testing.T) {
 	logContent := string(content)
 
 	// Check module names appear in logs
-	if !strings.Contains(logContent, "[main]") {
-		t.Error("[main] module not found in log")
+	if !strings.Contains(logContent, "\"module\":\"main\"") {
+		t.Error("main module not found in JSON log")
 	}
-	if !strings.Contains(logContent, "[database]") {
-		t.Error("[database] module not found in log")
+	if !strings.Contains(logContent, "\"module\":\"database\"") {
+		t.Error("database module not found in JSON log")
 	}
-	if !strings.Contains(logContent, "[api]") {
-		t.Error("[api] module not found in log")
+	if !strings.Contains(logContent, "\"module\":\"api\"") {
+		t.Error("api module not found in JSON log")
 	}
 
 	// Check messages
@@ -251,76 +295,50 @@ func TestModularLogger(t *testing.T) {
 func TestRotation(t *testing.T) {
 	logDir := t.TempDir()
 
-	// Manually set up logger with very small maxSize for testing
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		t.Fatalf("Failed to create log dir: %v", err)
+	if err := Init("info", logDir, 1, 3, 7, false); err != nil {
+		t.Fatalf("Init() failed: %v", err)
 	}
+	t.Cleanup(func() { _ = Close() })
 
-	// Create small maxSize (2KB) for testing
-	maxSize := int64(2048)
-	maxLogSize = maxSize
-	logLevel = slog.LevelInfo
+	Info("rotation baseline")
 
-	errorLogPath := filepath.Join(logDir, "error.log")
-	errorLogFile, err := os.OpenFile(errorLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	preRotateInfo, err := os.Stat(filepath.Join(logDir, "error.log"))
 	if err != nil {
-		t.Fatalf("Failed to open error.log: %v", err)
+		t.Fatalf("error.log does not exist before rotation: %v", err)
+	}
+	preRotateSize := preRotateInfo.Size()
+
+	rotator, ok := logFiles["error"].(*lumberjack.Logger)
+	if !ok {
+		t.Fatalf("expected lumberjack logger, got %T", logFiles["error"])
+	}
+	if err := rotator.Rotate(); err != nil {
+		t.Fatalf("Rotate() failed: %v", err)
 	}
 
-	errorRotated := &rotatedFile{
-		file:     errorLogFile,
-		filePath: errorLogPath,
-		maxSize:  maxSize,
-	}
-	if info, err := errorLogFile.Stat(); err == nil {
-		errorRotated.fileSize = info.Size()
+	Info("rotation after")
+
+	if err := Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
 	}
 
-	logFiles = make(map[string]io.WriteCloser)
-	logFiles["error"] = errorRotated
-	Log = slog.New(&plainTextHandler{w: errorRotated, level: logLevel, module: "main"})
-
-	defer Close()
-
-	// Write large messages to trigger rotation
-	// Each message is ~150 bytes, so we need ~15-20 messages to exceed 2KB
-	largeMessage := strings.Repeat("This is a large message to test rotation. ", 10)
-
-	for i := 0; i < 20; i++ {
-		Info(largeMessage, "iteration", i)
-		time.Sleep(10 * time.Millisecond) // Small delay to ensure different timestamps
-	}
-
-	// Check that backup file was created
+	// Check that backup file was created (lumberjack uses numeric suffixes)
 	files, err := os.ReadDir(logDir)
 	if err != nil {
 		t.Fatalf("Failed to read log directory: %v", err)
 	}
 
-	// Should have error.log + at least one backup file (error.YYYYMMDD_HHMMSS.log)
-	if len(files) < 2 {
-		t.Errorf("Expected at least 2 files (error.log + backup), got %d", len(files))
-		for _, f := range files {
-			t.Logf("File: %s", f.Name())
-		}
-	}
-
-	// Check for backup file naming pattern
 	hasBackup := false
 	for _, file := range files {
-		if strings.HasPrefix(file.Name(), "error.") && strings.Contains(file.Name(), ".log") && file.Name() != "error.log" {
+		if strings.HasPrefix(file.Name(), "error.log.") {
 			hasBackup = true
 			t.Logf("Found backup file: %s", file.Name())
 			break
 		}
 	}
 
-	if !hasBackup {
-		t.Error("No backup file created after rotation")
-	}
-
 	// Check that current error.log exists
-	errorLogPath = filepath.Join(logDir, "error.log")
+	errorLogPath := filepath.Join(logDir, "error.log")
 	info, err := os.Stat(errorLogPath)
 	if err != nil {
 		t.Fatalf("error.log does not exist after rotation: %v", err)
@@ -328,11 +346,23 @@ func TestRotation(t *testing.T) {
 
 	// Current file should exist (size may vary)
 	t.Logf("Current error.log size: %d bytes", info.Size())
+
+	content, err := os.ReadFile(errorLogPath)
+	if err != nil {
+		t.Fatalf("Failed to read error.log after rotation: %v", err)
+	}
+	if !strings.Contains(string(content), "rotation after") {
+		t.Error("rotation after message not found in log")
+	}
+
+	if !hasBackup && info.Size() >= preRotateSize {
+		t.Errorf("No backup file created after rotation and size did not decrease (before=%d after=%d)", preRotateSize, info.Size())
+	}
 }
 
 func TestClose(t *testing.T) {
 	logDir := t.TempDir()
-	if err := Init("info", logDir, 10); err != nil {
+	if err := Init("info", logDir, 10, 3, 7, true); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
 
@@ -373,12 +403,16 @@ func TestGetBeforeInit(t *testing.T) {
 
 func TestLogFormat(t *testing.T) {
 	logDir := t.TempDir()
-	if err := Init("info", logDir, 10); err != nil {
+	if err := Init("info", logDir, 10, 3, 7, true); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
-	defer Close()
+	t.Cleanup(func() { _ = Close() })
 
-	Info("test message", "key1", "value1", "key2", "value2")
+	Get("main").Info("test message", "key1", "value1", "key2", "value2")
+
+	if err := Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
 
 	errorLogPath := filepath.Join(logDir, "error.log")
 	content, err := os.ReadFile(errorLogPath)
@@ -388,30 +422,22 @@ func TestLogFormat(t *testing.T) {
 
 	logContent := string(content)
 
-	// Check format: YYYY-MM-DD HH:MM:SS.000000 [LEVEL] [module] message key=value
-	// Should contain timestamp pattern
-	if !strings.Contains(logContent, "[INFO]") {
-		t.Error("Log level [INFO] not found")
+	if !strings.Contains(logContent, "\"level\":\"INFO\"") {
+		t.Error("INFO level not found in JSON log")
 	}
-
-	if !strings.Contains(logContent, "[main]") {
-		t.Error("Module [main] not found")
+	if !strings.Contains(logContent, "\"module\":\"main\"") {
+		t.Error("main module not found in JSON log")
 	}
-
-	if !strings.Contains(logContent, "test message") {
-		t.Error("Message not found")
+	if !strings.Contains(logContent, "\"msg\":\"test message\"") {
+		t.Error("Message not found in JSON log")
 	}
-
-	if !strings.Contains(logContent, "key1=value1") {
-		t.Error("key1=value1 not found")
+	if !strings.Contains(logContent, "\"key1\":\"value1\"") {
+		t.Error("key1=value1 not found in JSON log")
 	}
-
-	if !strings.Contains(logContent, "key2=value2") {
-		t.Error("key2=value2 not found")
+	if !strings.Contains(logContent, "\"key2\":\"value2\"") {
+		t.Error("key2=value2 not found in JSON log")
 	}
-
-	// Check timestamp format (YYYY-MM-DD)
-	if !strings.Contains(logContent, "-") || !strings.Contains(logContent, ":") {
-		t.Error("Timestamp format not found in log")
+	if !strings.Contains(logContent, "\"time\":\"") || !strings.Contains(logContent, "Z\"") {
+		t.Error("Timestamp format not found in JSON log")
 	}
 }

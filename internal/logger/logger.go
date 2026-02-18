@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -10,157 +9,38 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
 var (
-	Log        *slog.Logger
-	logLevel   slog.Level
-	logDir     string
-	logFiles   map[string]io.WriteCloser
-	fileMutex  sync.RWMutex
-	maxLogSize int64
+	Log       *slog.Logger
+	logLevel  slog.Level
+	logDir    string
+	logFiles  map[string]io.WriteCloser
+	fileMutex sync.RWMutex
 )
-
-// rotatedFile - обертка с автоматической ротацией
-type rotatedFile struct {
-	file      *os.File
-	filePath  string
-	fileSize  int64
-	maxSize   int64
-	fileMutex sync.Mutex
-}
-
-func (rf *rotatedFile) Write(p []byte) (int, error) {
-	rf.fileMutex.Lock()
-	defer rf.fileMutex.Unlock()
-
-	// Check if rotation is needed
-	if rf.fileSize+int64(len(p)) > rf.maxSize {
-		if err := rf.rotate(); err != nil {
-			// If rotation fails, still try to write
-			n, _ := rf.file.Write(p)
-			rf.fileSize += int64(n)
-			return n, nil
-		}
-	}
-
-	n, err := rf.file.Write(p)
-	rf.fileSize += int64(n)
-	return n, err
-}
-
-func (rf *rotatedFile) rotate() error {
-	// Close current file
-	if err := rf.file.Close(); err != nil {
-		return err
-	}
-
-	// Create backup filename with timestamp
-	timestamp := time.Now().Format("20060102_150405")
-	dir := filepath.Dir(rf.filePath)
-	name := filepath.Base(rf.filePath)
-	ext := filepath.Ext(name)
-	base := strings.TrimSuffix(name, ext)
-	backupPath := filepath.Join(dir, fmt.Sprintf("%s.%s%s", base, timestamp, ext))
-
-	// Rename current file to backup
-	if err := os.Rename(rf.filePath, backupPath); err != nil {
-		return err
-	}
-
-	// Open new file
-	f, err := os.OpenFile(rf.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-
-	rf.file = f
-	rf.fileSize = 0
-	return nil
-}
-
-func (rf *rotatedFile) Close() error {
-	rf.fileMutex.Lock()
-	defer rf.fileMutex.Unlock()
-	return rf.file.Close()
-}
-
-// plainTextHandler - кастомный handler для slog
-type plainTextHandler struct {
-	w      io.WriteCloser
-	level  slog.Level
-	module string
-}
-
-func (h *plainTextHandler) Enabled(ctx context.Context, level slog.Level) bool {
-	return level >= h.level
-}
-
-func (h *plainTextHandler) Handle(ctx context.Context, r slog.Record) error {
-	// Format: YYYY-MM-DD HH:MM:SS.000000 [LEVEL] [module] message key=value
-	timeStr := r.Time.Format("2006-01-02 15:04:05.000000")
-	levelStr := strings.ToUpper(r.Level.String())
-	msg := r.Message
-	module := h.module
-
-	// Extract additional attributes
-	var otherAttrs []string
-	r.Attrs(func(a slog.Attr) bool {
-		if a.Key == "module" {
-			// Module already set
-			return true
-		} else if a.Key != slog.TimeKey && a.Key != slog.MessageKey {
-			value := fmt.Sprint(a.Value.Any())
-			otherAttrs = append(otherAttrs, fmt.Sprintf("%s=%s", a.Key, value))
-		}
-		return true
-	})
-
-	// Build output string
-	output := fmt.Sprintf("%s [%s] [%s] %s", timeStr, levelStr, module, msg)
-	if len(otherAttrs) > 0 {
-		output += " " + strings.Join(otherAttrs, " ")
-	}
-	output += "\n"
-
-	// Write to file
-	switch w := h.w.(type) {
-	case *rotatedFile:
-		_, err := w.Write([]byte(output))
-		return err
-	default:
-		_, err := io.WriteString(h.w, output)
-		return err
-	}
-}
-
-func (h *plainTextHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	newH := &plainTextHandler{w: h.w, level: h.level, module: h.module}
-	for _, a := range attrs {
-		if a.Key == "module" {
-			newH.module = fmt.Sprint(a.Value.Any())
-		}
-	}
-	return newH
-}
-
-func (h *plainTextHandler) WithGroup(name string) slog.Handler {
-	return h
-}
 
 func init() {
 	logFiles = make(map[string]io.WriteCloser)
 }
 
 // Init инициализирует систему логирования
-func Init(levelStr, dir string, maxFileSizeMB int) error {
-	// Create log directory
-	if err := os.MkdirAll(dir, 0755); err != nil {
+func Init(levelStr, dir string, maxFileSizeMB int, maxBackups int, maxAgeDays int, compress bool) error {
+	if err := validateLogDir(dir); err != nil {
 		return err
 	}
 
 	logDir = dir
-	maxLogSize = int64(maxFileSizeMB) * 1024 * 1024
+	if maxFileSizeMB <= 0 {
+		maxFileSizeMB = 100
+	}
+	if maxBackups <= 0 {
+		maxBackups = 10
+	}
+	if maxAgeDays <= 0 {
+		maxAgeDays = 30
+	}
 
 	// Parse log level
 	switch strings.ToLower(levelStr) {
@@ -178,23 +58,24 @@ func Init(levelStr, dir string, maxFileSizeMB int) error {
 
 	// Initialize error.log
 	errorLogPath := filepath.Join(filepath.Clean(dir), "error.log")
-	errorLogFile, err := os.OpenFile(errorLogPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to open error.log: %w", err)
+	errorLogFile := &lumberjack.Logger{
+		Filename:   errorLogPath,
+		MaxSize:    maxFileSizeMB,
+		MaxBackups: maxBackups,
+		MaxAge:     maxAgeDays,
+		Compress:   compress,
+	}
+	logFiles["error"] = errorLogFile
+
+	writer := io.MultiWriter(os.Stdout, errorLogFile)
+	opts := &slog.HandlerOptions{
+		Level:       logLevel,
+		ReplaceAttr: replaceTimeAttr,
 	}
 
-	errorRotated := &rotatedFile{
-		file:     errorLogFile,
-		filePath: errorLogPath,
-		maxSize:  maxLogSize,
-	}
-	if info, err := errorLogFile.Stat(); err == nil {
-		errorRotated.fileSize = info.Size()
-	}
-	logFiles["error"] = errorRotated
-
-	// Create logger
-	Log = slog.New(&plainTextHandler{w: errorRotated, level: logLevel, module: "main"})
+	// Create logger (JSON)
+	Log = slog.New(slog.NewJSONHandler(writer, opts))
+	slog.SetDefault(Log)
 
 	return nil
 }
@@ -202,8 +83,7 @@ func Init(levelStr, dir string, maxFileSizeMB int) error {
 // Get возвращает логгер для конкретного модуля
 func Get(module string) *slog.Logger {
 	if Log == nil {
-		// Fallback to stdout if not initialized
-		return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+		return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: replaceTimeAttr}))
 	}
 	return Log.With("module", module)
 }
@@ -259,4 +139,49 @@ func GetLevel() slog.Level {
 // GetLogDir возвращает директорию логов
 func GetLogDir() string {
 	return logDir
+}
+
+func replaceTimeAttr(_ []string, attr slog.Attr) slog.Attr {
+	if attr.Key != slog.TimeKey {
+		return attr
+	}
+	if t, ok := attr.Value.Any().(time.Time); ok {
+		attr.Value = slog.StringValue(t.UTC().Format("2006-01-02T15:04:05.000000Z"))
+	}
+	return attr
+}
+
+func validateLogDir(dir string) error {
+	if dir == "" {
+		return fmt.Errorf("log directory is empty")
+	}
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		return fmt.Errorf("create log dir %s: %w", dir, err)
+	}
+
+	file, err := os.CreateTemp(dir, ".write-test-*")
+	if err != nil {
+		return fmt.Errorf("create write test in %s: %w", dir, err)
+	}
+	name := file.Name()
+	if _, err := file.WriteString("test"); err != nil {
+		_ = file.Close()
+		_ = os.Remove(name)
+		return fmt.Errorf("write test in %s: %w", dir, err)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("close write test in %s: %w", dir, err)
+	}
+
+	rotated := name + ".rotate"
+	if err := os.Rename(name, rotated); err != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("rename write test in %s: %w", dir, err)
+	}
+	if err := os.Remove(rotated); err != nil {
+		return fmt.Errorf("cleanup write test in %s: %w", dir, err)
+	}
+
+	return nil
 }

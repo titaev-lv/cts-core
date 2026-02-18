@@ -95,6 +95,9 @@ type LoggingConfig struct {
 	Level         string `yaml:"level"`
 	Dir           string `yaml:"dir"`
 	MaxFileSizeMB int    `yaml:"max_file_size_mb"`
+	MaxBackups    int    `yaml:"max_backups"`
+	MaxAgeDays    int    `yaml:"max_age_days"`
+	Compress      bool   `yaml:"compress"`
 }
 
 // SessionConfig contains session management settings

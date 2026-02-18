@@ -7,10 +7,10 @@ environment: development
 # Server configuration (REST API - Phase 1.5)
 server:
   host: "0.0.0.0"
-  port: 8443
+  port: 8080
   
   tls:
-    enabled: true
+    enabled: false
     cert_file: "pki/server/cts-core.crt"
     key_file: "pki/server/cts-core.key"
     ca_file: "pki/ca/ca.crt"
@@ -22,7 +22,7 @@ server:
 
 # MySQL Database configuration
 mysql:
-  host: "127.0.0.1"              # Use "mysql" for Docker
+  host: "mysql"
   port: 3306
   user: "root"
   password: "root"          # TODO: Use env var CTS_MYSQL_PASSWORD in production
@@ -48,7 +48,7 @@ mysql:
 # HSM Service configuration
 # Two contexts: Trading (exchange keys) + 2FA (user secrets)
 hsm:
-  url: "https://192.168.50.4:8443"
+  url: "https://hsm:8443"
   timeout: 10s
   
   retry:
@@ -63,8 +63,8 @@ hsm:
     tls:
       enabled: true
       ca_file: "pki/ca/ca.crt"
-      cert_file: "pki/client/hsm-trading-client-1.crt"
-      key_file: "pki/client/hsm-trading-client-1.key"
+      cert_file: "pki/hsm-service/clients/cts-core-trader/cts-core-hsm-trader.crt"
+      key_file: "pki/hsm-service/clients/cts-core-trader/cts-core-hsm-trader.key"
   
   # 2FA context (user 2FA secrets - for re-encryption job only)
   two_fa:
@@ -72,8 +72,8 @@ hsm:
     tls:
       enabled: true
       ca_file: "pki/ca/ca.crt"
-      cert_file: "pki/client/hsm-2fa-client-1.crt"
-      key_file: "pki/client/hsm-2fa-client-1.key"
+      cert_file: "pki/hsm-service/clients/cts-core-2fa/cts-core-hsm-2fa.crt"
+      key_file: "pki/hsm-service/clients/cts-core-2fa/cts-core-hsm-2fa.key"
 
 # State management
 state:
@@ -86,6 +86,9 @@ logging:
   level: debug                   # debug | info | warn | error
   dir: logs                      # Directory for log files
   max_file_size_mb: 100          # Rotate when file reaches 100 MB
+  max_backups: 10                # Number of rotated files to keep
+  max_age_days: 30               # Max age in days before deletion
+  compress: true                 # Compress rotated files
 
 # Session management (Phase 1.4)
 session:
@@ -122,3 +125,4 @@ audit:
   file_path: "logs/audit.log"
   mysql_enabled: false           # Phase 2: store in MySQL
   retention_days: 30
+
