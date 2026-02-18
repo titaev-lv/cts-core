@@ -1,263 +1,82 @@
-# HSM Key Rotation Guide
+# HSM Key Rotation (Current State)
 
-> **Версия**: 1.0.0  
-> **Дата**: 2026-01-28  
-> **Связанные документы**: [ARCHITECTURE.md](ARCHITECTURE.md), [migrations/001_phase1_schema.sql](migrations/001_phase1_schema.sql)
+> **Версия**: 2.0.0  
+> **Дата**: 2026-02-18  
+> **Связанные документы**: [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ---
 
 ## Обзор
 
-HSM-service поддерживает key rotation (смена KEK - Key Encryption Key). После ротации все зашифрованные данные в БД нужно перешифровать на новый ключ.
+В текущей реализации CTS-Core нет автоматического re-encryption пайплайна, таблиц tracking или admin API для перешифровки. Документ описывает только реальные, доступные сегодня шаги.
 
-**Затронутые данные:**
-- `EXCHANGE_ACCOUNTS` - API keys (context: exchange-key, OU=Trading)
-- `USER_2FA` - TOTP secrets (context: 2fa, OU=2FA)
+**Что есть сейчас:**
+- Ротация KEK выполняется на стороне hsm-service через `hsm-admin`.
+- Старые версии KEK могут сохраняться для обратной совместимости (политика retention в hsm-service).
+- CTS-Core не ведет учет `enc_key_version` в БД и не запускает jobs на перешифровку.
+- Таблицы `REENCRYPTION_JOBS`, `REENCRYPTION_PROGRESS`, `SCHEDULER_TASKS`.
 
----
-
-## Подготовка БД
-
-### Миграция USER_2FA
-
-```sql
--- USER_2FA изначально не имел версионирования ключей
--- Добавлено в migrations/001_phase1_schema.sql
-
-ALTER TABLE USER_2FA
-ADD COLUMN enc_key_version INT COMMENT 'HSM KEK version (from key_id)',
-ADD COLUMN needs_reencryption BOOLEAN DEFAULT FALSE;
-
--- Установить текущую версию для существующих записей
-UPDATE USER_2FA 
-SET enc_key_version = 1 
-WHERE enc_key_version IS NULL AND SECRET_ENC IS NOT NULL;
-```
-
-### Таблицы для tracking
-
-```sql
--- REENCRYPTION_JOBS - управление заданиями на перешифровку
--- REENCRYPTION_PROGRESS - прогресс по каждой записи
--- SCHEDULER_TASKS - автоматическая проверка новых версий ключей
-
--- См. migrations/001_phase1_schema.sql для полного DDL
-```
+**Что отсутствует:**
+- Admin API `/api/v1/admin/reencryption/*`.
+- Автоматический или batch re-encryption данных CTS-Core.
 
 ---
 
-## Процесс Key Rotation
+## Процесс ротации KEK (реальный)
 
-### 1. HSM Key Rotation (Admin)
+### 1. Ротация ключа в hsm-service
 
 ```bash
 # В hsm-service
 cd /path/to/hsm-service
 
 # Ротация KEK для exchange-key context
-./hsm-admin key-rotate --context exchange-key
+./hsm-admin rotate exchange-key
 
 # Ротация KEK для 2fa context
-./hsm-admin key-rotate --context 2fa
-
-# Проверка версий
-curl -X GET https://hsm-service:8443/api/v1/keys/metadata \
-  --cert client.crt --key client.key --cacert ca.crt
+./hsm-admin rotate 2fa
 ```
 
-**Response:**
-```json
-{
-  "contexts": [
-    {
-      "context": "exchange-key",
-      "current_version": 2,
-      "previous_versions": [1],
-      "algorithm": "AES-256-GCM",
-      "created_at": "2026-01-28T10:00:00Z"
-    },
-    {
-      "context": "2fa",
-      "current_version": 2,
-      "previous_versions": [1],
-      "created_at": "2026-01-28T10:05:00Z"
-    }
-  ]
-}
-```
-
-### 2. Инициация Re-encryption (CTS-Core Admin API)
+### 2. Проверка состояния ключей
 
 ```bash
-# Автоматическая детекция (scheduler проверяет каждые 60 сек)
-# ИЛИ ручная инициация:
+# Список ключей
+./hsm-admin list-kek
 
-# Для EXCHANGE_ACCOUNTS
-curl -X POST https://cts-core:8443/api/v1/admin/reencryption/initiate \
-  --cert admin.crt --key admin.key --cacert ca.crt \
-  -H "Content-Type: application/json" \
-  -d '{
-    "job_type": "exchange_accounts",
-    "context": "exchange-key",
-    "new_key_version": 2
-  }'
+# Статус ротации и версии
+./hsm-admin rotation-status
 
-# Для USER_2FA
-curl -X POST https://cts-core:8443/api/v1/admin/reencryption/initiate \
-  --cert admin.crt --key admin.key --cacert ca.crt \
-  -H "Content-Type: application/json" \
-  -d '{
-    "job_type": "user_2fa",
-    "context": "2fa",
-    "new_key_version": 2
-  }'
-```
-
-**Response:**
-```json
-{
-  "job_id": 123,
-  "status": "pending",
-  "job_type": "exchange_accounts",
-  "old_key_version": 1,
-  "new_key_version": 2,
-  "total_records": 1523,
-  "estimated_duration_minutes": 15
-}
-```
-
-### 3. Мониторинг прогресса
-
-```bash
-# Статус задания
-curl -X GET https://cts-core:8443/api/v1/admin/reencryption/jobs/123 \
-  --cert admin.crt --key admin.key --cacert ca.crt
-```
-
-**Response:**
-```json
-{
-  "job_id": 123,
-  "job_type": "exchange_accounts",
-  "status": "in_progress",
-  "progress_percent": 45.2,
-  "processed_records": 689,
-  "failed_records": 3,
-  "total_records": 1523,
-  "started_at": "2026-01-28T15:00:00Z",
-  "last_processed_at": "2026-01-28T15:05:30Z",
-  "estimated_completion": "2026-01-28T15:12:00Z"
-}
-```
-
-### 4. Проверка результатов
-
-```sql
--- Все ли записи перешифрованы?
-SELECT 
-    enc_key_version,
-    COUNT(*) as count
-FROM EXCHANGE_ACCOUNTS
-GROUP BY enc_key_version;
-
--- Expected:
--- enc_key_version | count
--- 2               | 1523
-
--- Проверка USER_2FA
-SELECT 
-    enc_key_version,
-    COUNT(*) as count
-FROM USER_2FA
-WHERE SECRET_ENC IS NOT NULL
-GROUP BY enc_key_version;
-
--- Проверка failed records
-SELECT * FROM REENCRYPTION_PROGRESS
-WHERE job_id = 123 AND status = 'failed';
-```
-
-### 5. Retry failed records (если есть)
-
-```bash
-curl -X POST https://cts-core:8443/api/v1/admin/reencryption/jobs/123/retry \
-  --cert admin.crt --key admin.key --cacert ca.crt
+# Контроль целостности (если используется)
+./hsm-admin update-checksums
 ```
 
 ---
 
-## Алгоритм Re-encryption
+## Влияние на CTS-Core
 
-### Batch Processing
-
-```
-FOR EACH batch OF 100 records:
-  1. SELECT records WHERE enc_key_version = old_version LIMIT 100
-  2. FOR EACH record:
-      a) Decrypt with old KEK (v1):
-         HSM POST /decrypt {context, key_version: 1, ciphertext}
-      
-      b) Encrypt with new KEK (v2):
-         HSM POST /encrypt {context, key_version: 2, plaintext}
-      
-      c) UPDATE record:
-         SET DEK_ENC = new_ciphertext,
-             API_KEY_ENC = ..., (re-encrypt all encrypted fields)
-             enc_key_version = 2
-         WHERE ID = record_id
-      
-      d) Track progress:
-         INSERT INTO REENCRYPTION_PROGRESS (status='completed')
-  
-  3. Sleep 100ms (avoid HSM/DB overload)
-  
-  4. Update job progress:
-     UPDATE REENCRYPTION_JOBS 
-     SET processed_records = processed_records + batch_count
-```
-
-### Safety Measures
-
-1. **Transactional updates** - rollback on error
-2. **Progress tracking** - можно остановить и продолжить
-3. **Failed record handling** - не блокирует весь процесс
-4. **Batch delays** - 100ms между батчами (не перегружаем)
-5. **Old key retention** - старый KEK хранится 30 дней (rollback)
+- CTS-Core не имеет механизма автоматического re-encryption данных в БД.
+- Если в БД хранятся значения, зашифрованные через KEK, миграция на новую версию выполняется прикладным способом (вручную или через отдельный скрипт/процесс вне CTS-Core).
+- Старые версии KEK должны оставаться в HSM достаточно долго, чтобы успеть мигрировать данные.
 
 ---
 
-## Rollback (если что-то пошло не так)
+## Рекомендованный минимальный чеклист
 
-### Scenario: New key corrupted or HSM issue
-
-```sql
--- 1. Остановить re-encryption job
-UPDATE REENCRYPTION_JOBS SET status = 'cancelled' WHERE id = 123;
-
--- 2. Проверить какие записи уже перешифрованы
-SELECT COUNT(*) FROM EXCHANGE_ACCOUNTS WHERE enc_key_version = 2;
-SELECT COUNT(*) FROM EXCHANGE_ACCOUNTS WHERE enc_key_version = 1;
-
--- 3. Если новый ключ неработоспособен:
---    Старый KEK v1 все еще доступен в HSM (30 дней)
---    Можно использовать старые records (enc_key_version=1)
-
--- 4. Опционально: rollback перешифрованных records
---    (Инициировать reverse re-encryption job v2 → v1)
-```
+1. Запустить `hsm-admin rotate <context>` в hsm-service.
+2. Проверить `hsm-admin rotation-status` и `list-kek`.
+3. Если есть данные в БД, завязанные на KEK, выполнить их перешифровку вне CTS-Core.
+4. После полной миграции данных можно удалить старые версии KEK через `hsm-admin cleanup-old-versions` (при наличии политик retention).
 
 ---
 
-## Scheduling
+## Будущая работа (не реализовано)
 
-### Автоматическая проверка
+Этот документ больше не описывает несуществующие API/DDL. Если потребуется автоматизация, нужно:
 
-```sql
--- Scheduler task (проверяет каждые 60 сек)
-SELECT * FROM SCHEDULER_TASKS WHERE task_name = 'check_reencryption_jobs';
+- Определить таблицы tracking re-encryption (job/progress).
+- Добавить admin API для запуска и мониторинга job.
+- Реализовать batch re-encryption с безопасными транзакциями и retry.
 
--- Config:
-{
   "check_interval_sec": 60,
   "batch_size": 100,
   "sleep_between_batches_ms": 100,

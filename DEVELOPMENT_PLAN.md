@@ -2,7 +2,7 @@
 
 > **Версия документа**: 1.2.0  
 > **Дата**: 2026-01-31  
-> **Статус**: Phase 1.3 Complete | Phase 1.4 In Progress  
+> **Статус**: Phase 1.3 Complete | Phase 1.4 Not Started | Phase 1.5 Planned  
 > **Связанные документы**: [ARCHITECTURE.md](ARCHITECTURE.md), [CONTEXT.md](CONTEXT.md), [API_SPECIFICATION.md](API_SPECIFICATION.md)
 
 ---
@@ -13,7 +13,12 @@
 - **CTS-Core** — центральный оркестратор
 - **Trader Daemon** — торговые демоны
 
-**ВАЖНО:** Все архитектурные блокеры закрыты (9/9), можно начинать Phase 1.
+**ВАЖНО:** Все архитектурные блокеры закрыты (9/9), можно продолжать Phase 1.
+
+**Текущее состояние (факт):**
+- Phase 1.1-1.3 реализованы (config/logger/MySQL/HSM client)
+- Phase 1.4 (state) не начата
+- Phase 1.5 (REST server) не запущена, есть только заготовки handlers
 
 ---
 
@@ -21,7 +26,7 @@
 
 ```mermaid
 gantt
-    title CTS-Core Development Plan (Updated: 2026-01-31)
+    title CTS-Core Development Plan (Updated: 2026-02-18)
     dateFormat  YYYY-MM-DD
     section Phase 0: Database ✅
     SQL migrations                    :done, p0a, 2026-01-28, 1d
@@ -30,7 +35,7 @@ gantt
     Project setup, config, logger     :done, p1a, 2026-01-28, 2d
     MySQL connection pool + repo      :done, p1b, 2026-01-29, 2d
     HSM client (dual context)         :done, p1c, 2026-01-30, 2d
-    State management (daemon.state)   :active, p1d, 2026-01-31, 2d
+    State management (daemon.state)   :p1d, 2026-02-18, 2d
     Basic REST API server             :p1e, after p1d, 2d
     
     section Phase 2: Core Features
@@ -61,10 +66,13 @@ gantt
 
 ```mermaid
 gantt
-    title Trader Daemon Development Plan
+    title Trader Daemon Development Plan (Updated: 2026-02-18)
     dateFormat  YYYY-MM-DD
+    section Planning Baseline
+    Schedule baseline                 :milestone, t0, 2026-02-18, 0d
+    
     section Phase 1: Core Connection
-    WebSocket client to CTS-Core      :t1a, 2026-02-10, 3d
+    WebSocket client to CTS-Core      :t1a, after t0, 3d
     HSM client integration            :t1b, after t1a, 2d
     Credential decryption flow        :t1c, after t1b, 2d
     
@@ -83,6 +91,113 @@ gantt
     Limit+Market strategy             :t4b, after t4a, 4d
     Futures stub                      :t4c, after t4b, 2d
     DEX stub                          :t4d, after t4c, 2d
+```
+
+---
+
+## 3. 📊 Унификация логирования (КРИТИЧНО за Phase 1.4)
+
+### 🎯 Цель
+Привести CTS-Core к уровню HSM Service v2.0.0:
+- JSON + stdout + rotation (lumberjack)
+- request_id и единый формат времени UTC RFC3339 с микросекундами
+- fail-fast проверка доступности директорий логов
+- модульные теги и разделение потоков логирования
+
+### 📦 Предлагаемые потоки логов
+
+**error.log** (system log)
+- все системные события, ошибки, исключения, внутренние операции
+
+**access.log** (входящие запросы)
+- все входящие HTTP запросы от других систем
+- WebSocket handshake и события жизненного цикла соединения
+
+**out_request.log** (исходящие запросы)
+- все исходящие HTTP запросы CTS-Core (HSM, внешние сервисы)
+- WS исходящие сообщения логировать выборочно (см. ниже)
+
+### ⚠️ Текущее состояние (ПРОБЛЕМЫ)
+
+| Параметр | CTS-Core | HSM v2.0.0 |
+|----------|----------|------------|
+| **Библиотека** | ✅ slog | ✅ slog |
+| **Формат** | ❌ Plain text | ✅ JSON |
+| **Stdout вывод** | ❌ MISSING | ✅ Есть |
+| **Ротация** | ❌ Custom | ✅ lumberjack |
+| **request_id** | ❌ Нет | ✅ Есть |
+| **Fail-fast проверка логов** | ❌ Нет | ✅ Есть |
+| **Разделение логов** | ❌ Нет | ✅ audit/error |
+| **Видно в docker logs** | ❌ НЕТ | ✅ Да |
+
+### ✅ Требуемые изменения (1-2 дня)
+
+**1) Перейти на JSON + stdout + lumberjack**
+```go
+// internal/logger/logger.go
+logFile := &lumberjack.Logger{...}
+w := io.MultiWriter(os.Stdout, logFile)
+handler := slog.NewJSONHandler(w, &slog.HandlerOptions{Level: logLevel})
+```
+
+**2) Добавить request_id**
+- Заголовок `X-Request-ID` (если нет — сгенерировать)
+- Проброс в access/error/out_request
+
+**3) Разделить логи на потоки**
+- error: основной системный лог
+- access: входящие HTTP запросы
+- out_request: исходящие HTTP запросы
+
+**4) Fail-fast при недоступной директории логов**
+- Проверка mkdir + write/rename
+- Права директории 0750
+
+**5) Единый формат времени**
+- UTC RFC3339 microseconds через ReplaceAttr
+
+### 📝 Конфигурация (пример)
+
+```yaml
+logging:
+    level: "info"
+    error_path: "/var/log/cts-core/error.log"
+    access_path: "/var/log/cts-core/access.log"
+    out_request_path: "/var/log/cts-core/out_request.log"
+    max_size_mb: 100
+    max_backups: 10
+    max_age_days: 30
+    compress: true
+    access_to_stdout: true
+    out_request_to_stdout: false
+```
+
+### 🧠 Рекомендация по WebSocket логированию
+
+**Минимально необходимое:**
+- Логировать lifecycle: connect/disconnect, auth, subscribe/unsubscribe
+- Логировать ошибки протокола, timeouts, rate limits
+- Все это писать в access.log (как inbound) и error.log (ошибки)
+
+**Не рекомендуется:**
+- Логировать каждое WS сообщение (шум + объём)
+
+**Если нужно логировать сообщения:**
+- Ввести sampling (например 1% или только ошибки)
+- Отдельный лог `ws_events.log` или `out_request.log` (если outbound)
+- Включать по флагу `logging.ws_debug=true`
+
+### ✅ Чек-лист реализации
+
+```
+Phase 1.4 - Logging Unification for CTS-Core
+[ ] JSON + stdout + lumberjack
+[ ] request_id (X-Request-ID) + проброс
+[ ] access/error/out_request разделение
+[ ] fail-fast проверка прав на директорию
+[ ] UTC RFC3339 microseconds
+[ ] Обновить config + docs
+[ ] Проверить docker logs и наличие файлов
 ```
 
 ---

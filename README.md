@@ -32,7 +32,7 @@
 1. ✅ Hybrid trader registration (admin pre-register + auto-connect)
 2. ✅ State: daemon.state + MySQL sync
 3. ✅ Idempotency: UNIQUE constraints + exchange_order_id tracking
-4. ✅ SQL schema: 11 таблиц включая HSM key rotation support
+4. ✅ SQL schema: 11 таблиц (автоматизация HSM re-encryption пока не реализована)
 5. ✅ Failover: single instance + trader resilience (Phase 1)
 
 📖 **См. [ARCHITECTURE.md](ARCHITECTURE.md)** для всех архитектурных решений
