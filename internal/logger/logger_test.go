@@ -92,7 +92,14 @@ func TestInit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := Init(tt.level, tt.dir, tt.maxFileSizeMB, tt.maxBackups, tt.maxAgeDays, tt.compress)
+			err := InitWithOptions(Options{
+				Level:         tt.level,
+				Dir:           tt.dir,
+				MaxFileSizeMB: tt.maxFileSizeMB,
+				MaxBackups:    tt.maxBackups,
+				MaxAgeDays:    tt.maxAgeDays,
+				Compress:      tt.compress,
+			})
 			if (err != nil) != tt.expectError {
 				t.Errorf("Init() error = %v, expectError %v", err, tt.expectError)
 				return
@@ -140,7 +147,19 @@ func TestInit(t *testing.T) {
 
 func TestLogLevels(t *testing.T) {
 	logDir := t.TempDir()
-	if err := Init("debug", logDir, 10, 3, 7, true); err != nil {
+	if err := InitWithOptions(Options{
+		Level:              "debug",
+		Dir:                logDir,
+		MaxFileSizeMB:      10,
+		MaxBackups:         3,
+		MaxAgeDays:         7,
+		Compress:           true,
+		AccessToStdout:     false,
+		OutRequestToStdout: false,
+		WSAccessToStdout:   false,
+		WSOutToStdout:      false,
+		AuditToStdout:      false,
+	}); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
 	t.Cleanup(func() { _ = Close() })
@@ -207,7 +226,14 @@ func TestLogLevels(t *testing.T) {
 func TestLogLevelFiltering(t *testing.T) {
 	logDir := t.TempDir()
 	// Set level to INFO (should filter out DEBUG)
-	if err := Init("info", logDir, 10, 3, 7, true); err != nil {
+	if err := InitWithOptions(Options{
+		Level:         "info",
+		Dir:           logDir,
+		MaxFileSizeMB: 10,
+		MaxBackups:    3,
+		MaxAgeDays:    7,
+		Compress:      true,
+	}); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
 	t.Cleanup(func() { _ = Close() })
@@ -241,7 +267,14 @@ func TestLogLevelFiltering(t *testing.T) {
 
 func TestModularLogger(t *testing.T) {
 	logDir := t.TempDir()
-	if err := Init("info", logDir, 10, 3, 7, true); err != nil {
+	if err := InitWithOptions(Options{
+		Level:         "info",
+		Dir:           logDir,
+		MaxFileSizeMB: 10,
+		MaxBackups:    3,
+		MaxAgeDays:    7,
+		Compress:      true,
+	}); err != nil {
 		t.Fatalf("Init() failed: %v", err)
 	}
 	t.Cleanup(func() { _ = Close() })
@@ -250,11 +283,15 @@ func TestModularLogger(t *testing.T) {
 	mainLogger := Get("main")
 	dbLogger := Get("database")
 	apiLogger := Get("api")
+	accessLogger := GetAccess("api")
+	wsLogger := GetWSAccess("ws")
 
 	// Log messages from different modules
 	mainLogger.Info("message from main")
 	dbLogger.Info("message from database")
 	apiLogger.Info("message from api")
+	accessLogger.Info("message from access")
+	wsLogger.Info("message from ws access")
 
 	if err := Close(); err != nil {
 		t.Fatalf("Close() failed: %v", err)

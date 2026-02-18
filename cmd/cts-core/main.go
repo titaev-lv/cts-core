@@ -28,14 +28,25 @@ func main() {
 	}
 
 	// Initialize logger
-	if err := logger.Init(
-		cfg.Logging.Level,
-		cfg.Logging.Dir,
-		cfg.Logging.MaxFileSizeMB,
-		cfg.Logging.MaxBackups,
-		cfg.Logging.MaxAgeDays,
-		cfg.Logging.Compress,
-	); err != nil {
+	if err := logger.InitWithOptions(logger.Options{
+		Level:              cfg.Logging.Level,
+		Dir:                cfg.Logging.Dir,
+		MaxFileSizeMB:      cfg.Logging.MaxFileSizeMB,
+		MaxBackups:         cfg.Logging.MaxBackups,
+		MaxAgeDays:         cfg.Logging.MaxAgeDays,
+		Compress:           cfg.Logging.Compress,
+		ErrorPath:          cfg.Logging.ErrorPath,
+		AccessPath:         cfg.Logging.AccessPath,
+		OutRequestPath:     cfg.Logging.OutRequestPath,
+		WSAccessPath:       cfg.Logging.WSAccessPath,
+		WSOutPath:          cfg.Logging.WSOutPath,
+		AuditPath:          cfg.Logging.AuditPath,
+		AccessToStdout:     cfg.Logging.AccessToStdout,
+		OutRequestToStdout: cfg.Logging.OutRequestToStdout,
+		WSAccessToStdout:   cfg.Logging.WSAccessToStdout,
+		WSOutToStdout:      cfg.Logging.WSOutToStdout,
+		AuditToStdout:      cfg.Logging.AuditToStdout,
+	}); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
 		os.Exit(1)
 	}

@@ -17,8 +17,8 @@ func TestLoad(t *testing.T) {
 		t.Errorf("Expected environment=development, got %s", cfg.Environment)
 	}
 
-	if cfg.Server.Port != 8443 {
-		t.Errorf("Expected port=8443, got %d", cfg.Server.Port)
+	if cfg.Server.Port != 8080 {
+		t.Errorf("Expected port=8080, got %d", cfg.Server.Port)
 	}
 
 	if cfg.MySQL.Database != "ct_system" {
@@ -43,26 +43,68 @@ func TestLoad(t *testing.T) {
 	if !cfg.Logging.Compress {
 		t.Error("Expected compress=true")
 	}
+	if cfg.Logging.ErrorPath != "logs/error.log" {
+		t.Errorf("Expected error_path=logs/error.log, got %s", cfg.Logging.ErrorPath)
+	}
+	if cfg.Logging.AccessPath != "logs/access.log" {
+		t.Errorf("Expected access_path=logs/access.log, got %s", cfg.Logging.AccessPath)
+	}
+	if cfg.Logging.OutRequestPath != "logs/out_request.log" {
+		t.Errorf("Expected out_request_path=logs/out_request.log, got %s", cfg.Logging.OutRequestPath)
+	}
+	if cfg.Logging.WSAccessPath != "logs/ws_access.log" {
+		t.Errorf("Expected ws_access_path=logs/ws_access.log, got %s", cfg.Logging.WSAccessPath)
+	}
+	if cfg.Logging.WSOutPath != "logs/ws_out.log" {
+		t.Errorf("Expected ws_out_path=logs/ws_out.log, got %s", cfg.Logging.WSOutPath)
+	}
+	if cfg.Logging.AuditPath != "logs/audit.log" {
+		t.Errorf("Expected audit_path=logs/audit.log, got %s", cfg.Logging.AuditPath)
+	}
+	if !cfg.Logging.AccessToStdout {
+		t.Error("Expected access_to_stdout=true")
+	}
+	if cfg.Logging.OutRequestToStdout {
+		t.Error("Expected out_request_to_stdout=false")
+	}
+	if cfg.Logging.WSAccessToStdout {
+		t.Error("Expected ws_access_to_stdout=false")
+	}
+	if cfg.Logging.WSOutToStdout {
+		t.Error("Expected ws_out_to_stdout=false")
+	}
+	if cfg.Logging.AuditToStdout {
+		t.Error("Expected audit_to_stdout=false")
+	}
+	if cfg.Logging.PostPayload {
+		t.Error("Expected post_payload=false")
+	}
+	if cfg.Logging.PostPayloadMaxBytes != 2048 {
+		t.Errorf("Expected post_payload_max_bytes=2048, got %d", cfg.Logging.PostPayloadMaxBytes)
+	}
+	if cfg.Logging.WSDebug {
+		t.Error("Expected ws_debug=false")
+	}
 
 	// Test HSM dual-context configuration
-	if cfg.HSM.URL != "https://192.168.50.4:8443" {
-		t.Errorf("Expected HSM URL=https://192.168.50.4:8443, got %s", cfg.HSM.URL)
+	if cfg.HSM.URL != "https://hsm:8443" {
+		t.Errorf("Expected HSM URL=https://hsm:8443, got %s", cfg.HSM.URL)
 	}
 
 	if cfg.HSM.Trading.Context != "exchange-key" {
 		t.Errorf("Expected HSM Trading context=exchange-key, got %s", cfg.HSM.Trading.Context)
 	}
 
-	if cfg.HSM.Trading.TLS.CertFile != "pki/client/hsm-trading-client-1.crt" {
-		t.Errorf("Expected Trading cert=hsm-trading-client-1.crt, got %s", cfg.HSM.Trading.TLS.CertFile)
+	if cfg.HSM.Trading.TLS.CertFile != "pki/hsm-service/clients/cts-core-trader/cts-core-hsm-trader.crt" {
+		t.Errorf("Expected Trading cert=pki/hsm-service/clients/cts-core-trader/cts-core-hsm-trader.crt, got %s", cfg.HSM.Trading.TLS.CertFile)
 	}
 
 	if cfg.HSM.TwoFA.Context != "2fa" {
 		t.Errorf("Expected HSM 2FA context=2fa, got %s", cfg.HSM.TwoFA.Context)
 	}
 
-	if cfg.HSM.TwoFA.TLS.CertFile != "pki/client/hsm-2fa-client-1.crt" {
-		t.Errorf("Expected 2FA cert=hsm-2fa-client-1.crt, got %s", cfg.HSM.TwoFA.TLS.CertFile)
+	if cfg.HSM.TwoFA.TLS.CertFile != "pki/hsm-service/clients/cts-core-2fa/cts-core-hsm-2fa.crt" {
+		t.Errorf("Expected 2FA cert=pki/hsm-service/clients/cts-core-2fa/cts-core-hsm-2fa.crt, got %s", cfg.HSM.TwoFA.TLS.CertFile)
 	}
 }
 

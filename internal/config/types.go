@@ -92,12 +92,26 @@ type StateConfig struct {
 
 // LoggingConfig contains logging settings
 type LoggingConfig struct {
-	Level         string `yaml:"level"`
-	Dir           string `yaml:"dir"`
-	MaxFileSizeMB int    `yaml:"max_file_size_mb"`
-	MaxBackups    int    `yaml:"max_backups"`
-	MaxAgeDays    int    `yaml:"max_age_days"`
-	Compress      bool   `yaml:"compress"`
+	Level               string `yaml:"level"`
+	Dir                 string `yaml:"dir"`
+	MaxFileSizeMB       int    `yaml:"max_file_size_mb"`
+	MaxBackups          int    `yaml:"max_backups"`
+	MaxAgeDays          int    `yaml:"max_age_days"`
+	Compress            bool   `yaml:"compress"`
+	ErrorPath           string `yaml:"error_path"`
+	AccessPath          string `yaml:"access_path"`
+	OutRequestPath      string `yaml:"out_request_path"`
+	WSAccessPath        string `yaml:"ws_access_path"`
+	WSOutPath           string `yaml:"ws_out_path"`
+	AuditPath           string `yaml:"audit_path"`
+	AccessToStdout      bool   `yaml:"access_to_stdout"`
+	OutRequestToStdout  bool   `yaml:"out_request_to_stdout"`
+	WSAccessToStdout    bool   `yaml:"ws_access_to_stdout"`
+	WSOutToStdout       bool   `yaml:"ws_out_to_stdout"`
+	AuditToStdout       bool   `yaml:"audit_to_stdout"`
+	PostPayload         bool   `yaml:"post_payload"`
+	PostPayloadMaxBytes int    `yaml:"post_payload_max_bytes"`
+	WSDebug             bool   `yaml:"ws_debug"`
 }
 
 // SessionConfig contains session management settings

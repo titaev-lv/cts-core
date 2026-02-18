@@ -85,10 +85,24 @@ state:
 logging:
   level: debug                   # debug | info | warn | error
   dir: logs                      # Directory for log files
+  error_path: "logs/error.log"
+  access_path: "logs/access.log"
+  out_request_path: "logs/out_request.log"
+  ws_access_path: "logs/ws_access.log"
+  ws_out_path: "logs/ws_out.log"
+  audit_path: "logs/audit.log"
   max_file_size_mb: 100          # Rotate when file reaches 100 MB
   max_backups: 10                # Number of rotated files to keep
   max_age_days: 30               # Max age in days before deletion
   compress: true                 # Compress rotated files
+  access_to_stdout: true
+  out_request_to_stdout: false
+  ws_access_to_stdout: false
+  ws_out_to_stdout: false
+  audit_to_stdout: false
+  post_payload: false
+  post_payload_max_bytes: 2048
+  ws_debug: false
 
 # Session management (Phase 1.4)
 session:

@@ -15,6 +15,11 @@ import (
 
 var (
 	Log       *slog.Logger
+	AccessLog *slog.Logger
+	OutReqLog *slog.Logger
+	WSAccLog  *slog.Logger
+	WSOutLog  *slog.Logger
+	AuditLog  *slog.Logger
 	logLevel  slog.Level
 	logDir    string
 	logFiles  map[string]io.WriteCloser
@@ -26,24 +31,56 @@ func init() {
 }
 
 // Init инициализирует систему логирования
+type Options struct {
+	Level              string
+	Dir                string
+	MaxFileSizeMB      int
+	MaxBackups         int
+	MaxAgeDays         int
+	Compress           bool
+	ErrorPath          string
+	AccessPath         string
+	OutRequestPath     string
+	WSAccessPath       string
+	WSOutPath          string
+	AuditPath          string
+	AccessToStdout     bool
+	OutRequestToStdout bool
+	WSAccessToStdout   bool
+	WSOutToStdout      bool
+	AuditToStdout      bool
+}
+
 func Init(levelStr, dir string, maxFileSizeMB int, maxBackups int, maxAgeDays int, compress bool) error {
-	if err := validateLogDir(dir); err != nil {
+	return InitWithOptions(Options{
+		Level:         levelStr,
+		Dir:           dir,
+		MaxFileSizeMB: maxFileSizeMB,
+		MaxBackups:    maxBackups,
+		MaxAgeDays:    maxAgeDays,
+		Compress:      compress,
+	})
+}
+
+// InitWithOptions initializes all CTS-Core log streams.
+func InitWithOptions(opts Options) error {
+	if err := validateLogDir(opts.Dir); err != nil {
 		return err
 	}
 
-	logDir = dir
-	if maxFileSizeMB <= 0 {
-		maxFileSizeMB = 100
+	logDir = opts.Dir
+	if opts.MaxFileSizeMB <= 0 {
+		opts.MaxFileSizeMB = 100
 	}
-	if maxBackups <= 0 {
-		maxBackups = 10
+	if opts.MaxBackups <= 0 {
+		opts.MaxBackups = 10
 	}
-	if maxAgeDays <= 0 {
-		maxAgeDays = 30
+	if opts.MaxAgeDays <= 0 {
+		opts.MaxAgeDays = 30
 	}
 
 	// Parse log level
-	switch strings.ToLower(levelStr) {
+	switch strings.ToLower(opts.Level) {
 	case "debug":
 		logLevel = slog.LevelDebug
 	case "info":
@@ -56,28 +93,52 @@ func Init(levelStr, dir string, maxFileSizeMB int, maxBackups int, maxAgeDays in
 		logLevel = slog.LevelInfo
 	}
 
-	// Initialize error.log
-	errorLogPath := filepath.Join(filepath.Clean(dir), "error.log")
-	errorLogFile := &lumberjack.Logger{
-		Filename:   errorLogPath,
-		MaxSize:    maxFileSizeMB,
-		MaxBackups: maxBackups,
-		MaxAge:     maxAgeDays,
-		Compress:   compress,
-	}
-	logFiles["error"] = errorLogFile
+	opts.ErrorPath = defaultLogPath(opts.ErrorPath, opts.Dir, "error.log")
+	opts.AccessPath = defaultLogPath(opts.AccessPath, opts.Dir, "access.log")
+	opts.OutRequestPath = defaultLogPath(opts.OutRequestPath, opts.Dir, "out_request.log")
+	opts.WSAccessPath = defaultLogPath(opts.WSAccessPath, opts.Dir, "ws_access.log")
+	opts.WSOutPath = defaultLogPath(opts.WSOutPath, opts.Dir, "ws_out.log")
+	opts.AuditPath = defaultLogPath(opts.AuditPath, opts.Dir, "audit.log")
 
-	writer := io.MultiWriter(os.Stdout, errorLogFile)
-	opts := &slog.HandlerOptions{
+	Log = buildLogger("error", opts.ErrorPath, true, opts)
+	AccessLog = buildLogger("access", opts.AccessPath, opts.AccessToStdout, opts)
+	OutReqLog = buildLogger("out_request", opts.OutRequestPath, opts.OutRequestToStdout, opts)
+	WSAccLog = buildLogger("ws_access", opts.WSAccessPath, opts.WSAccessToStdout, opts)
+	WSOutLog = buildLogger("ws_out", opts.WSOutPath, opts.WSOutToStdout, opts)
+	AuditLog = buildLogger("audit", opts.AuditPath, opts.AuditToStdout, opts)
+
+	slog.SetDefault(Log)
+	return nil
+}
+
+func defaultLogPath(value string, dir string, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return filepath.Join(filepath.Clean(dir), fallback)
+}
+
+func buildLogger(name string, path string, toStdout bool, opts Options) *slog.Logger {
+	file := &lumberjack.Logger{
+		Filename:   path,
+		MaxSize:    opts.MaxFileSizeMB,
+		MaxBackups: opts.MaxBackups,
+		MaxAge:     opts.MaxAgeDays,
+		Compress:   opts.Compress,
+	}
+	logFiles[name] = file
+
+	writer := io.Writer(file)
+	if toStdout {
+		writer = io.MultiWriter(os.Stdout, file)
+	}
+
+	handler := slog.NewJSONHandler(writer, &slog.HandlerOptions{
 		Level:       logLevel,
 		ReplaceAttr: replaceTimeAttr,
-	}
+	})
 
-	// Create logger (JSON)
-	Log = slog.New(slog.NewJSONHandler(writer, opts))
-	slog.SetDefault(Log)
-
-	return nil
+	return slog.New(handler)
 }
 
 // Get возвращает логгер для конкретного модуля
@@ -86,6 +147,41 @@ func Get(module string) *slog.Logger {
 		return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: replaceTimeAttr}))
 	}
 	return Log.With("module", module)
+}
+
+func GetAccess(module string) *slog.Logger {
+	if AccessLog == nil {
+		return Get(module)
+	}
+	return AccessLog.With("module", module)
+}
+
+func GetOutRequest(module string) *slog.Logger {
+	if OutReqLog == nil {
+		return Get(module)
+	}
+	return OutReqLog.With("module", module)
+}
+
+func GetWSAccess(module string) *slog.Logger {
+	if WSAccLog == nil {
+		return Get(module)
+	}
+	return WSAccLog.With("module", module)
+}
+
+func GetWSOut(module string) *slog.Logger {
+	if WSOutLog == nil {
+		return Get(module)
+	}
+	return WSOutLog.With("module", module)
+}
+
+func GetAudit(module string) *slog.Logger {
+	if AuditLog == nil {
+		return Get(module)
+	}
+	return AuditLog.With("module", module)
 }
 
 // Debug logs debug message to error.log
