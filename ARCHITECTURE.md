@@ -76,7 +76,7 @@
 | 16 | **Retry Policy** | Exponential backoff | По типам операций: API (3 retry, 1s base), DB (5 retry, 100ms base), Exchange (3 retry, 2s base) |
 | 17 | **Circuit Breaker** | Отложено на Phase 2 | Не критично для MVP, retry policy достаточно |
 | 18 | **Metrics** | Prometheus + Grafana | 20+ метрик, /metrics endpoint, 4 dashboard (overview, performance, errors, system) |
-| 19 | **Logging Format** | Гибридный | Dev: text (human-readable), Prod: JSON (machine-readable), библиотека: zerolog |
+| 19 | **Logging Format** | JSON | Dev: JSON to stdout+file, Prod: JSON file only, библиотека: slog |
 | 20 | **Timeout Values** | Стандартизированные | heartbeat=5s, timeout=15s, grace=60s, failover=60s |
 | 21 | **Trader Capacity** | Phase 1 ограничения | DEV: 3 traders max, PROD: 2 traders max (инфраструктурные лимиты) |
 | 22 | **Load Balancing** | Scoring алгоритм | Latency 50%, Load 30%, Resources 20% (без региона) |
@@ -1693,27 +1693,23 @@ process_cpu_seconds_total (counter)
 
 **Библиотека:** `github.com/prometheus/client_golang/prometheus`
 
-### Logging (Zerolog)
+### Logging (slog)
 
-**Гибридный формат:**
+**Формат и вывод:**
 
 ```yaml
 DEVELOPMENT (Docker):
-  format: text (human-readable, colored)
-  output: console + file (logs/daemon.log)
-  level: DEBUG
-  example: |
-    15:04:05 INFO  scheduler: Task assigned trader=eu-1 task=12345 ✓
-    15:04:06 ERROR websocket: Connection lost trader=us-2 reason=timeout
+    format: json (machine-readable)
+    output: stdout + file
+    level: DEBUG
+    rotation: lumberjack (size/age/backups)
 
 PRODUCTION (VM Debian):
-  format: json (machine-readable)
-  output: file only (logs/daemon.log)
-  level: INFO
-  rotation: daily, 7 days retention
-  shipping: Loki/ELK для централизованного хранения
-  example: |
-    {"timestamp":"2026-01-28T15:04:05Z","level":"INFO","component":"scheduler","message":"Task assigned","trader_id":"trader-eu-1","task_id":"task-12345","latency_ms":45}
+    format: json (machine-readable)
+    output: file only
+    level: INFO
+    rotation: lumberjack (size/age/backups)
+    shipping: Loki/ELK для централизованного хранения
 ```
 
 **Структура JSON log:**
@@ -1737,7 +1733,33 @@ PRODUCTION (VM Debian):
 **Required fields:** timestamp, level, component, message  
 **Optional context:** trader_id, task_id, correlation_id, error, stack_trace
 
-**Библиотека:** `github.com/rs/zerolog`
+**Библиотека:** `log/slog`
+
+**Стандарт модульности:** использовать атрибут `module` (эквивалентно `slog.With("module", ...)`).
+
+**Стандарт graceful shutdown:** обработка `SIGTERM/SIGINT` + `server.Shutdown(ctx)` + закрытие логгеров.
+
+### Log Files (CTS-Core)
+
+CTS-Core использует 6 файлов логов:
+- error.log: системные ошибки и события
+- access.log: входящие HTTP запросы
+- out_request.log: исходящие HTTP запросы
+- ws_access.log: входящие WS события
+- ws_out.log: исходящие WS сообщения
+- audit.log: аудит админских/системных действий
+
+### WS Log Fields (Standard)
+
+**ws_access.log**
+- required: timestamp, level, module, event, conn_id
+- recommended: trader_id, session_id, client_ip, user_agent, ws_path
+- optional: msg_id, request_id, error, latency_ms, size_bytes
+
+**ws_out.log**
+- required: timestamp, level, module, event, conn_id, msg_id
+- recommended: trader_id, session_id, target, msg_type, size_bytes
+- optional: request_id, latency_ms, error, status
 
 ### Audit Log
 

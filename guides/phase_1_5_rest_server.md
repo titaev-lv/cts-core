@@ -30,13 +30,13 @@ import (
     "time"
 
     "github.com/gin-gonic/gin"
-    "github.com/rs/zerolog"
+    "log/slog"
 )
 
 type Server struct {
     router     *gin.Engine
     httpServer *http.Server
-    logger     *zerolog.Logger
+    logger     *slog.Logger
 }
 
 type ServerConfig struct {
@@ -57,7 +57,7 @@ type ServerConfig struct {
 }
 
 // NewServer creates new API server
-func NewServer(cfg ServerConfig, logger *zerolog.Logger) (*Server, error) {
+func NewServer(cfg ServerConfig, logger *slog.Logger) (*Server, error) {
     // Set Gin mode based on environment
     gin.SetMode(gin.ReleaseMode)
     
@@ -89,11 +89,11 @@ func NewServer(cfg ServerConfig, logger *zerolog.Logger) (*Server, error) {
     
     server.httpServer = httpServer
     
-    logger.Info().
-        Str("addr", addr).
-        Bool("tls", cfg.TLS.Enabled).
-        Bool("mtls", cfg.TLS.ClientAuth).
-        Msg("API server initialized")
+    logger.Info("API server initialized",
+        "addr", addr,
+        "tls", cfg.TLS.Enabled,
+        "mtls", cfg.TLS.ClientAuth,
+    )
     
     return server, nil
 }
@@ -332,11 +332,11 @@ import (
     "time"
 
     "github.com/gin-gonic/gin"
-    "github.com/rs/zerolog"
+    "log/slog"
 )
 
 // Logger middleware logs HTTP requests
-func Logger(logger *zerolog.Logger) gin.HandlerFunc {
+func Logger(logger *slog.Logger) gin.HandlerFunc {
     return func(c *gin.Context) {
         start := time.Now()
         path := c.Request.URL.Path
@@ -352,23 +352,24 @@ func Logger(logger *zerolog.Logger) gin.HandlerFunc {
         method := c.Request.Method
         errorMessage := c.Errors.ByType(gin.ErrorTypePrivate).String()
 
-        logEvent := logger.Info()
-        if statusCode >= 500 {
-            logEvent = logger.Error()
-        } else if statusCode >= 400 {
-            logEvent = logger.Warn()
+        attrs := []any{
+            "method", method,
+            "path", path,
+            "query", query,
+            "status", statusCode,
+            "latency", latency,
+            "client_ip", clientIP,
+            "user_agent", c.Request.UserAgent(),
+            "error", errorMessage,
         }
 
-        logEvent.
-            Str("method", method).
-            Str("path", path).
-            Str("query", query).
-            Int("status", statusCode).
-            Dur("latency", latency).
-            Str("client_ip", clientIP).
-            Str("user_agent", c.Request.UserAgent()).
-            Str("error", errorMessage).
-            Msg("HTTP request")
+        if statusCode >= 500 {
+            logger.Error("HTTP request", attrs...)
+        } else if statusCode >= 400 {
+            logger.Warn("HTTP request", attrs...)
+        } else {
+            logger.Info("HTTP request", attrs...)
+        }
     }
 }
 ```
@@ -386,19 +387,19 @@ import (
     "runtime/debug"
 
     "github.com/gin-gonic/gin"
-    "github.com/rs/zerolog"
+    "log/slog"
 )
 
 // Recovery middleware recovers from panics
-func Recovery(logger *zerolog.Logger) gin.HandlerFunc {
+func Recovery(logger *slog.Logger) gin.HandlerFunc {
     return func(c *gin.Context) {
         defer func() {
             if err := recover(); err != nil {
                 // Log panic with stack trace
-                logger.Error().
-                    Str("panic", fmt.Sprintf("%v", err)).
-                    Str("stack", string(debug.Stack())).
-                    Msg("Panic recovered")
+                logger.Error("Panic recovered",
+                    "panic", fmt.Sprintf("%v", err),
+                    "stack", string(debug.Stack()),
+                )
 
                 // Return 500 error
                 c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
@@ -508,7 +509,7 @@ import (
 )
 
 // NewServer creates new API server
-func NewServer(cfg ServerConfig, logger *zerolog.Logger) (*Server, error) {
+func NewServer(cfg ServerConfig, logger *slog.Logger) (*Server, error) {
     // ... (existing code)
     
     router := gin.New()
@@ -900,9 +901,9 @@ func main() {
     }
 
     go func() {
-        logger.Info().Msg("Starting metrics server on :9090")
+        logger.Info("Starting metrics server on :9090")
         if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-            logger.Error().Err(err).Msg("Metrics server failed")
+            logger.Error("Metrics server failed", "error", err)
         }
     }()
 
@@ -910,7 +911,7 @@ func main() {
 
     // In shutdown section, add:
     if err := metricsServer.Shutdown(shutdownCtx); err != nil {
-        logger.Error().Err(err).Msg("Metrics server shutdown error")
+        logger.Error("Metrics server shutdown error", "error", err)
     }
 }
 ```
@@ -926,7 +927,7 @@ import (
     "github.com/your-org/cts-core/internal/api/middleware"
 )
 
-func NewServer(cfg ServerConfig, logger *zerolog.Logger) (*Server, error) {
+func NewServer(cfg ServerConfig, logger *slog.Logger) (*Server, error) {
     // ...
     
     router.Use(middleware.Recovery(logger))

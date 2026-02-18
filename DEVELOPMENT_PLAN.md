@@ -111,11 +111,32 @@ gantt
 
 **access.log** (входящие запросы)
 - все входящие HTTP запросы от других систем
-- WebSocket handshake и события жизненного цикла соединения
+- WebSocket handshake и события жизненного цикла соединения (если WS логи не включены отдельно)
 
 **out_request.log** (исходящие запросы)
 - все исходящие HTTP запросы CTS-Core (HSM, внешние сервисы)
-- WS исходящие сообщения логировать выборочно (см. ниже)
+
+**ws_access.log** (входящие WS события)
+- connect/disconnect, auth, subscribe/unsubscribe, ping/pong, ошибки протокола
+
+**ws_out.log** (исходящие WS сообщения)
+- команды и ответы трейдерам/веб-клиентам (с conn_id/msg_id)
+
+### ✅ Стандарт полей для WS логов
+
+**ws_access.log**
+- required: timestamp, level, module, event, conn_id
+- recommended: trader_id, session_id, client_ip, user_agent, ws_path
+- optional: msg_id, request_id, error, latency_ms, size_bytes
+
+**ws_out.log**
+- required: timestamp, level, module, event, conn_id, msg_id
+- recommended: trader_id, session_id, target, msg_type, size_bytes
+- optional: request_id, latency_ms, error, status
+
+**audit.log** (аудит действий)
+- все критичные админские/системные действия над сущностями
+- хранит кто/что/когда/результат, нужен для compliance и расследований
 
 ### ⚠️ Текущее состояние (ПРОБЛЕМЫ)
 
@@ -140,6 +161,15 @@ gantt
 - error: основной системный лог
 - access: входящие HTTP запросы
 - out_request: исходящие HTTP запросы
+- ws_access: входящие WS события
+- ws_out: исходящие WS сообщения
+- audit: критичные админские/системные действия
+
+**3) Частичное логирование POST payload**
+- Только whitelist полей (никаких секретов/ключей)
+- Маскирование чувствительных значений
+- Лимит размера (например 2-4 KB)
+- Включается по флагу (например `logging.post_payload=true`)
 
 ### 📝 Конфигурация (пример)
 
@@ -149,6 +179,8 @@ logging:
     error_path: "/var/log/cts-core/error.log"
     access_path: "/var/log/cts-core/access.log"
     out_request_path: "/var/log/cts-core/out_request.log"
+    ws_access_path: "/var/log/cts-core/ws_access.log"
+    ws_out_path: "/var/log/cts-core/ws_out.log"
     max_size_mb: 100
     max_backups: 10
     max_age_days: 30
@@ -162,14 +194,14 @@ logging:
 **Минимально необходимое:**
 - Логировать lifecycle: connect/disconnect, auth, subscribe/unsubscribe
 - Логировать ошибки протокола, timeouts, rate limits
-- Все это писать в access.log (как inbound) и error.log (ошибки)
+- Все это писать в ws_access.log и error.log (ошибки)
 
 **Не рекомендуется:**
 - Логировать каждое WS сообщение (шум + объём)
 
 **Если нужно логировать сообщения:**
 - Ввести sampling (например 1% или только ошибки)
-- Отдельный лог `ws_events.log` или `out_request.log` (если outbound)
+- Писать в ws_out.log (outbound)
 - Включать по флагу `logging.ws_debug=true`
 
 ### ✅ Чек-лист реализации
@@ -2508,8 +2540,8 @@ tail logs/cts-core.log
 ```
 
 **Definition of Done:**
-- ✅ Logger package реализован с zerolog
-- ✅ Hybrid format работает (text DEV, json PROD)
+- ✅ Logger package реализован с slog
+- ✅ JSON формат работает (stdout + file)
 - ✅ Log rotation настроен (lumberjack)
 - ✅ main.go компилируется и запускается
 - ✅ Логи пишутся в console + file
@@ -2717,7 +2749,7 @@ git status
 3. ✅ config.yaml полностью реализован (200+ строк)
 4. ✅ Config types и loader с validation
 5. ✅ Config tests (80%+ coverage)
-6. ✅ Logger с zerolog (hybrid text/json, rotation)
+6. ✅ Logger с slog (JSON + stdout, rotation)
 7. ✅ main.go базовая версия (компилируется и запускается)
 8. ✅ Makefile с 15+ targets
 9. ✅ .gitignore настроен
@@ -2754,7 +2786,7 @@ git status
 | **3.4** | Scheduler Tasks | Background jobs (cleanup, re-encryption check) | 🟡 High | 2d |
 | **3.5** | HSM Key Rotation | Re-encryption job processor (CRITICAL для production) | 🔴 Critical | 3d |
 | **3.6** | Metrics | Prometheus exporter (20+ метрик), /metrics endpoint | 🟡 High | 3d |
-| **3.7** | Logging | Zerolog integration (hybrid format) | 🟡 High | 1d |
+| **3.7** | Logging | slog integration (JSON + stdout) | 🟡 High | 1d |
 
 **Metrics (20+):**
 - Core: active_traders, tasks_assigned, websocket_connections

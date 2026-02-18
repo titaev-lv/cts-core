@@ -112,13 +112,13 @@ import (
     "sync"
     "time"
 
-    "github.com/rs/zerolog"
+    "log/slog"
 )
 
 type Manager struct {
     state      *DaemonState
     mu         sync.RWMutex
-    logger     *zerolog.Logger
+    logger     *slog.Logger
     
     // Configuration
     stateFile   string
@@ -139,7 +139,7 @@ type ManagerConfig struct {
 }
 
 // NewManager creates new state manager
-func NewManager(cfg ManagerConfig, logger *zerolog.Logger) (*Manager, error) {
+func NewManager(cfg ManagerConfig, logger *slog.Logger) (*Manager, error) {
     // Ensure directories exist
     if err := os.MkdirAll(filepath.Dir(cfg.StateFile), 0755); err != nil {
         return nil, fmt.Errorf("failed to create state directory: %w", err)
@@ -931,16 +931,17 @@ func (m *Manager) ValidateState() []string {
 package state
 
 import (
+    "io"
     "os"
     "path/filepath"
     "testing"
     "time"
 
-    "github.com/rs/zerolog"
+    "log/slog"
 )
 
 func TestStateManagerBasic(t *testing.T) {
-    logger := zerolog.Nop()
+    logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
     
     // Create temp directory
     tmpDir := t.TempDir()
@@ -952,7 +953,7 @@ func TestStateManagerBasic(t *testing.T) {
         SyncInterval: 30 * time.Second,
     }
     
-    manager, err := NewManager(cfg, &logger)
+    manager, err := NewManager(cfg, logger)
     if err != nil {
         t.Fatalf("Failed to create manager: %v", err)
     }
@@ -992,7 +993,7 @@ func TestStateManagerBasic(t *testing.T) {
 }
 
 func TestStateLoadSave(t *testing.T) {
-    logger := zerolog.Nop()
+    logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
     tmpDir := t.TempDir()
     
     cfg := ManagerConfig{
@@ -1003,7 +1004,7 @@ func TestStateLoadSave(t *testing.T) {
     }
     
     // Create manager and add data
-    manager1, _ := NewManager(cfg, &logger)
+    manager1, _ := NewManager(cfg, logger)
     
     trader := TraderState{
         TraderID: 1,
@@ -1041,7 +1042,7 @@ func TestStateLoadSave(t *testing.T) {
 }
 
 func TestBackupRotation(t *testing.T) {
-    logger := zerolog.Nop()
+    logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
     tmpDir := t.TempDir()
     
     cfg := ManagerConfig{
@@ -1051,7 +1052,7 @@ func TestBackupRotation(t *testing.T) {
         SyncInterval: 30 * time.Second,
     }
     
-    manager, _ := NewManager(cfg, &logger)
+    manager, _ := NewManager(cfg, logger)
     defer manager.Close()
     
     // Create initial state
@@ -1071,7 +1072,7 @@ func TestBackupRotation(t *testing.T) {
 }
 
 func TestValidateState(t *testing.T) {
-    logger := zerolog.Nop()
+    logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
     tmpDir := t.TempDir()
     
     cfg := ManagerConfig{
@@ -1081,7 +1082,7 @@ func TestValidateState(t *testing.T) {
         SyncInterval: 30 * time.Second,
     }
     
-    manager, _ := NewManager(cfg, &logger)
+    manager, _ := NewManager(cfg, logger)
     defer manager.Close()
     
     // Add valid data

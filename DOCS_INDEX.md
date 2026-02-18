@@ -66,7 +66,7 @@
 - [x] **SQL migrations** (11 tables including HSM key rotation)
 - [x] **Failover design** (Single instance + trader resilience)
 - [x] **Error handling** (27 standardized codes with retry policies)
-- [x] **Observability** (Prometheus 20+ metrics, zerolog, audit log)
+- [x] **Observability** (Prometheus 20+ metrics, slog, audit log)
 - [x] **HSM key rotation** (Complete infrastructure with re-encryption)
 
 ### Текущая фаза 🔵
