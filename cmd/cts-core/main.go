@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -216,14 +218,42 @@ func main() {
 	log.Info("CTS-Core initialized successfully")
 	log.Info("REST server starting", "addr", addr, "tls", cfg.Server.TLS.Enabled)
 
-	var serveErr error
-	if cfg.Server.TLS.Enabled {
-		serveErr = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
-	} else {
-		serveErr = httpServer.ListenAndServe()
+	serverErrCh := make(chan error, 1)
+	go func() {
+		var serveErr error
+		if cfg.Server.TLS.Enabled {
+			serveErr = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+		} else {
+			serveErr = httpServer.ListenAndServe()
+		}
+		serverErrCh <- serveErr
+	}()
+
+	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case <-shutdownCtx.Done():
+		log.Info("Shutdown signal received")
+	case serveErr := <-serverErrCh:
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+			log.Error("REST server stopped with error", "error", serveErr)
+			os.Exit(1)
+		}
+		return
 	}
-	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(ctx); err != nil {
+		log.Error("REST server shutdown failed", "error", err)
+		os.Exit(1)
+	}
+
+	if serveErr := <-serverErrCh; serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 		log.Error("REST server stopped with error", "error", serveErr)
 		os.Exit(1)
 	}
+
+	log.Info("REST server stopped")
 }
