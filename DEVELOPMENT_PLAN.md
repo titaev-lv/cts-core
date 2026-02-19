@@ -146,24 +146,24 @@ gantt
 | **Формат** | ✅ JSON | ✅ JSON |
 | **Stdout вывод** | ✅ Есть | ✅ Есть |
 | **Ротация** | ✅ lumberjack | ✅ lumberjack |
-| **request_id** | ❌ Нет | ✅ Есть |
+| **request_id** | ⚠️ Middleware добавлен | ✅ Есть |
 | **Fail-fast проверка логов** | ✅ Есть | ✅ Есть |
-| **Разделение логов** | ❌ Нет | ✅ audit/error |
+| **Разделение логов** | ⚠️ Логгеры/файлы готовы | ✅ audit/error |
 | **Видно в docker logs** | ✅ Да | ✅ Да |
 
 ### ✅ Требуемые изменения (1-2 дня)
 
 **1) Добавить request_id**
-- Заголовок `X-Request-ID` (если нет — сгенерировать)
-- Проброс в access/error/out_request
+- Заголовок `X-Request-ID` (если нет — сгенерировать) ✅
+- Проброс в access/error/out_request ❌ (нужно подключить middleware/handlers)
 
 **2) Разделить логи на потоки**
-- error: основной системный лог
-- access: входящие HTTP запросы
-- out_request: исходящие HTTP запросы
-- ws_access: входящие WS события
-- ws_out: исходящие WS сообщения
-- audit: критичные админские/системные действия
+- error: основной системный лог ✅
+- access: входящие HTTP запросы ⚠️ (логгер готов, нет middleware)
+- out_request: исходящие HTTP запросы ⚠️ (логгер готов, нет обертки)
+- ws_access: входящие WS события ⚠️ (логгер готов, нет обработчиков)
+- ws_out: исходящие WS сообщения ⚠️ (логгер готов, нет обработчиков)
+- audit: критичные админские/системные действия ⚠️ (логгер готов, нет вызовов)
 
 **3) Частичное логирование POST payload**
 - Только whitelist полей (никаких секретов/ключей)
@@ -208,12 +208,14 @@ logging:
 
 ```
 Phase 1.4 - Logging Unification for CTS-Core
-[ ] JSON + stdout + lumberjack
-[ ] request_id (X-Request-ID) + проброс
-[ ] access/error/out_request разделение
-[ ] fail-fast проверка прав на директорию
-[ ] UTC RFC3339 microseconds
-[ ] Обновить config + docs
+[x] JSON + stdout + lumberjack
+[x] fail-fast проверка прав на директорию
+[x] UTC RFC3339 microseconds
+[x] Логгеры и файлы для error/access/out_request/ws_access/ws_out/audit
+[x] Обновить config + docs
+[ ] Подключить request_id middleware к HTTP серверу
+[ ] Проброс request_id в access/error/out_request
+[ ] Включить access/out_request/ws/audit логирование в обработчиках
 [ ] Проверить docker logs и наличие файлов
 ```
 
