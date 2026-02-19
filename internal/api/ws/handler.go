@@ -1,0 +1,87 @@
+package ws
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+	"github.com/titaev-lv/cts-core/internal/api/middleware"
+	"github.com/titaev-lv/cts-core/internal/logger"
+)
+
+type Handler struct {
+	wsDebug   bool
+	upgrader  websocket.Upgrader
+	accessLog *slog.Logger
+	outLog    *slog.Logger
+}
+
+// NewHandler creates a WebSocket handler with logging.
+func NewHandler(wsDebug bool) *Handler {
+	return &Handler{
+		wsDebug: wsDebug,
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin:     func(_ *http.Request) bool { return true },
+		},
+		accessLog: logger.GetWSAccess("ws"),
+		outLog:    logger.GetWSOut("ws"),
+	}
+}
+
+// Serve handles WebSocket connections (stub implementation).
+func (h *Handler) Serve(c *gin.Context) {
+	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		logger.Get("ws").Error("WS upgrade failed", "error", err)
+		return
+	}
+	defer conn.Close()
+
+	connID := generateConnID()
+	requestID := middleware.GetRequestID(c)
+	clientIP := c.ClientIP()
+	userAgent := c.Request.UserAgent()
+	path := c.Request.URL.Path
+
+	h.accessLog.Info("ws_connect", "conn_id", connID, "request_id", requestID, "ip", clientIP, "user_agent", userAgent, "ws_path", path)
+
+	msgID := int64(0)
+	if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"connected\"}")); err == nil {
+		msgID++
+		h.outLog.Info("ws_out", "event", "connected", "conn_id", connID, "msg_id", msgID, "request_id", requestID)
+	}
+
+	for {
+		msgType, payload, err := conn.ReadMessage()
+		if err != nil {
+			h.accessLog.Warn("ws_disconnect", "conn_id", connID, "request_id", requestID, "error", err)
+			return
+		}
+
+		msgID++
+		h.accessLog.Info("ws_in", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "msg_type", msgType, "size_bytes", len(payload))
+
+		if h.wsDebug {
+			start := time.Now()
+			if err := conn.WriteMessage(msgType, payload); err != nil {
+				h.outLog.Warn("ws_out", "event", "echo_error", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "error", err)
+				continue
+			}
+			h.outLog.Info("ws_out", "event", "echo", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "latency_ms", time.Since(start).Milliseconds(), "size_bytes", len(payload))
+		}
+	}
+}
+
+func generateConnID() string {
+	buf := make([]byte, 12)
+	if _, err := rand.Read(buf); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(buf)
+}

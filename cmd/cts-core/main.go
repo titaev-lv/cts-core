@@ -199,7 +199,7 @@ func main() {
 
 	// TODO: Phase 1.4 - Load state
 
-	router := rest.NewRouter(dbClient)
+	router := rest.NewRouter(dbClient, rest.Options{WSDebug: cfg.Logging.WSDebug})
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	if cfg.Server.Host == "" {
 		addr = fmt.Sprintf(":%d", cfg.Server.Port)
