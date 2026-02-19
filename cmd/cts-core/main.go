@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/titaev-lv/cts-core/internal/api/rest"
 	"github.com/titaev-lv/cts-core/internal/config"
 	"github.com/titaev-lv/cts-core/internal/db"
 	"github.com/titaev-lv/cts-core/internal/db/repository"
@@ -108,11 +111,12 @@ func main() {
 
 	// 1. Trading context (exchange API keys)
 	hsmTradingCfg := hsm.ClientConfig{
-		BaseURL:        cfg.HSM.URL,
-		CertPath:       cfg.HSM.Trading.TLS.CertFile,
-		KeyPath:        cfg.HSM.Trading.TLS.KeyFile,
-		CAPath:         cfg.HSM.Trading.TLS.CAFile,
-		RequestTimeout: cfg.HSM.Timeout,
+		BaseURL:          cfg.HSM.URL,
+		CertPath:         cfg.HSM.Trading.TLS.CertFile,
+		KeyPath:          cfg.HSM.Trading.TLS.KeyFile,
+		CAPath:           cfg.HSM.Trading.TLS.CAFile,
+		RequestTimeout:   cfg.HSM.Timeout,
+		OutRequestLogger: logger.GetOutRequest("hsm"),
 		RetryConfig: hsm.RetryConfig{
 			MaxAttempts: cfg.HSM.Retry.MaxAttempts,
 			InitialWait: cfg.HSM.Retry.InitialDelay,
@@ -150,11 +154,12 @@ func main() {
 
 	// 2. 2FA context (for re-encryption job only, not used in normal operation)
 	hsm2FACfg := hsm.ClientConfig{
-		BaseURL:        cfg.HSM.URL,
-		CertPath:       cfg.HSM.TwoFA.TLS.CertFile,
-		KeyPath:        cfg.HSM.TwoFA.TLS.KeyFile,
-		CAPath:         cfg.HSM.TwoFA.TLS.CAFile,
-		RequestTimeout: cfg.HSM.Timeout,
+		BaseURL:          cfg.HSM.URL,
+		CertPath:         cfg.HSM.TwoFA.TLS.CertFile,
+		KeyPath:          cfg.HSM.TwoFA.TLS.KeyFile,
+		CAPath:           cfg.HSM.TwoFA.TLS.CAFile,
+		RequestTimeout:   cfg.HSM.Timeout,
+		OutRequestLogger: logger.GetOutRequest("hsm"),
 		RetryConfig: hsm.RetryConfig{
 			MaxAttempts: cfg.HSM.Retry.MaxAttempts,
 			InitialWait: cfg.HSM.Retry.InitialDelay,
@@ -193,11 +198,32 @@ func main() {
 	log.Info("HSM clients initialized", "trading_context", cfg.HSM.Trading.Context, "2fa_context", cfg.HSM.TwoFA.Context)
 
 	// TODO: Phase 1.4 - Load state
-	// TODO: Phase 1.5 - Start REST server
+
+	router := rest.NewRouter(dbClient)
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	if cfg.Server.Host == "" {
+		addr = fmt.Sprintf(":%d", cfg.Server.Port)
+	}
+
+	httpServer := &http.Server{
+		Addr:         addr,
+		Handler:      router,
+		ReadTimeout:  cfg.Server.Timeouts.Read,
+		WriteTimeout: cfg.Server.Timeouts.Write,
+		IdleTimeout:  cfg.Server.Timeouts.Idle,
+	}
 
 	log.Info("CTS-Core initialized successfully")
-	log.Info("CTS-Core is running. Press Ctrl+C to stop.")
+	log.Info("REST server starting", "addr", addr, "tls", cfg.Server.TLS.Enabled)
 
-	// Keep running
-	select {}
+	var serveErr error
+	if cfg.Server.TLS.Enabled {
+		serveErr = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+	} else {
+		serveErr = httpServer.ListenAndServe()
+	}
+	if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
+		log.Error("REST server stopped with error", "error", serveErr)
+		os.Exit(1)
+	}
 }

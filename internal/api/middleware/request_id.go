@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/titaev-lv/cts-core/internal/requestid"
 )
 
 const requestIDHeader = "X-Request-ID"
@@ -19,6 +20,10 @@ func RequestID() gin.HandlerFunc {
 		}
 
 		c.Set("request_id", requestID)
+		ctx := requestid.WithContext(c.Request.Context(), requestID)
+		if ctx != nil {
+			c.Request = c.Request.WithContext(ctx)
+		}
 		c.Writer.Header().Set(requestIDHeader, requestID)
 		c.Next()
 	}
