@@ -146,24 +146,24 @@ gantt
 | **Формат** | ✅ JSON | ✅ JSON |
 | **Stdout вывод** | ✅ Есть | ✅ Есть |
 | **Ротация** | ✅ lumberjack | ✅ lumberjack |
-| **request_id** | ⚠️ Middleware добавлен | ✅ Есть |
+| **request_id** | ✅ Есть | ✅ Есть |
 | **Fail-fast проверка логов** | ✅ Есть | ✅ Есть |
-| **Разделение логов** | ⚠️ Логгеры/файлы готовы | ✅ audit/error |
+| **Разделение логов** | ✅ HTTP + WS stub | ✅ audit/error |
 | **Видно в docker logs** | ✅ Да | ✅ Да |
 
 ### ✅ Требуемые изменения (1-2 дня)
 
 **1) Добавить request_id**
 - Заголовок `X-Request-ID` (если нет — сгенерировать) ✅
-- Проброс в access/error/out_request ❌ (нужно подключить middleware/handlers)
+- Проброс в access/error/out_request ✅
 
 **2) Разделить логи на потоки**
 - error: основной системный лог ✅
-- access: входящие HTTP запросы ⚠️ (логгер готов, нет middleware)
-- out_request: исходящие HTTP запросы ⚠️ (логгер готов, нет обертки)
-- ws_access: входящие WS события ⚠️ (логгер готов, нет обработчиков)
-- ws_out: исходящие WS сообщения ⚠️ (логгер готов, нет обработчиков)
-- audit: критичные админские/системные действия ⚠️ (логгер готов, нет вызовов)
+- access: входящие HTTP запросы ✅
+- out_request: исходящие HTTP запросы ✅
+- ws_access: входящие WS события ✅ (WS stub)
+- ws_out: исходящие WS сообщения ✅ (WS stub)
+- audit: критичные админские/системные действия ✅ (middleware)
 
 **3) Частичное логирование POST payload**
 - Только whitelist полей (никаких секретов/ключей)
@@ -213,9 +213,9 @@ Phase 1.4 - Logging Unification for CTS-Core
 [x] UTC RFC3339 microseconds
 [x] Логгеры и файлы для error/access/out_request/ws_access/ws_out/audit
 [x] Обновить config + docs
-[ ] Подключить request_id middleware к HTTP серверу
-[ ] Проброс request_id в access/error/out_request
-[ ] Включить access/out_request/ws/audit логирование в обработчиках
+[x] Подключить request_id middleware к HTTP серверу
+[x] Проброс request_id в access/error/out_request
+[x] Включить access/out_request/ws/audit логирование в обработчиках (WS stub)
 [ ] Проверить docker logs и наличие файлов
 ```
 
