@@ -25,6 +25,7 @@ func AccessLog() gin.HandlerFunc {
 		c.Next()
 
 		latency := time.Since(start)
+		latencyMS := float64(latency.Microseconds()) / 1000.0
 		status := c.Writer.Status()
 		size := c.Writer.Size()
 
@@ -32,7 +33,7 @@ func AccessLog() gin.HandlerFunc {
 			"method", method,
 			"path", path,
 			"status", status,
-			"latency_ms", latency.Milliseconds(),
+			"latency_ms", latencyMS,
 			"ip", clientIP,
 			"user_agent", userAgent,
 			"bytes", size,

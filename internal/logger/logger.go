@@ -137,6 +137,12 @@ func buildLogger(name string, path string, toStdout bool, opts Options) *slog.Lo
 		Level:       logLevel,
 		ReplaceAttr: replaceTimeAttr,
 	})
+	if name == "access" {
+		handler = slog.NewJSONHandler(writer, &slog.HandlerOptions{
+			Level:       logLevel,
+			ReplaceAttr: replaceAccessAttr,
+		})
+	}
 
 	return slog.New(handler)
 }
@@ -149,11 +155,11 @@ func Get(module string) *slog.Logger {
 	return Log.With("module", module)
 }
 
-func GetAccess(module string) *slog.Logger {
+func GetAccess(_ string) *slog.Logger {
 	if AccessLog == nil {
-		return Get(module)
+		return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: replaceAccessAttr}))
 	}
-	return AccessLog.With("module", module)
+	return AccessLog
 }
 
 func GetOutRequest(module string) *slog.Logger {
@@ -243,6 +249,14 @@ func replaceTimeAttr(_ []string, attr slog.Attr) slog.Attr {
 	}
 	if t, ok := attr.Value.Any().(time.Time); ok {
 		attr.Value = slog.StringValue(t.UTC().Format("2006-01-02T15:04:05.000000Z"))
+	}
+	return attr
+}
+
+func replaceAccessAttr(groups []string, attr slog.Attr) slog.Attr {
+	attr = replaceTimeAttr(groups, attr)
+	if attr.Key == slog.MessageKey || attr.Key == "module" {
+		return slog.Attr{}
 	}
 	return attr
 }

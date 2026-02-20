@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/titaev-lv/cts-core/internal/requestid"
@@ -20,6 +21,7 @@ func RequestID() gin.HandlerFunc {
 		}
 
 		c.Set("request_id", requestID)
+		c.Set("request_start", time.Now())
 		ctx := requestid.WithContext(c.Request.Context(), requestID)
 		if ctx != nil {
 			c.Request = c.Request.WithContext(ctx)
@@ -37,6 +39,18 @@ func GetRequestID(c *gin.Context) string {
 	}
 	requestID, _ := value.(string)
 	return requestID
+}
+
+func GetRequestStart(c *gin.Context) (time.Time, bool) {
+	value, ok := c.Get("request_start")
+	if !ok {
+		return time.Time{}, false
+	}
+	startedAt, ok := value.(time.Time)
+	if !ok || startedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return startedAt, true
 }
 
 // PropagateRequestID copies request_id to outbound requests if set.

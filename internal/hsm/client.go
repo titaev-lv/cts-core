@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/titaev-lv/cts-core/internal/requestid"
@@ -131,7 +132,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			lastErr = fmt.Errorf("HTTP request failed: %w", err)
-			c.logOutRequest(ctx, method, path, url, 0, time.Since(attemptStart), lastErr)
+			c.logOutRequest(ctx, method, path, url, 0, time.Since(attemptStart), -1, lastErr)
 			c.logRetry(attempt, lastErr)
 
 			if attempt < c.retryCfg.MaxAttempts {
@@ -143,10 +144,11 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 
 		// Read response body
 		defer resp.Body.Close()
+		serverLatencyUS := extractServerLatencyUS(resp)
 		respBody, err := io.ReadAll(resp.Body)
 		if err != nil {
 			lastErr = fmt.Errorf("failed to read response: %w", err)
-			c.logOutRequest(ctx, method, path, url, resp.StatusCode, time.Since(attemptStart), lastErr)
+			c.logOutRequest(ctx, method, path, url, resp.StatusCode, time.Since(attemptStart), serverLatencyUS, lastErr)
 			c.logRetry(attempt, lastErr)
 
 			if attempt < c.retryCfg.MaxAttempts {
@@ -159,7 +161,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		// Check status code
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			lastErr = fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
-			c.logOutRequest(ctx, method, path, url, resp.StatusCode, time.Since(attemptStart), lastErr)
+			c.logOutRequest(ctx, method, path, url, resp.StatusCode, time.Since(attemptStart), serverLatencyUS, lastErr)
 			c.logRetry(attempt, lastErr)
 
 			// Don't retry on 4xx errors (client errors)
@@ -182,41 +184,78 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		}
 
 		// Success
-		c.logOutRequest(ctx, method, path, url, resp.StatusCode, time.Since(attemptStart), nil)
+		c.logOutRequest(ctx, method, path, url, resp.StatusCode, time.Since(attemptStart), serverLatencyUS, nil)
 		return nil
 	}
 
 	return fmt.Errorf("request failed after %d attempts: %w", c.retryCfg.MaxAttempts, lastErr)
 }
 
-func (c *Client) logOutRequest(ctx context.Context, method, path, url string, status int, latency time.Duration, err error) {
+func extractServerLatencyUS(resp *http.Response) int64 {
+	if resp == nil {
+		return -1
+	}
+
+	val := resp.Header.Get("X-HSM-Processing-Us")
+	if val == "" {
+		return -1
+	}
+
+	parsed, err := strconv.ParseInt(val, 10, 64)
+	if err != nil || parsed < 0 {
+		return -1
+	}
+
+	return parsed
+}
+
+func (c *Client) logOutRequest(ctx context.Context, method, path, url string, status int, latency time.Duration, serverLatencyUS int64, err error) {
 	if c.outLogger == nil {
 		return
 	}
 
 	requestID := requestid.FromContext(ctx)
+	includeDetailedLatency := c.outLogger.Enabled(ctx, slog.LevelDebug)
+	totalLatencyMS := float64(latency.Microseconds()) / 1000.0
 
-	if err != nil {
-		c.outLogger.Warn("HSM request",
-			"method", method,
-			"path", path,
-			"url", url,
-			"status", status,
-			"latency_ms", latency.Milliseconds(),
-			"request_id", requestID,
-			"error", err,
-		)
-		return
+	serverLatencyMS := -1.0
+	networkLatencyMS := -1.0
+	if serverLatencyUS >= 0 {
+		serverLatencyMS = float64(serverLatencyUS) / 1000.0
+		networkLatencyMS = totalLatencyMS - serverLatencyMS
+		if networkLatencyMS < 0 {
+			networkLatencyMS = 0
+		}
 	}
 
-	c.outLogger.Info("HSM request",
+	latencyField := any(totalLatencyMS)
+	if includeDetailedLatency {
+		latencyBreakdown := map[string]float64{
+			"total": totalLatencyMS,
+		}
+		if serverLatencyMS >= 0 {
+			latencyBreakdown["server"] = serverLatencyMS
+			latencyBreakdown["network"] = networkLatencyMS
+		}
+		latencyField = latencyBreakdown
+	}
+
+	fields := []any{
 		"method", method,
 		"path", path,
 		"url", url,
 		"status", status,
-		"latency_ms", latency.Milliseconds(),
+		"latency_ms", latencyField,
 		"request_id", requestID,
-	)
+	}
+
+	if err != nil {
+		fields = append(fields, "error", err)
+		c.outLogger.Warn("HSM request", fields...)
+		return
+	}
+
+	c.outLogger.Info("HSM request", fields...)
 }
 
 // logRetry logs retry attempt
