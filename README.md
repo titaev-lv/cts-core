@@ -13,7 +13,7 @@
 
 **CTS-Core** — это Go-приложение для управления распределённой системой криптовалютной торговли:
 
-- 🎯 **Оркестрация**: Управление 25+ независимыми trader daemons
+- 🎯 **Оркестрация**: Управление 25+ независимыми traders
 - 📊 **Задачи**: TRADE (арбитраж) + MONITOR (сбор рыночных данных)
 - 🔒 **Безопасность**: mTLS, envelope encryption (HSM), certificate-based auth
 - ⚡ **Производительность**: WebSocket для low-latency communication
@@ -273,7 +273,7 @@ TBD
 
 ## 🔗 Связанные проекты
 
-- **[daemon2](other-sub-system/daemon2/)** - Trader daemon (базовая структура)
+- **[daemon2](other-sub-system/daemon2/)** - Trader (базовая структура)
 - **[hsm-service](other-sub-system/hsm-service/)** - SoftHSM service (mTLS, KEK/DEK)
 - **[www-go](other-sub-system/www-go/)** - Web UI (Gin, cryptostore patterns)
 

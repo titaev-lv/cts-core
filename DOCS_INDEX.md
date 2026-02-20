@@ -155,7 +155,7 @@ TRADER_MODES.md
 
 ### Архитектурные решения
 
-1. **Distributed Architecture**: CTS-Core (orchestrator) + 25+ Trader daemons
+1. **Distributed Architecture**: CTS-Core (orchestrator) + 25+ Traders
 2. **Security First**: mTLS everywhere, envelope encryption (KEK/DEK), OU-based ACL
 3. **Low Latency**: WebSocket для всей коммуникации, прямой доступ трейдеров к ClickHouse
 4. **Dual-Mode Trading**: TRADE (MySQL) и MONITOR (ClickHouse) независимы

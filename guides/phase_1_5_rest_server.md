@@ -547,9 +547,9 @@ curl -k -X OPTIONS https://localhost:8443/test
 ```
 
 **Definition of Done:**
-- [ ] 4 middleware созданы (logger, recovery, cors, ratelimit)
-- [ ] Middleware применены в server.go
-- [ ] HTTP requests логируются
+- [x] 4 middleware созданы (logger, recovery, cors, ratelimit)
+- [x] Middleware применены в server.go
+- [x] HTTP requests логируются
 - [ ] CORS headers добавляются
 - [ ] Recovery отлавливает panics
 
@@ -812,7 +812,7 @@ var (
     ActiveTradersTotal = promauto.NewGauge(
         prometheus.GaugeOpts{
             Name: "cts_active_traders_total",
-            Help: "Number of active trader daemons",
+            Help: "Number of active traders",
         },
     )
 

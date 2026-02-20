@@ -107,7 +107,7 @@ flowchart TB
         CH["ClickHouse"]
     end
     
-    subgraph TRADERS["🤖 Trader Daemons<br/>50+ VM"]
+    subgraph TRADERS["🤖 Traders<br/>50+ VM"]
         direction LR
         T1["trader-1<br/>Binance"]
         TN["...trader-N"]
@@ -213,7 +213,7 @@ sequenceDiagram
     end
 ```
 
-### 4.2 Trader Daemon Structure (ASCII)
+### 4.2 Trader Structure (ASCII)
 
 **Ответственность:**
 - Подключение к биржам (WebSocket + REST)

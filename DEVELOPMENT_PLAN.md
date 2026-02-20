@@ -1,4 +1,4 @@
-# CTS-Core & Trader Daemon Development Plan
+# CTS-Core & Trader Development Plan
 
 > **Версия документа**: 1.2.0  
 > **Дата**: 2026-01-31  
@@ -11,7 +11,7 @@
 
 Этот документ содержит план разработки для двух основных компонентов:
 - **CTS-Core** — центральный оркестратор
-- **Trader Daemon** — торговые демоны
+- **Trader** — торговые сервисы
 
 **ВАЖНО:** Все архитектурные блокеры закрыты (9/9), можно продолжать Phase 1.
 
@@ -60,13 +60,13 @@ gantt
 
 ---
 
-## 3. Этапы разработки Trader Daemon
+## 3. Этапы разработки Trader
 
 > **Примечание:** daemon2 уже имеет базовую структуру в `/other-sub-system/daemon2/`
 
 ```mermaid
 gantt
-    title Trader Daemon Development Plan (Updated: 2026-02-18)
+    title Trader Development Plan (Updated: 2026-02-18)
     dateFormat  YYYY-MM-DD
     section Planning Baseline
     Schedule baseline                 :milestone, t0, 2026-02-18, 0d
@@ -1858,9 +1858,7 @@ state/*.state
 
 # Config (keep examples)
 conf/config.yaml
-conf/config.ini
 !conf/config.example.yaml
-!conf/config.example.ini
 
 # SSL/TLS certificates (keep examples)
 conf/ssl/*.pem
@@ -2031,7 +2029,6 @@ state/
 
 # Config (will be mounted)
 conf/config.yaml
-conf/config.ini
 
 # SSL certs (will be mounted)
 conf/ssl/*.pem

@@ -1,4 +1,4 @@
-# Trader Daemon: Dual-Mode Operation
+# Trader: Dual-Mode Operation
 
 > **Версия**: 1.0.0 | **Дата**: 2026-01-27  
 > **См. также**: [ARCHITECTURE.md](ARCHITECTURE.md), [API_SPECIFICATION.md](API_SPECIFICATION.md)
@@ -7,7 +7,7 @@
 
 ## Ключевая концепция
 
-Trader daemon работает в **двух НЕЗАВИСИМЫХ режимах одновременно**:
+Trader работает в **двух НЕЗАВИСИМЫХ режимах одновременно**:
 
 | Режим | Цель | База данных | Источник config |
 |-------|------|-------------|-----------------|
@@ -17,7 +17,7 @@ Trader daemon работает в **двух НЕЗАВИСИМЫХ режима
 **Критично:** Режимы полностью независимы — разные БД, разные цели, могут работать на одной паре/бирже параллельно.
 
 ```
-TRADER DAEMON
+TRADER
 ├── TRADE:    BTC/USDT Binance↔KuCoin (арбитраж) → MySQL
 └── MONITOR:  BTC/USDT на 5 биржах (котировки)   → ClickHouse
 ```

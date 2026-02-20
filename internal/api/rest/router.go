@@ -14,6 +14,8 @@ type Options struct {
 
 // NewRouter configures REST routes and middleware.
 func NewRouter(dbClient *db.MySQLClient, opts Options) *gin.Engine {
+	gin.SetMode(gin.ReleaseMode)
+
 	router := gin.New()
 	router.Use(
 		middleware.RequestID(),

@@ -205,7 +205,7 @@ wss://cts-core:8443/ws/admin    # Для web-интерфейса
 
 **Phase 1: Foundation (после миграций)**
    - [ ] Config loader (YAML)
-  - [ ] Logger (slog JSON: stdout + file)
+  - [x] Logger (slog JSON: stdout + file)
    - [ ] MySQL connection pool (mTLS)
    - [ ] HSM client (mTLS)
    - [ ] Basic REST API (/health, /metrics)

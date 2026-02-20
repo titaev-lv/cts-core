@@ -43,7 +43,7 @@ type ServerState struct {
     LastHeartbeat  time.Time `json:"last_heartbeat"`
 }
 
-// TraderState represents trader daemon state
+// TraderState represents trader state
 type TraderState struct {
     TraderID       int64     `json:"trader_id"`
     Name           string    `json:"name"`
