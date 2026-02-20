@@ -2,7 +2,7 @@
 
 > **Версия документа**: 1.1.0
 > **Дата**: 2026-01-25
-> **Статус**: Проектирование (решения приняты)
+> **Статус**: В разработке (Phase 1.3 реализован, Phase 1.4/1.5 в работе)
 
 ## Оглавление
 
@@ -60,7 +60,7 @@
 | 5 | Futures/DEX | **Заложить архитектуру, заглушки** | Не реализуем сейчас, но структура должна поддерживать |
 | 6 | Инфраструктура | **Dev: Docker, Prod: VM Debian** | Гибкость для разработки, стабильность для production |
 | 7 | Глубина стакана, TTL | **Вынести в настройки** | Будет определено позже |
-| 8 | Логирование | **Локальные логи** | ELK/Loki можно добавить позже |
+| 8 | Логирование | **JSON + stdout + file (slog + lumberjack)** | Единый стандарт observability в CT-SYSTEM |
 | 9 | Сертификаты трейдеров | **Вручную через CA** | Полный контроль над PKI |
 
 ### 2.2 Phase 1 архитектурные решения (Январь 2026)
@@ -97,7 +97,7 @@ flowchart TB
     end
     
     subgraph CORE["CTS-CORE"]
-        COREBLOCK["🎛️ Orchestrator<br/>VM: cts-core<br/>Port: 8443/8444<br/><br/>API Server, Scheduler<br/>Metrics, Session Manager<br/>..."]
+        COREBLOCK["🎛️ Orchestrator<br/>VM: cts-core<br/>Port: 8080/8081 (dev)<br/><br/>API Server, Scheduler<br/>Metrics, Session Manager<br/>..."]
     end
     
     subgraph DATA["💾 Infrastructure"]

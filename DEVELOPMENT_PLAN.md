@@ -2,7 +2,7 @@
 
 > **Версия документа**: 1.2.0  
 > **Дата**: 2026-01-31  
-> **Статус**: Phase 1.3 Complete | Phase 1.4 Not Started | Phase 1.5 Planned  
+> **Статус**: Phase 1.3 Complete | Phase 1.4 In Progress | Phase 1.5 In Progress  
 > **Связанные документы**: [ARCHITECTURE.md](ARCHITECTURE.md), [CONTEXT.md](CONTEXT.md), [API_SPECIFICATION.md](API_SPECIFICATION.md)
 
 ---
@@ -17,8 +17,8 @@
 
 **Текущее состояние (факт):**
 - Phase 1.1-1.3 реализованы (config/logger/MySQL/HSM client)
-- Phase 1.4 (state) не начата
-- Phase 1.5 (REST server) не запущена, есть только заготовки handlers
+- Phase 1.4 (state) в работе
+- Phase 1.5 (REST server) в работе: базовые health endpoints и middleware присутствуют
 
 ---
 
