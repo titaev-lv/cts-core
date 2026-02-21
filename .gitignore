@@ -29,6 +29,7 @@ state/*.backup
 
 # Binaries
 bin/
+cts-core
 *.exe
 *.dll
 *.so
