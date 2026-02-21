@@ -764,10 +764,9 @@ type Config struct {
 
 ```yaml
 state:
-  file: state/daemon.state
-  backup_dir: state/backups
-  max_backups: 3
-  sync_interval_seconds: 30
+    file_path: state/daemon.state
+    backup_count: 3
+    sync_interval: 30s
 ```
 
 **Время:** 30 минут

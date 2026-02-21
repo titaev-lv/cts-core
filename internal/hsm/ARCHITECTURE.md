@@ -81,18 +81,18 @@ hsm:
     context: "exchange-key"
     tls:
       enabled: true
-      ca_file: "pki/ca/ca.crt"
-      cert_file: "pki/client/hsm-trading-client-1.crt"
-      key_file: "pki/client/hsm-trading-client-1.key"
+      ca_path: "pki/ca/ca.crt"
+      cert_path: "pki/client/hsm-trading-client-1.crt"
+      key_path: "pki/client/hsm-trading-client-1.key"
   
   # 2FA context (user 2FA secrets - for re-encryption job only)
   two_fa:
     context: "2fa"
     tls:
       enabled: true
-      ca_file: "pki/ca/ca.crt"
-      cert_file: "pki/client/hsm-2fa-client-1.crt"
-      key_file: "pki/client/hsm-2fa-client-1.key"
+      ca_path: "pki/ca/ca.crt"
+      cert_path: "pki/client/hsm-2fa-client-1.crt"
+      key_path: "pki/client/hsm-2fa-client-1.key"
 ```
 
 ### Code Initialization (main.go)
@@ -101,18 +101,18 @@ hsm:
 // 1. Trading context client
 hsmTradingClient, err := hsm.NewClient(hsm.ClientConfig{
     BaseURL:  cfg.HSM.URL,
-    CertPath: cfg.HSM.Trading.TLS.CertFile,
-    KeyPath:  cfg.HSM.Trading.TLS.KeyFile,
-    CAPath:   cfg.HSM.Trading.TLS.CAFile,
+  CertPath: cfg.HSM.Trading.TLS.CertPath,
+  KeyPath:  cfg.HSM.Trading.TLS.KeyPath,
+  CAPath:   cfg.HSM.Trading.TLS.CAPath,
     // ...
 }, hsmLogger)
 
 // 2. 2FA context client
 hsm2FAClient, err := hsm.NewClient(hsm.ClientConfig{
     BaseURL:  cfg.HSM.URL,
-    CertPath: cfg.HSM.TwoFA.TLS.CertFile,
-    KeyPath:  cfg.HSM.TwoFA.TLS.KeyFile,
-    CAPath:   cfg.HSM.TwoFA.TLS.CAFile,
+  CertPath: cfg.HSM.TwoFA.TLS.CertPath,
+  KeyPath:  cfg.HSM.TwoFA.TLS.KeyPath,
+  CAPath:   cfg.HSM.TwoFA.TLS.CAPath,
     // ...
 }, hsmLogger)
 ```

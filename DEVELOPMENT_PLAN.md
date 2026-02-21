@@ -853,9 +853,9 @@ server:
   
   tls:
     enabled: true
-    cert_file: "pki/server/cts-core.crt"
-    key_file: "pki/server/cts-core.key"
-    ca_file: "pki/ca/ca.crt"
+        cert_path: "pki/server/cts-core.crt"
+        key_path: "pki/server/cts-core.key"
+        ca_path: "pki/ca/ca.crt"
     
   timeouts:
     read: 30s
@@ -876,9 +876,9 @@ mysql:
     
   tls:
     enabled: true
-    ca_file: "pki/ca/ca.crt"
-    cert_file: "pki/client/cts-core-mysql.crt"
-    key_file: "pki/client/cts-core-mysql.key"
+        ca_path: "pki/ca/ca.crt"
+        cert_path: "pki/client/cts-core-mysql.crt"
+        key_path: "pki/client/cts-core-mysql.key"
     
   retry:
     max_attempts: 3
@@ -891,9 +891,9 @@ hsm:
   
   tls:
     enabled: true
-    ca_file: "pki/ca/ca.crt"
-    cert_file: "pki/client/cts-core-hsm.crt"
-    key_file: "pki/client/cts-core-hsm.key"
+        ca_path: "pki/ca/ca.crt"
+        cert_path: "pki/client/cts-core-hsm.crt"
+        key_path: "pki/client/cts-core-hsm.key"
     
   timeout: 10s
   
@@ -910,16 +910,15 @@ state:
 
 logging:
   level: debug        # debug | info | warn | error
-  format: text        # text (DEV) | json (PROD)
-  
-  output:
-    console: true
-    file: true
-    file_path: "logs/cts-core.log"
-    
-  rotation:
-    max_size: 100     # MB
-    max_age: 7        # days
+    dir: logs
+    error_path: "logs/error.log"
+    access_path: "logs/access.log"
+    out_request_path: "logs/out_request.log"
+    ws_access_path: "logs/ws_access.log"
+    ws_out_path: "logs/ws_out.log"
+    audit_path: "logs/audit.log"
+    max_size_mb: 100    # MB
+    max_age_days: 7     # days
     max_backups: 10
     compress: true
 
@@ -934,7 +933,7 @@ scheduler:
   latency_check_interval: 60s
   resource_check_interval: 30s
 
-rate_limiting:
+rate_limit:
   rest:
     requests_per_minute: 1000
     burst: 100
@@ -1738,7 +1737,7 @@ func main() {
 logging:
   level: debug           # debug, info, warn, error
   dir: logs             # Директория для логов
-  max_file_size_mb: 100 # Максимальный размер файла перед ротацией
+    max_size_mb: 100      # Максимальный размер файла перед ротацией
 ```
 
 **Test run:**
