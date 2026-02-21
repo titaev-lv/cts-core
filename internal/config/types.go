@@ -4,17 +4,17 @@ import "time"
 
 // Config is the root configuration structure
 type Config struct {
-	Environment  string          `yaml:"environment"`
-	Server       ServerConfig    `yaml:"server"`
-	MySQL        MySQLConfig     `yaml:"mysql"`
-	HSM          HSMConfig       `yaml:"hsm"`
-	State        StateConfig     `yaml:"state"`
-	Logging      LoggingConfig   `yaml:"logging"`
-	Session      SessionConfig   `yaml:"session"`
-	Scheduler    SchedulerConfig `yaml:"scheduler"`
-	RateLimiting RateLimitConfig `yaml:"rate_limiting"`
-	Metrics      MetricsConfig   `yaml:"metrics"`
-	Audit        AuditConfig     `yaml:"audit"`
+	Environment string          `yaml:"environment"`
+	Server      ServerConfig    `yaml:"server"`
+	MySQL       MySQLConfig     `yaml:"mysql"`
+	HSM         HSMConfig       `yaml:"hsm"`
+	State       StateConfig     `yaml:"state"`
+	Logging     LoggingConfig   `yaml:"logging"`
+	Session     SessionConfig   `yaml:"session"`
+	Scheduler   SchedulerConfig `yaml:"scheduler"`
+	RateLimit   RateLimitConfig `yaml:"rate_limit"`
+	Metrics     MetricsConfig   `yaml:"metrics"`
+	Audit       AuditConfig     `yaml:"audit"`
 }
 
 // ServerConfig contains REST API server settings
@@ -28,9 +28,9 @@ type ServerConfig struct {
 // TLSConfig contains TLS/mTLS settings
 type TLSConfig struct {
 	Enabled  bool   `yaml:"enabled"`
-	CertFile string `yaml:"cert_file"`
-	KeyFile  string `yaml:"key_file"`
-	CAFile   string `yaml:"ca_file"`
+	CertPath string `yaml:"cert_path"`
+	KeyPath  string `yaml:"key_path"`
+	CAPath   string `yaml:"ca_path"`
 }
 
 // TimeoutConfig contains server timeout settings
@@ -94,7 +94,7 @@ type StateConfig struct {
 type LoggingConfig struct {
 	Level               string `yaml:"level"`
 	Dir                 string `yaml:"dir"`
-	MaxFileSizeMB       int    `yaml:"max_file_size_mb"`
+	MaxSizeMB           int    `yaml:"max_size_mb"`
 	MaxBackups          int    `yaml:"max_backups"`
 	MaxAgeDays          int    `yaml:"max_age_days"`
 	Compress            bool   `yaml:"compress"`

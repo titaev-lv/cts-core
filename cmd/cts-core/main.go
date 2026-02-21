@@ -36,7 +36,7 @@ func main() {
 	if err := logger.InitWithOptions(logger.Options{
 		Level:              cfg.Logging.Level,
 		Dir:                cfg.Logging.Dir,
-		MaxFileSizeMB:      cfg.Logging.MaxFileSizeMB,
+		MaxFileSizeMB:      cfg.Logging.MaxSizeMB,
 		MaxBackups:         cfg.Logging.MaxBackups,
 		MaxAgeDays:         cfg.Logging.MaxAgeDays,
 		Compress:           cfg.Logging.Compress,
@@ -75,9 +75,9 @@ func main() {
 		Password:        cfg.MySQL.Password,
 		Database:        cfg.MySQL.Database,
 		TLSEnabled:      cfg.MySQL.TLS.Enabled,
-		CertPath:        cfg.MySQL.TLS.CertFile,
-		KeyPath:         cfg.MySQL.TLS.KeyFile,
-		CAPath:          cfg.MySQL.TLS.CAFile,
+		CertPath:        cfg.MySQL.TLS.CertPath,
+		KeyPath:         cfg.MySQL.TLS.KeyPath,
+		CAPath:          cfg.MySQL.TLS.CAPath,
 		MaxOpenConns:    cfg.MySQL.Pool.MaxOpenConns,
 		MaxIdleConns:    cfg.MySQL.Pool.MaxIdleConns,
 		ConnMaxLifetime: cfg.MySQL.Pool.ConnMaxLifetime,
@@ -114,9 +114,9 @@ func main() {
 	// 1. Trading context (exchange API keys)
 	hsmTradingCfg := hsm.ClientConfig{
 		BaseURL:          cfg.HSM.URL,
-		CertPath:         cfg.HSM.Trading.TLS.CertFile,
-		KeyPath:          cfg.HSM.Trading.TLS.KeyFile,
-		CAPath:           cfg.HSM.Trading.TLS.CAFile,
+		CertPath:         cfg.HSM.Trading.TLS.CertPath,
+		KeyPath:          cfg.HSM.Trading.TLS.KeyPath,
+		CAPath:           cfg.HSM.Trading.TLS.CAPath,
 		RequestTimeout:   cfg.HSM.Timeout,
 		OutRequestLogger: logger.GetOutRequest("hsm"),
 		RetryConfig: hsm.RetryConfig{
@@ -157,9 +157,9 @@ func main() {
 	// 2. 2FA context (for re-encryption job only, not used in normal operation)
 	hsm2FACfg := hsm.ClientConfig{
 		BaseURL:          cfg.HSM.URL,
-		CertPath:         cfg.HSM.TwoFA.TLS.CertFile,
-		KeyPath:          cfg.HSM.TwoFA.TLS.KeyFile,
-		CAPath:           cfg.HSM.TwoFA.TLS.CAFile,
+		CertPath:         cfg.HSM.TwoFA.TLS.CertPath,
+		KeyPath:          cfg.HSM.TwoFA.TLS.KeyPath,
+		CAPath:           cfg.HSM.TwoFA.TLS.CAPath,
 		RequestTimeout:   cfg.HSM.Timeout,
 		OutRequestLogger: logger.GetOutRequest("hsm"),
 		RetryConfig: hsm.RetryConfig{
@@ -222,7 +222,7 @@ func main() {
 	go func() {
 		var serveErr error
 		if cfg.Server.TLS.Enabled {
-			serveErr = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertFile, cfg.Server.TLS.KeyFile)
+			serveErr = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertPath, cfg.Server.TLS.KeyPath)
 		} else {
 			serveErr = httpServer.ListenAndServe()
 		}

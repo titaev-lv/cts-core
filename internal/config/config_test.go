@@ -31,8 +31,8 @@ func TestLoad(t *testing.T) {
 	if cfg.Logging.Dir != "logs" {
 		t.Errorf("Expected log dir=logs, got %s", cfg.Logging.Dir)
 	}
-	if cfg.Logging.MaxFileSizeMB != 100 {
-		t.Errorf("Expected max_file_size_mb=100, got %d", cfg.Logging.MaxFileSizeMB)
+	if cfg.Logging.MaxSizeMB != 100 {
+		t.Errorf("Expected max_size_mb=100, got %d", cfg.Logging.MaxSizeMB)
 	}
 	if cfg.Logging.MaxBackups != 10 {
 		t.Errorf("Expected max_backups=10, got %d", cfg.Logging.MaxBackups)
@@ -95,16 +95,16 @@ func TestLoad(t *testing.T) {
 		t.Errorf("Expected HSM Trading context=exchange-key, got %s", cfg.HSM.Trading.Context)
 	}
 
-	if cfg.HSM.Trading.TLS.CertFile != "pki/hsm-service/clients/cts-core-trader/cts-core-hsm-trader.crt" {
-		t.Errorf("Expected Trading cert=pki/hsm-service/clients/cts-core-trader/cts-core-hsm-trader.crt, got %s", cfg.HSM.Trading.TLS.CertFile)
+	if cfg.HSM.Trading.TLS.CertPath != "pki/hsm-service/clients/cts-core-trader/cts-core-hsm-trader.crt" {
+		t.Errorf("Expected Trading cert=pki/hsm-service/clients/cts-core-trader/cts-core-hsm-trader.crt, got %s", cfg.HSM.Trading.TLS.CertPath)
 	}
 
 	if cfg.HSM.TwoFA.Context != "2fa" {
 		t.Errorf("Expected HSM 2FA context=2fa, got %s", cfg.HSM.TwoFA.Context)
 	}
 
-	if cfg.HSM.TwoFA.TLS.CertFile != "pki/hsm-service/clients/cts-core-2fa/cts-core-hsm-2fa.crt" {
-		t.Errorf("Expected 2FA cert=pki/hsm-service/clients/cts-core-2fa/cts-core-hsm-2fa.crt, got %s", cfg.HSM.TwoFA.TLS.CertFile)
+	if cfg.HSM.TwoFA.TLS.CertPath != "pki/hsm-service/clients/cts-core-2fa/cts-core-hsm-2fa.crt" {
+		t.Errorf("Expected 2FA cert=pki/hsm-service/clients/cts-core-2fa/cts-core-hsm-2fa.crt, got %s", cfg.HSM.TwoFA.TLS.CertPath)
 	}
 }
 
@@ -267,15 +267,15 @@ func TestHSMDualContext(t *testing.T) {
 			t.Error("Trading TLS should be enabled")
 		}
 
-		if cfg.HSM.Trading.TLS.CertFile == "" {
+		if cfg.HSM.Trading.TLS.CertPath == "" {
 			t.Error("Trading cert file should not be empty")
 		}
 
-		if cfg.HSM.Trading.TLS.KeyFile == "" {
+		if cfg.HSM.Trading.TLS.KeyPath == "" {
 			t.Error("Trading key file should not be empty")
 		}
 
-		if cfg.HSM.Trading.TLS.CAFile == "" {
+		if cfg.HSM.Trading.TLS.CAPath == "" {
 			t.Error("Trading CA file should not be empty")
 		}
 	})
@@ -294,15 +294,15 @@ func TestHSMDualContext(t *testing.T) {
 			t.Error("2FA TLS should be enabled")
 		}
 
-		if cfg.HSM.TwoFA.TLS.CertFile == "" {
+		if cfg.HSM.TwoFA.TLS.CertPath == "" {
 			t.Error("2FA cert file should not be empty")
 		}
 
-		if cfg.HSM.TwoFA.TLS.KeyFile == "" {
+		if cfg.HSM.TwoFA.TLS.KeyPath == "" {
 			t.Error("2FA key file should not be empty")
 		}
 
-		if cfg.HSM.TwoFA.TLS.CAFile == "" {
+		if cfg.HSM.TwoFA.TLS.CAPath == "" {
 			t.Error("2FA CA file should not be empty")
 		}
 	})
@@ -313,11 +313,11 @@ func TestHSMDualContext(t *testing.T) {
 			t.Error("Trading and 2FA contexts should be different")
 		}
 
-		if cfg.HSM.Trading.TLS.CertFile == cfg.HSM.TwoFA.TLS.CertFile {
+		if cfg.HSM.Trading.TLS.CertPath == cfg.HSM.TwoFA.TLS.CertPath {
 			t.Error("Trading and 2FA should use different certificates")
 		}
 
-		if cfg.HSM.Trading.TLS.KeyFile == cfg.HSM.TwoFA.TLS.KeyFile {
+		if cfg.HSM.Trading.TLS.KeyPath == cfg.HSM.TwoFA.TLS.KeyPath {
 			t.Error("Trading and 2FA should use different keys")
 		}
 	})
