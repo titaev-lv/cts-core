@@ -843,12 +843,8 @@ go list -m all | head -10
 **conf/config.yaml:**
 ```yaml
 # CTS-Core Configuration
-# Environment: development | production
-
-environment: development
 
 server:
-  host: "0.0.0.0"
   port: 8443
   
   tls:
@@ -861,6 +857,10 @@ server:
     read: 30s
     write: 30s
     idle: 120s
+    read_header: 5s
+    shutdown_grace: 10s
+    limits:
+        max_header_bytes: 1048576
 
 mysql:
   host: "127.0.0.1"
@@ -961,7 +961,6 @@ package config
 import "time"
 
 type Config struct {
-    Environment string         `yaml:"environment"`
     Server      ServerConfig   `yaml:"server"`
     MySQL       MySQLConfig    `yaml:"mysql"`
     HSM         HSMConfig      `yaml:"hsm"`
@@ -975,7 +974,6 @@ type Config struct {
 }
 
 type ServerConfig struct {
-    Host     string        `yaml:"host"`
     Port     int           `yaml:"port"`
     TLS      TLSConfig     `yaml:"tls"`
     Timeouts TimeoutConfig `yaml:"timeouts"`
@@ -1155,10 +1153,6 @@ func (c *Config) Validate() error {
 
 // applyEnvOverrides overrides config with environment variables
 func (c *Config) applyEnvOverrides() {
-    if env := os.Getenv("CTS_ENVIRONMENT"); env != "" {
-        c.Environment = env
-    }
-    
     if mysqlPass := os.Getenv("CTS_MYSQL_PASSWORD"); mysqlPass != "" {
         c.MySQL.Password = mysqlPass
     }
@@ -1166,16 +1160,6 @@ func (c *Config) applyEnvOverrides() {
     if logLevel := os.Getenv("CTS_LOG_LEVEL"); logLevel != "" {
         c.Logging.Level = logLevel
     }
-}
-
-// IsDevelopment returns true if running in development mode
-func (c *Config) IsDevelopment() bool {
-    return c.Environment == "development"
-}
-
-// IsProduction returns true if running in production mode
-func (c *Config) IsProduction() bool {
-    return c.Environment == "production"
 }
 ```
 
@@ -1240,7 +1224,6 @@ func TestValidate(t *testing.T) {
         {
             name: "valid config",
             cfg: Config{
-                Environment: "development",
                 Server:      ServerConfig{Port: 8443},
                 MySQL:       MySQLConfig{Database: "ct_system"},
                 State:       StateConfig{FilePath: "state/daemon.state"},
@@ -1249,20 +1232,8 @@ func TestValidate(t *testing.T) {
             wantErr: false,
         },
         {
-            name: "invalid environment",
-            cfg: Config{
-                Environment: "staging",  // Invalid
-                Server:      ServerConfig{Port: 8443},
-                MySQL:       MySQLConfig{Database: "ct_system"},
-                State:       StateConfig{FilePath: "state/daemon.state"},
-                Logging:     LoggingConfig{Level: "info", Format: "text"},
-            },
-            wantErr: true,
-        },
-        {
             name: "invalid port",
             cfg: Config{
-                Environment: "development",
                 Server:      ServerConfig{Port: 99999},  // Invalid
                 MySQL:       MySQLConfig{Database: "ct_system"},
                 State:       StateConfig{FilePath: "state/daemon.state"},
@@ -1273,7 +1244,6 @@ func TestValidate(t *testing.T) {
         {
             name: "invalid log level",
             cfg: Config{
-                Environment: "development",
                 Server:      ServerConfig{Port: 8443},
                 MySQL:       MySQLConfig{Database: "ct_system"},
                 State:       StateConfig{FilePath: "state/daemon.state"},
@@ -1294,26 +1264,19 @@ func TestValidate(t *testing.T) {
 }
 
 func TestEnvOverrides(t *testing.T) {
-    os.Setenv("CTS_ENVIRONMENT", "production")
     os.Setenv("CTS_MYSQL_PASSWORD", "secret123")
     os.Setenv("CTS_LOG_LEVEL", "error")
     defer func() {
-        os.Unsetenv("CTS_ENVIRONMENT")
         os.Unsetenv("CTS_MYSQL_PASSWORD")
         os.Unsetenv("CTS_LOG_LEVEL")
     }()
     
     cfg := &Config{
-        Environment: "development",
         MySQL:       MySQLConfig{Password: "default"},
         Logging:     LoggingConfig{Level: "debug"},
     }
     
     cfg.applyEnvOverrides()
-    
-    if cfg.Environment != "production" {
-        t.Errorf("Expected environment=production, got %s", cfg.Environment)
-    }
     
     if cfg.MySQL.Password != "secret123" {
         t.Errorf("Expected password=secret123, got %s", cfg.MySQL.Password)
@@ -1326,11 +1289,16 @@ func TestEnvOverrides(t *testing.T) {
 
 func createTempConfig(t *testing.T) string {
     content := `
-environment: development
-
 server:
-  host: "0.0.0.0"
   port: 8443
+    timeouts:
+        read: 10s
+        write: 30s
+        idle: 120s
+        read_header: 5s
+        shutdown_grace: 15s
+        limits:
+        max_header_bytes: 1048576
   
 mysql:
   database: "ct_system"
@@ -2059,9 +2027,6 @@ temp/
 Добавить секцию для Docker:
 
 ```yaml
-# Environment: development, staging, production
-environment: development
-
 # MySQL Database
 database:
   host: mysql        # В Docker используем имя сервиса

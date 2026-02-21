@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestLoad(t *testing.T) {
@@ -13,12 +14,11 @@ func TestLoad(t *testing.T) {
 	}
 
 	// Validate loaded values
-	if cfg.Environment != "development" {
-		t.Errorf("Expected environment=development, got %s", cfg.Environment)
-	}
-
 	if cfg.Server.Port != 8080 {
 		t.Errorf("Expected port=8080, got %d", cfg.Server.Port)
+	}
+	if cfg.Server.Limits.MaxHeaderBytes != 1048576 {
+		t.Errorf("Expected server.limits.max_header_bytes=1048576, got %d", cfg.Server.Limits.MaxHeaderBytes)
 	}
 
 	if cfg.MySQL.Database != "ct_system" {
@@ -117,55 +117,83 @@ func TestValidate(t *testing.T) {
 		{
 			name: "valid config",
 			cfg: Config{
-				Environment: "development",
-				Server:      ServerConfig{Port: 8443},
-				MySQL:       MySQLConfig{Database: "ct_system", Port: 3306},
-				State:       StateConfig{FilePath: "state/daemon.state"},
-				Logging:     LoggingConfig{Level: "info", Dir: "logs"},
+				Server: ServerConfig{
+					Port: 8443,
+					TLS: TLSConfig{
+						Enabled:  true,
+						CertPath: "pki/server/cts-core.crt",
+						KeyPath:  "pki/server/cts-core.key",
+					},
+				},
+				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+				State:   StateConfig{FilePath: "state/daemon.state"},
+				Logging: LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: false,
 		},
 		{
-			name: "invalid environment",
+			name: "valid config with tls disabled and empty cert paths",
 			cfg: Config{
-				Environment: "staging", // Invalid
-				Server:      ServerConfig{Port: 8443},
-				MySQL:       MySQLConfig{Database: "ct_system", Port: 3306},
-				State:       StateConfig{FilePath: "state/daemon.state"},
-				Logging:     LoggingConfig{Level: "info", Dir: "logs"},
+				Server:  ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+				State:   StateConfig{FilePath: "state/daemon.state"},
+				Logging: LoggingConfig{Level: "info", Dir: "logs"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid tls enabled without cert path",
+			cfg: Config{
+				Server: ServerConfig{Port: 8443, TLS: TLSConfig{
+					Enabled: true,
+					KeyPath: "pki/server/cts-core.key",
+				}},
+				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+				State:   StateConfig{FilePath: "state/daemon.state"},
+				Logging: LoggingConfig{Level: "info", Dir: "logs"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid tls enabled without key path",
+			cfg: Config{
+				Server: ServerConfig{Port: 8443, TLS: TLSConfig{
+					Enabled:  true,
+					CertPath: "pki/server/cts-core.crt",
+				}},
+				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+				State:   StateConfig{FilePath: "state/daemon.state"},
+				Logging: LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid port",
 			cfg: Config{
-				Environment: "development",
-				Server:      ServerConfig{Port: 99999}, // Invalid
-				MySQL:       MySQLConfig{Database: "ct_system", Port: 3306},
-				State:       StateConfig{FilePath: "state/daemon.state"},
-				Logging:     LoggingConfig{Level: "info", Dir: "logs"},
+				Server:  ServerConfig{Port: 99999}, // Invalid
+				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+				State:   StateConfig{FilePath: "state/daemon.state"},
+				Logging: LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid log level",
 			cfg: Config{
-				Environment: "development",
-				Server:      ServerConfig{Port: 8443},
-				MySQL:       MySQLConfig{Database: "ct_system", Port: 3306},
-				State:       StateConfig{FilePath: "state/daemon.state"},
-				Logging:     LoggingConfig{Level: "verbose", Dir: "logs"}, // Invalid
+				Server:  ServerConfig{Port: 8443},
+				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+				State:   StateConfig{FilePath: "state/daemon.state"},
+				Logging: LoggingConfig{Level: "verbose", Dir: "logs"}, // Invalid
 			},
 			wantErr: true,
 		},
 		{
 			name: "empty database",
 			cfg: Config{
-				Environment: "development",
-				Server:      ServerConfig{Port: 8443},
-				MySQL:       MySQLConfig{Database: "", Port: 3306}, // Invalid
-				State:       StateConfig{FilePath: "state/daemon.state"},
-				Logging:     LoggingConfig{Level: "info", Dir: "logs"},
+				Server:  ServerConfig{Port: 8443},
+				MySQL:   MySQLConfig{Database: "", Port: 3306}, // Invalid
+				State:   StateConfig{FilePath: "state/daemon.state"},
+				Logging: LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: true,
 		},
@@ -183,26 +211,19 @@ func TestValidate(t *testing.T) {
 
 func TestEnvOverrides(t *testing.T) {
 	// Set environment variables
-	os.Setenv("CTS_ENVIRONMENT", "production")
 	os.Setenv("CTS_MYSQL_PASSWORD", "secret123")
 	os.Setenv("CTS_LOG_LEVEL", "error")
 	defer func() {
-		os.Unsetenv("CTS_ENVIRONMENT")
 		os.Unsetenv("CTS_MYSQL_PASSWORD")
 		os.Unsetenv("CTS_LOG_LEVEL")
 	}()
 
 	cfg := &Config{
-		Environment: "development",
-		MySQL:       MySQLConfig{Password: "default"},
-		Logging:     LoggingConfig{Level: "debug"},
+		MySQL:   MySQLConfig{Password: "default"},
+		Logging: LoggingConfig{Level: "debug"},
 	}
 
 	cfg.applyEnvOverrides()
-
-	if cfg.Environment != "production" {
-		t.Errorf("Expected environment=production, got %s", cfg.Environment)
-	}
 
 	if cfg.MySQL.Password != "secret123" {
 		t.Errorf("Expected password=secret123, got %s", cfg.MySQL.Password)
@@ -213,27 +234,119 @@ func TestEnvOverrides(t *testing.T) {
 	}
 }
 
-func TestIsDevelopment(t *testing.T) {
-	cfg := &Config{Environment: "development"}
-	if !cfg.IsDevelopment() {
-		t.Error("Expected IsDevelopment() to return true")
+func TestValidateServerTimeoutDefaults(t *testing.T) {
+	cfg := Config{
+		Server:  ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+		State:   StateConfig{FilePath: "state/daemon.state"},
+		Logging: LoggingConfig{Level: "info", Dir: "logs"},
 	}
 
-	cfg.Environment = "production"
-	if cfg.IsDevelopment() {
-		t.Error("Expected IsDevelopment() to return false")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	if cfg.Server.Timeouts.Read == 0 || cfg.Server.Timeouts.Write == 0 || cfg.Server.Timeouts.Idle == 0 || cfg.Server.Timeouts.ReadHeader == 0 || cfg.Server.Timeouts.ShutdownGrace == 0 {
+		t.Fatalf("expected server timeout defaults to be populated, got %+v", cfg.Server.Timeouts)
+	}
+	if cfg.Server.Limits.MaxHeaderBytes == 0 {
+		t.Fatalf("expected server.limits.max_header_bytes default to be populated")
 	}
 }
 
-func TestIsProduction(t *testing.T) {
-	cfg := &Config{Environment: "production"}
-	if !cfg.IsProduction() {
-		t.Error("Expected IsProduction() to return true")
+func TestValidateServerTimeoutBounds(t *testing.T) {
+	cfg := Config{
+		Server: ServerConfig{
+			Port: 8443,
+			TLS:  TLSConfig{Enabled: false},
+			Timeouts: TimeoutConfig{
+				Read: -1 * time.Second,
+			},
+		},
+		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+		State:   StateConfig{FilePath: "state/daemon.state"},
+		Logging: LoggingConfig{Level: "info", Dir: "logs"},
 	}
 
-	cfg.Environment = "development"
-	if cfg.IsProduction() {
-		t.Error("Expected IsProduction() to return false")
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected Validate() to fail for negative server.timeouts.read")
+	}
+}
+
+func TestValidateServerMaxHeaderBytesBounds(t *testing.T) {
+	cfg := Config{
+		Server: ServerConfig{
+			Port: 8443,
+			TLS:  TLSConfig{Enabled: false},
+			Limits: LimitsConfig{
+				MaxHeaderBytes: 1024,
+			},
+		},
+		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+		State:   StateConfig{FilePath: "state/daemon.state"},
+		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected Validate() to fail for too small server.limits.max_header_bytes")
+	}
+}
+
+func TestValidateServerHTTP2Invalid(t *testing.T) {
+	cfg := Config{
+		Server: ServerConfig{
+			Port: 8443,
+			TLS:  TLSConfig{Enabled: false},
+			HTTP2: &HTTP2Config{
+				MaxFrameSize: "invalid",
+			},
+		},
+		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+		State:   StateConfig{FilePath: "state/daemon.state"},
+		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected Validate() to fail for invalid server.http2 settings")
+	}
+}
+
+func TestValidateRateLimitDefaultsAndAlias(t *testing.T) {
+	cfg := Config{
+		Server:  ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+		State:   StateConfig{FilePath: "state/daemon.state"},
+		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+		RateLimit: RateLimitConfig{
+			WebSocket: LimitConfig{MessagesPerMinute: 777, Burst: 10},
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	if cfg.RateLimit.REST.PerMinute() == 0 {
+		t.Fatal("expected rate_limit.rest default to be set")
+	}
+	if cfg.RateLimit.WebSocket.PerMinute() != 777 {
+		t.Fatalf("expected websocket alias messages_per_minute=777, got %d", cfg.RateLimit.WebSocket.PerMinute())
+	}
+}
+
+func TestValidateRateLimitInvalid(t *testing.T) {
+	cfg := Config{
+		Server:  ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
+		State:   StateConfig{FilePath: "state/daemon.state"},
+		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+		RateLimit: RateLimitConfig{
+			REST: LimitConfig{RequestsPerMinute: -1, Burst: 0},
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected Validate() to fail for invalid rate_limit.rest.requests_per_minute")
 	}
 }
 

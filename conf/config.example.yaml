@@ -1,12 +1,8 @@
 # CTS-Core Configuration Example
 # Copy this file to config.yaml and customize for your environment
 
-# Environment: development | production
-environment: development
-
 # Server configuration (REST API - Phase 1.5)
 server:
-  host: "0.0.0.0"
   port: 8080
   
   tls:
@@ -19,6 +15,18 @@ server:
     read: 30s
     write: 30s
     idle: 120s
+    read_header: 5s
+    shutdown_grace: 10s
+  limits:
+    max_header_bytes: 1048576
+  http2:
+    max_concurrent_streams: "250"
+    initial_window_size: "64k"
+    max_frame_size: "16k"
+    max_header_list_size: "1M"
+    idle_timeout_seconds: 120
+    max_upload_buffer_per_conn: "1M"
+    max_upload_buffer_per_stream: "1M"
 
 # MySQL Database configuration
 mysql:
@@ -124,7 +132,7 @@ rate_limit:
     burst: 100
     
   websocket:
-    messages_per_minute: 10000
+    requests_per_minute: 10000
     burst: 1000
 
 # Prometheus metrics (Phase 1.6)

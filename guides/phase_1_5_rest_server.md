@@ -179,22 +179,27 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 ```go
 type ServerConfig struct {
-    Host string `yaml:"host"`
     Port int    `yaml:"port"`
     
     TLS struct {
         Enabled    bool   `yaml:"enabled"`
-        CertPath   string `yaml:"cert"`
-        KeyPath    string `yaml:"key"`
-        CAPath     string `yaml:"ca"`
+        CertPath   string `yaml:"cert_path"`
+        KeyPath    string `yaml:"key_path"`
+        CAPath     string `yaml:"ca_path"`
         ClientAuth bool   `yaml:"client_auth"` // mTLS
     } `yaml:"tls"`
     
     Timeouts struct {
-        Read  int `yaml:"read_seconds"`
-        Write int `yaml:"write_seconds"`
-        Idle  int `yaml:"idle_seconds"`
+        Read          time.Duration `yaml:"read"`
+        Write         time.Duration `yaml:"write"`
+        Idle          time.Duration `yaml:"idle"`
+        ReadHeader    time.Duration `yaml:"read_header"`
+        ShutdownGrace time.Duration `yaml:"shutdown_grace"`
     } `yaml:"timeouts"`
+
+    Limits struct {
+        MaxHeaderBytes int `yaml:"max_header_bytes"`
+    } `yaml:"limits"`
 }
 ```
 
@@ -202,18 +207,21 @@ type ServerConfig struct {
 
 ```yaml
 server:
-  host: 0.0.0.0
   port: 8443
   tls:
     enabled: true
-    cert: conf/ssl/server-cert.pem
-    key: conf/ssl/server-key.pem
-    ca: conf/ssl/ca-cert.pem
+        cert_path: conf/ssl/server-cert.pem
+        key_path: conf/ssl/server-key.pem
+        ca_path: conf/ssl/ca-cert.pem
     client_auth: false  # Set true for mTLS (Phase 2)
   timeouts:
-    read_seconds: 15
-    write_seconds: 15
-    idle_seconds: 60
+        read: 15s
+        write: 15s
+        idle: 60s
+        read_header: 5s
+        shutdown_grace: 10s
+  limits:
+      max_header_bytes: 1048576
 ```
 
 **Время:** 30 минут
@@ -236,11 +244,11 @@ func main() {
 
     // Initialize API server
     serverCfg := api.ServerConfig{
-        Host: cfg.Server.Host,
         Port: cfg.Server.Port,
-        ReadTimeout:  time.Duration(cfg.Server.Timeouts.Read) * time.Second,
-        WriteTimeout: time.Duration(cfg.Server.Timeouts.Write) * time.Second,
-        IdleTimeout:  time.Duration(cfg.Server.Timeouts.Idle) * time.Second,
+        ReadTimeout:       cfg.Server.Timeouts.Read,
+        WriteTimeout:      cfg.Server.Timeouts.Write,
+        IdleTimeout:       cfg.Server.Timeouts.Idle,
+        ReadHeaderTimeout: cfg.Server.Timeouts.ReadHeader,
     }
     serverCfg.TLS.Enabled = cfg.Server.TLS.Enabled
     serverCfg.TLS.CertPath = cfg.Server.TLS.CertPath
@@ -272,7 +280,7 @@ func main() {
     logger.Info().Msg("Shutting down...")
 
     // Graceful shutdown
-    shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.Timeouts.ShutdownGrace)
     defer cancel()
 
     if err := apiServer.Shutdown(shutdownCtx); err != nil {

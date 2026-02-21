@@ -4,25 +4,25 @@ import "time"
 
 // Config is the root configuration structure
 type Config struct {
-	Environment string          `yaml:"environment"`
-	Server      ServerConfig    `yaml:"server"`
-	MySQL       MySQLConfig     `yaml:"mysql"`
-	HSM         HSMConfig       `yaml:"hsm"`
-	State       StateConfig     `yaml:"state"`
-	Logging     LoggingConfig   `yaml:"logging"`
-	Session     SessionConfig   `yaml:"session"`
-	Scheduler   SchedulerConfig `yaml:"scheduler"`
-	RateLimit   RateLimitConfig `yaml:"rate_limit"`
-	Metrics     MetricsConfig   `yaml:"metrics"`
-	Audit       AuditConfig     `yaml:"audit"`
+	Server    ServerConfig    `yaml:"server"`
+	MySQL     MySQLConfig     `yaml:"mysql"`
+	HSM       HSMConfig       `yaml:"hsm"`
+	State     StateConfig     `yaml:"state"`
+	Logging   LoggingConfig   `yaml:"logging"`
+	Session   SessionConfig   `yaml:"session"`
+	Scheduler SchedulerConfig `yaml:"scheduler"`
+	RateLimit RateLimitConfig `yaml:"rate_limit"`
+	Metrics   MetricsConfig   `yaml:"metrics"`
+	Audit     AuditConfig     `yaml:"audit"`
 }
 
 // ServerConfig contains REST API server settings
 type ServerConfig struct {
-	Host     string        `yaml:"host"`
 	Port     int           `yaml:"port"`
 	TLS      TLSConfig     `yaml:"tls"`
 	Timeouts TimeoutConfig `yaml:"timeouts"`
+	Limits   LimitsConfig  `yaml:"limits"`
+	HTTP2    *HTTP2Config  `yaml:"http2,omitempty"`
 }
 
 // TLSConfig contains TLS/mTLS settings
@@ -35,9 +35,16 @@ type TLSConfig struct {
 
 // TimeoutConfig contains server timeout settings
 type TimeoutConfig struct {
-	Read  time.Duration `yaml:"read"`
-	Write time.Duration `yaml:"write"`
-	Idle  time.Duration `yaml:"idle"`
+	Read          time.Duration `yaml:"read"`
+	Write         time.Duration `yaml:"write"`
+	Idle          time.Duration `yaml:"idle"`
+	ReadHeader    time.Duration `yaml:"read_header"`
+	ShutdownGrace time.Duration `yaml:"shutdown_grace"`
+}
+
+// LimitsConfig contains HTTP server limits settings
+type LimitsConfig struct {
+	MaxHeaderBytes int `yaml:"max_header_bytes"`
 }
 
 // MySQLConfig contains database connection settings
@@ -138,7 +145,15 @@ type RateLimitConfig struct {
 // LimitConfig contains rate limit values
 type LimitConfig struct {
 	RequestsPerMinute int `yaml:"requests_per_minute"`
+	MessagesPerMinute int `yaml:"messages_per_minute"`
 	Burst             int `yaml:"burst"`
+}
+
+func (l LimitConfig) PerMinute() int {
+	if l.RequestsPerMinute > 0 {
+		return l.RequestsPerMinute
+	}
+	return l.MessagesPerMinute
 }
 
 // MetricsConfig contains Prometheus metrics settings

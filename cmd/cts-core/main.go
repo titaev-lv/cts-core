@@ -18,6 +18,7 @@ import (
 	"github.com/titaev-lv/cts-core/internal/db/repository"
 	"github.com/titaev-lv/cts-core/internal/hsm"
 	"github.com/titaev-lv/cts-core/internal/logger"
+	"golang.org/x/net/http2"
 )
 
 func main() {
@@ -60,10 +61,9 @@ func main() {
 	// Get main logger
 	log := logger.Get("main")
 	log.Debug("Logger configured", "level", cfg.Logging.Level, "dir", cfg.Logging.Dir)
-	log.Debug("Loaded configuration", "path", *configPath, "environment", cfg.Environment)
+	log.Debug("Loaded configuration", "path", *configPath)
 
 	log.Info("CTS-Core starting",
-		"environment", cfg.Environment,
 		"version", "0.0.1",
 		"log_level", cfg.Logging.Level)
 
@@ -201,22 +201,47 @@ func main() {
 
 	// TODO: Phase 1.4 - Load state
 
-	router := rest.NewRouter(dbClient, rest.Options{WSDebug: cfg.Logging.WSDebug})
-	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	if cfg.Server.Host == "" {
-		addr = fmt.Sprintf(":%d", cfg.Server.Port)
-	}
+	router := rest.NewRouter(dbClient, rest.Options{
+		WSDebug:               cfg.Logging.WSDebug,
+		RESTRequestsPerMinute: cfg.RateLimit.REST.PerMinute(),
+		RESTBurst:             cfg.RateLimit.REST.Burst,
+		WSRequestsPerMinute:   cfg.RateLimit.WebSocket.PerMinute(),
+		WSBurst:               cfg.RateLimit.WebSocket.Burst,
+	})
+	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 
 	httpServer := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		ReadTimeout:  cfg.Server.Timeouts.Read,
-		WriteTimeout: cfg.Server.Timeouts.Write,
-		IdleTimeout:  cfg.Server.Timeouts.Idle,
+		Addr:              addr,
+		Handler:           router,
+		ReadTimeout:       cfg.Server.Timeouts.Read,
+		WriteTimeout:      cfg.Server.Timeouts.Write,
+		IdleTimeout:       cfg.Server.Timeouts.Idle,
+		ReadHeaderTimeout: cfg.Server.Timeouts.ReadHeader,
+		MaxHeaderBytes:    cfg.Server.Limits.MaxHeaderBytes,
+	}
+
+	if cfg.Server.HTTP2 != nil {
+		parsed, err := cfg.Server.HTTP2.Parse()
+		if err != nil {
+			log.Error("Invalid server.http2 config", "error", err)
+			os.Exit(1)
+		}
+
+		h2Config := &http2.Server{
+			MaxConcurrentStreams:         parsed.MaxConcurrentStreams,
+			MaxReadFrameSize:             parsed.MaxFrameSize,
+			IdleTimeout:                  time.Duration(parsed.IdleTimeoutSeconds) * time.Second,
+			MaxUploadBufferPerConnection: parsed.MaxUploadBufferPerConn,
+			MaxUploadBufferPerStream:     parsed.MaxUploadBufferPerStream,
+		}
+		if err := http2.ConfigureServer(httpServer, h2Config); err != nil {
+			log.Error("Failed to configure HTTP/2 server", "error", err)
+			os.Exit(1)
+		}
 	}
 
 	log.Info("CTS-Core initialized successfully")
-	log.Info("REST server starting", "addr", addr, "tls", cfg.Server.TLS.Enabled)
+	log.Info("REST server starting", "addr", addr, "tls_enabled", cfg.Server.TLS.Enabled)
 
 	serverErrCh := make(chan error, 1)
 	go func() {
@@ -243,7 +268,7 @@ func main() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.Timeouts.ShutdownGrace)
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Error("REST server shutdown failed", "error", err)
