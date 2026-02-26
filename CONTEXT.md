@@ -55,9 +55,9 @@
 language: Go 1.24.9
 framework: Gin (для REST API)
 websocket: gorilla/websocket
-database:
-  primary: MySQL 9 (mTLS)
-  timeseries: ClickHouse
+databases:
+  system: MySQL 9 (mTLS)
+  quotes: ClickHouse
 security:
   hsm: SoftHSM v2 (via hsm-service)
   tls: TLS 1.3, mTLS everywhere

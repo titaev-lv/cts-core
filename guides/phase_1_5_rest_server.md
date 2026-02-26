@@ -468,7 +468,7 @@ import (
 
 // RateLimit middleware limits requests per IP
 func RateLimit(rate string) gin.HandlerFunc {
-    // Parse rate (e.g., "100-M" = 100 requests per minute)
+    // Parse rate (e.g., "100-S" = 100 requests per second)
     parsedRate, err := limiter.NewRateFromFormatted(rate)
     if err != nil {
         panic("invalid rate limit format: " + err.Error())

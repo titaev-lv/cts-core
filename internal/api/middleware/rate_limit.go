@@ -15,13 +15,13 @@ type ipRateWindow struct {
 }
 
 // PerIPRateLimit applies a simple fixed-window rate limit by client IP.
-func PerIPRateLimit(requestsPerMinute, burst int) gin.HandlerFunc {
-	allowed := requestsPerMinute + burst
+func PerIPRateLimit(requestsPerSecond, burst int) gin.HandlerFunc {
+	allowed := requestsPerSecond + burst
 	if allowed <= 0 {
 		allowed = 1
 	}
 
-	const window = time.Minute
+	const window = time.Second
 	var (
 		mu      sync.Mutex
 		windows = make(map[string]ipRateWindow)

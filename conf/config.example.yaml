@@ -28,30 +28,39 @@ server:
     max_upload_buffer_per_conn: "1M"
     max_upload_buffer_per_stream: "1M"
 
-# MySQL Database configuration
-mysql:
-  host: "mysql"
-  port: 3306
-  user: "root"
-  password: "root"          # TODO: Use env var CTS_MYSQL_PASSWORD in production
-  database: "ct_system"
-  
-  pool:
-    max_open_conns: 25
-    max_idle_conns: 10
-    conn_max_lifetime: 300s      # 5 minutes
-    
-  tls:
-    enabled: false               # Set to true for production with mTLS certificates
-    ca_path: "pki/ca/ca.crt"
-    cert_path: "pki/client/cts-core-mysql.crt"
-    key_path: "pki/client/cts-core-mysql.key"
-    
-  retry:
-    max_attempts: 3
-    initial_delay: 100ms
-    max_delay: 5s
-    multiplier: 2.0
+# Databases configuration
+databases:
+  system:
+    engine: "mysql"
+    mysql:
+      host: "mysql"
+      port: 3306
+      user: "root"
+      password: "root"          # TODO: Use env var CTS_DATABASES_SYSTEM_MYSQL_PASSWORD in production
+      database: "ct_system"
+
+      pool:
+        max_open_conns: 25
+        max_idle_conns: 10
+        conn_max_lifetime: 300s      # 5 minutes
+
+      tls:
+        enabled: false               # Set to true for production with mTLS certificates
+        ca_path: "pki/ca/ca.crt"
+        cert_path: "pki/client/cts-core-mysql.crt"
+        key_path: "pki/client/cts-core-mysql.key"
+
+      retry:
+        max_attempts: 3
+        initial_delay: 100ms
+        max_delay: 5s
+        multiplier: 2.0
+
+  audit:
+    engine: ""
+
+  quotes:
+    engine: ""
 
 # HSM Service configuration
 # Two contexts: Trading (exchange keys) + 2FA (user secrets)
@@ -92,25 +101,22 @@ state:
 # Logging configuration
 logging:
   level: debug                   # debug | info | warn | error
-  dir: logs                      # Directory for log files
-  error_path: "logs/error.log"
-  access_path: "logs/access.log"
-  out_request_path: "logs/out_request.log"
-  ws_access_path: "logs/ws_access.log"
-  ws_out_path: "logs/ws_out.log"
-  audit_path: "logs/audit.log"
+  format: json                   # json | text
+  compress: false                 # Compress rotated files
+  error_path: "/var/log/cts-core/error.log"
+  access_path: "/var/log/cts-core/access.log"
+  out_request_path: "/var/log/cts-core/out_request.log"
+  ws_in_path: "/var/log/cts-core/ws_in.log"
+  ws_out_path: "/var/log/cts-core/ws_out.log"
+  audit_path: "/var/log/cts-core/audit.log"
   max_size_mb: 100               # Rotate when file reaches 100 MB
   max_backups: 10                # Number of rotated files to keep
   max_age_days: 30               # Max age in days before deletion
-  compress: true                 # Compress rotated files
   access_to_stdout: true
   out_request_to_stdout: false
-  ws_access_to_stdout: false
+  ws_in_to_stdout: false
   ws_out_to_stdout: false
   audit_to_stdout: false
-  post_payload: false
-  post_payload_max_bytes: 2048
-  ws_debug: false
 
 # Session management (Phase 1.4)
 session:
@@ -128,11 +134,11 @@ scheduler:
 # Rate limiting (Phase 1.5)
 rate_limit:
   rest:
-    requests_per_minute: 1000
+    requests_per_second: 50
     burst: 100
     
   websocket:
-    requests_per_minute: 10000
+    requests_per_second: 200
     burst: 1000
 
 # Prometheus metrics (Phase 1.6)
@@ -140,11 +146,4 @@ metrics:
   enabled: true
   port: 9090
   path: "/metrics"
-
-# Audit logging
-audit:
-  enabled: true
-  file_path: "logs/audit.log"
-  mysql_enabled: false           # Phase 2: store in MySQL
-  retention_days: 30
 

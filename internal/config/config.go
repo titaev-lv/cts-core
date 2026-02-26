@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -90,44 +91,51 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Validate MySQL settings
-	if c.MySQL.Database == "" {
-		return fmt.Errorf("mysql database cannot be empty")
+	if c.Databases.System.Engine == "" {
+		return fmt.Errorf("databases.system.engine cannot be empty")
+	}
+	if c.Databases.System.Engine != "mysql" {
+		return fmt.Errorf("unsupported databases.system.engine: %s", c.Databases.System.Engine)
 	}
 
-	if c.MySQL.Port < 1 || c.MySQL.Port > 65535 {
-		return fmt.Errorf("invalid mysql port: %d (must be 1-65535)", c.MySQL.Port)
+	// Validate MySQL settings for system DB
+	if c.Databases.System.MySQL.Database == "" {
+		return fmt.Errorf("databases.system.mysql database cannot be empty")
 	}
 
-	if c.RateLimit.REST.RequestsPerMinute < 0 || c.RateLimit.REST.MessagesPerMinute < 0 {
-		return fmt.Errorf("invalid rate_limit.rest.requests_per_minute: %d", c.RateLimit.REST.PerMinute())
-	}
-	if c.RateLimit.WebSocket.RequestsPerMinute < 0 || c.RateLimit.WebSocket.MessagesPerMinute < 0 {
-		return fmt.Errorf("invalid rate_limit.websocket.requests_per_minute: %d", c.RateLimit.WebSocket.PerMinute())
+	if c.Databases.System.MySQL.Port < 1 || c.Databases.System.MySQL.Port > 65535 {
+		return fmt.Errorf("invalid databases.system.mysql port: %d (must be 1-65535)", c.Databases.System.MySQL.Port)
 	}
 
-	if c.RateLimit.REST.PerMinute() == 0 {
-		c.RateLimit.REST.RequestsPerMinute = 1000
+	if c.RateLimit.REST.RequestsPerSecond < 0 || c.RateLimit.REST.MessagesPerSecond < 0 {
+		return fmt.Errorf("invalid rate_limit.rest.requests_per_second: %d", c.RateLimit.REST.PerSecond())
+	}
+	if c.RateLimit.WebSocket.RequestsPerSecond < 0 || c.RateLimit.WebSocket.MessagesPerSecond < 0 {
+		return fmt.Errorf("invalid rate_limit.websocket.requests_per_second: %d", c.RateLimit.WebSocket.PerSecond())
+	}
+
+	if c.RateLimit.REST.PerSecond() == 0 {
+		c.RateLimit.REST.RequestsPerSecond = 17
 	}
 	if c.RateLimit.REST.Burst == 0 {
 		c.RateLimit.REST.Burst = 100
 	}
 
-	if c.RateLimit.WebSocket.PerMinute() == 0 {
-		c.RateLimit.WebSocket.RequestsPerMinute = 10000
+	if c.RateLimit.WebSocket.PerSecond() == 0 {
+		c.RateLimit.WebSocket.RequestsPerSecond = 167
 	}
 	if c.RateLimit.WebSocket.Burst == 0 {
 		c.RateLimit.WebSocket.Burst = 1000
 	}
 
-	if c.RateLimit.REST.PerMinute() <= 0 {
-		return fmt.Errorf("invalid rate_limit.rest.requests_per_minute: %d", c.RateLimit.REST.PerMinute())
+	if c.RateLimit.REST.PerSecond() <= 0 {
+		return fmt.Errorf("invalid rate_limit.rest.requests_per_second: %d", c.RateLimit.REST.PerSecond())
 	}
 	if c.RateLimit.REST.Burst < 0 {
 		return fmt.Errorf("invalid rate_limit.rest.burst: %d", c.RateLimit.REST.Burst)
 	}
-	if c.RateLimit.WebSocket.PerMinute() <= 0 {
-		return fmt.Errorf("invalid rate_limit.websocket.requests_per_minute: %d", c.RateLimit.WebSocket.PerMinute())
+	if c.RateLimit.WebSocket.PerSecond() <= 0 {
+		return fmt.Errorf("invalid rate_limit.websocket.requests_per_second: %d", c.RateLimit.WebSocket.PerSecond())
 	}
 	if c.RateLimit.WebSocket.Burst < 0 {
 		return fmt.Errorf("invalid rate_limit.websocket.burst: %d", c.RateLimit.WebSocket.Burst)
@@ -148,10 +156,48 @@ func (c *Config) Validate() error {
 	if !validLevels[c.Logging.Level] {
 		return fmt.Errorf("invalid log level: %s (must be debug, info, warn, or error)", c.Logging.Level)
 	}
-
-	// Validate logging directory
+	if c.Logging.Format == "" {
+		c.Logging.Format = "json"
+	}
+	if c.Logging.Format != "json" && c.Logging.Format != "text" {
+		return fmt.Errorf("invalid logging format: %s (must be json or text)", c.Logging.Format)
+	}
 	if c.Logging.Dir == "" {
-		return fmt.Errorf("logging directory cannot be empty")
+		if c.Logging.ErrorPath != "" {
+			c.Logging.Dir = filepath.Dir(c.Logging.ErrorPath)
+		} else {
+			c.Logging.Dir = "/var/log/cts-core"
+		}
+	}
+	if c.Logging.ErrorPath == "" {
+		c.Logging.ErrorPath = filepath.Join(c.Logging.Dir, "error.log")
+	}
+	if c.Logging.AccessPath == "" {
+		c.Logging.AccessPath = filepath.Join(c.Logging.Dir, "access.log")
+	}
+	if c.Logging.OutRequestPath == "" {
+		c.Logging.OutRequestPath = filepath.Join(c.Logging.Dir, "out_request.log")
+	}
+	if c.Logging.WSInPath == "" {
+		c.Logging.WSInPath = filepath.Join(c.Logging.Dir, "ws_in.log")
+	}
+	if c.Logging.WSOutPath == "" {
+		c.Logging.WSOutPath = filepath.Join(c.Logging.Dir, "ws_out.log")
+	}
+	if c.Logging.AuditPath == "" {
+		c.Logging.AuditPath = filepath.Join(c.Logging.Dir, "audit.log")
+	}
+
+	if c.Databases.System.MySQL.TLS.Enabled {
+		if c.Databases.System.MySQL.TLS.CAPath == "" {
+			return fmt.Errorf("databases.system.mysql.tls.ca_path is required when tls.enabled=true")
+		}
+		if c.Databases.System.MySQL.TLS.CertPath == "" {
+			return fmt.Errorf("databases.system.mysql.tls.cert_path is required when tls.enabled=true")
+		}
+		if c.Databases.System.MySQL.TLS.KeyPath == "" {
+			return fmt.Errorf("databases.system.mysql.tls.key_path is required when tls.enabled=true")
+		}
 	}
 
 	return nil
@@ -159,12 +205,15 @@ func (c *Config) Validate() error {
 
 // applyEnvOverrides overrides config with environment variables
 func (c *Config) applyEnvOverrides() {
-	if mysqlPass := os.Getenv("CTS_MYSQL_PASSWORD"); mysqlPass != "" {
-		c.MySQL.Password = mysqlPass
+	if mysqlPass := os.Getenv("CTS_DATABASES_SYSTEM_MYSQL_PASSWORD"); mysqlPass != "" {
+		c.Databases.System.MySQL.Password = mysqlPass
 	}
 
 	if logLevel := os.Getenv("CTS_LOG_LEVEL"); logLevel != "" {
 		c.Logging.Level = logLevel
+	}
+	if logFormat := os.Getenv("CTS_LOG_FORMAT"); logFormat != "" {
+		c.Logging.Format = logFormat
 	}
 
 }

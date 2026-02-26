@@ -81,7 +81,7 @@
 | 21 | **Trader Capacity** | Phase 1 ограничения | DEV: 3 traders max, PROD: 2 traders max (инфраструктурные лимиты) |
 | 22 | **Load Balancing** | Scoring алгоритм | Latency 50%, Load 30%, Resources 20% (без региона) |
 | 23 | **Rate Limiting** | Token bucket | REST: 1000 req/min, WebSocket: 10000 msg/min per connection |
-| 24 | **Audit Log** | Гибридный | PRIMARY: JSON файл (logs/audit.log), SECONDARY: MySQL для Phase 2 (UI) |
+| 24 | **Audit Log** | Гибридный | PRIMARY: JSON файл (/var/log/cts-core/audit.log), SECONDARY: MySQL для Phase 2 (UI) |
 | 25 | **Error Codes** | 27 стандартизированных | Группировка: client errors (4xx), server errors (5xx), детали в API_SPECIFICATION.md |
 
 ---
@@ -1745,13 +1745,13 @@ CTS-Core использует 6 файлов логов:
 - error.log: системные ошибки и события
 - access.log: входящие HTTP запросы
 - out_request.log: исходящие HTTP запросы
-- ws_access.log: входящие WS события
+- ws_in.log: входящие WS события
 - ws_out.log: исходящие WS сообщения
 - audit.log: аудит админских/системных действий
 
 ### WS Log Fields (Standard)
 
-**ws_access.log**
+**ws_in.log**
 - required: timestamp, level, module, event, conn_id
 - recommended: trader_id, session_id, client_ip, user_agent, ws_path
 - optional: msg_id, request_id, error, latency_ms, size_bytes
@@ -1767,7 +1767,7 @@ CTS-Core использует 6 файлов логов:
 
 ```yaml
 PRIMARY: JSON файл
-    Path: logs/audit.log
+    Path: /var/log/cts-core/audit.log
     Format: JSON lines (one event per line)
     Write: Synchronous append-only
     Rotation: logrotate (30 days локально)

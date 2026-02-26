@@ -116,7 +116,7 @@ gantt
 **out_request.log** (исходящие запросы)
 - все исходящие HTTP запросы CTS-Core (HSM, внешние сервисы)
 
-**ws_access.log** (входящие WS события)
+**ws_in.log** (входящие WS события)
 - connect/disconnect, auth, subscribe/unsubscribe, ping/pong, ошибки протокола
 
 **ws_out.log** (исходящие WS сообщения)
@@ -124,7 +124,7 @@ gantt
 
 ### ✅ Стандарт полей для WS логов
 
-**ws_access.log**
+**ws_in.log**
 - required: timestamp, level, module, event, conn_id
 - recommended: trader_id, session_id, client_ip, user_agent, ws_path
 - optional: msg_id, request_id, error, latency_ms, size_bytes
@@ -161,15 +161,9 @@ gantt
 - error: основной системный лог ✅
 - access: входящие HTTP запросы ✅
 - out_request: исходящие HTTP запросы ✅
-- ws_access: входящие WS события ✅ (WS stub)
+- ws_in: входящие WS события ✅ (WS stub)
 - ws_out: исходящие WS сообщения ✅ (WS stub)
 - audit: критичные админские/системные действия ✅ (middleware)
-
-**3) Частичное логирование POST payload**
-- Только whitelist полей (никаких секретов/ключей)
-- Маскирование чувствительных значений
-- Лимит размера (например 2-4 KB)
-- Включается по флагу (например `logging.post_payload=true`)
 
 ### 📝 Конфигурация (пример)
 
@@ -179,7 +173,7 @@ logging:
     error_path: "/var/log/cts-core/error.log"
     access_path: "/var/log/cts-core/access.log"
     out_request_path: "/var/log/cts-core/out_request.log"
-    ws_access_path: "/var/log/cts-core/ws_access.log"
+    ws_in_path: "/var/log/cts-core/ws_in.log"
     ws_out_path: "/var/log/cts-core/ws_out.log"
     max_size_mb: 100
     max_backups: 10
@@ -194,7 +188,7 @@ logging:
 **Минимально необходимое:**
 - Логировать lifecycle: connect/disconnect, auth, subscribe/unsubscribe
 - Логировать ошибки протокола, timeouts, rate limits
-- Все это писать в ws_access.log и error.log (ошибки)
+- Все это писать в ws_in.log и error.log (ошибки)
 
 **Не рекомендуется:**
 - Логировать каждое WS сообщение (шум + объём)
@@ -202,7 +196,6 @@ logging:
 **Если нужно логировать сообщения:**
 - Ввести sampling (например 1% или только ошибки)
 - Писать в ws_out.log (outbound)
-- Включать по флагу `logging.ws_debug=true`
 
 ### ✅ Чек-лист реализации
 
@@ -211,7 +204,7 @@ Phase 1.4 - Logging Unification for CTS-Core
 [x] JSON + stdout + lumberjack
 [x] fail-fast проверка прав на директорию
 [x] UTC RFC3339 microseconds
-[x] Логгеры и файлы для error/access/out_request/ws_access/ws_out/audit
+[x] Логгеры и файлы для error/access/out_request/ws_in/ws_out/audit
 [x] Обновить config + docs
 [x] Подключить request_id middleware к HTTP серверу
 [x] Проброс request_id в access/error/out_request
@@ -862,29 +855,38 @@ server:
     limits:
         max_header_bytes: 1048576
 
-mysql:
-  host: "127.0.0.1"
-  port: 3306
-  user: "root"
-  password: "root"  # TODO: Use env var in production
-  database: "ct_system"
-  
-  pool:
-    max_open_conns: 25
-    max_idle_conns: 10
-    conn_max_lifetime: 300s  # 5 minutes
-    
-  tls:
-    enabled: true
-        ca_path: "pki/ca/ca.crt"
-        cert_path: "pki/client/cts-core-mysql.crt"
-        key_path: "pki/client/cts-core-mysql.key"
-    
-  retry:
-    max_attempts: 3
-    initial_delay: 100ms
-    max_delay: 5s
-    multiplier: 2.0
+databases:
+    system:
+        engine: "mysql"
+        mysql:
+            host: "127.0.0.1"
+            port: 3306
+            user: "root"
+            password: "root"  # TODO: Use env var in production
+            database: "ct_system"
+
+            pool:
+                max_open_conns: 25
+                max_idle_conns: 10
+                conn_max_lifetime: 300s  # 5 minutes
+
+            tls:
+                enabled: true
+                ca_path: "pki/ca/ca.crt"
+                cert_path: "pki/client/cts-core-mysql.crt"
+                key_path: "pki/client/cts-core-mysql.key"
+
+            retry:
+                max_attempts: 3
+                initial_delay: 100ms
+                max_delay: 5s
+                multiplier: 2.0
+
+    audit:
+        engine: ""
+
+    quotes:
+        engine: ""
 
 hsm:
   url: "https://hsm-service:8443"
@@ -910,13 +912,12 @@ state:
 
 logging:
   level: debug        # debug | info | warn | error
-    dir: logs
-    error_path: "logs/error.log"
-    access_path: "logs/access.log"
-    out_request_path: "logs/out_request.log"
-    ws_access_path: "logs/ws_access.log"
-    ws_out_path: "logs/ws_out.log"
-    audit_path: "logs/audit.log"
+        error_path: "/var/log/cts-core/error.log"
+        access_path: "/var/log/cts-core/access.log"
+        out_request_path: "/var/log/cts-core/out_request.log"
+        ws_in_path: "/var/log/cts-core/ws_in.log"
+        ws_out_path: "/var/log/cts-core/ws_out.log"
+        audit_path: "/var/log/cts-core/audit.log"
     max_size_mb: 100    # MB
     max_age_days: 7     # days
     max_backups: 10
@@ -934,24 +935,18 @@ scheduler:
   resource_check_interval: 30s
 
 rate_limit:
-  rest:
-    requests_per_minute: 1000
-    burst: 100
-    
-  websocket:
-    messages_per_minute: 10000
-    burst: 1000
+    rest:
+        requests_per_second: 50
+        burst: 100
+
+    websocket:
+        requests_per_second: 200
+        burst: 1000
 
 metrics:
   enabled: true
   port: 9090
   path: "/metrics"
-
-audit:
-    enabled: true
-    file_path: "logs/audit.log"
-    mysql_enabled: false  # Phase 2
-    retention_days: 30
 ```
 
 **internal/config/types.go:**
@@ -961,16 +956,26 @@ package config
 import "time"
 
 type Config struct {
-    Server      ServerConfig   `yaml:"server"`
-    MySQL       MySQLConfig    `yaml:"mysql"`
-    HSM         HSMConfig      `yaml:"hsm"`
-    State       StateConfig    `yaml:"state"`
-    Logging     LoggingConfig  `yaml:"logging"`
-    Session     SessionConfig  `yaml:"session"`
-    Scheduler   SchedulerConfig `yaml:"scheduler"`
+    Server      ServerConfig     `yaml:"server"`
+    Databases   DatabasesConfig  `yaml:"databases"`
+    HSM         HSMConfig        `yaml:"hsm"`
+    State       StateConfig      `yaml:"state"`
+    Logging     LoggingConfig    `yaml:"logging"`
+    Session     SessionConfig    `yaml:"session"`
+    Scheduler   SchedulerConfig  `yaml:"scheduler"`
     RateLimiting RateLimitConfig `yaml:"rate_limiting"`
-    Metrics     MetricsConfig  `yaml:"metrics"`
-    Audit       AuditConfig    `yaml:"audit"`
+    Metrics     MetricsConfig    `yaml:"metrics"`
+}
+
+type DatabasesConfig struct {
+    System DatabaseTargetConfig `yaml:"system"`
+    Audit  DatabaseTargetConfig `yaml:"audit"`
+    Quotes DatabaseTargetConfig `yaml:"quotes"`
+}
+
+type DatabaseTargetConfig struct {
+    Engine string      `yaml:"engine"`
+    MySQL  MySQLConfig `yaml:"mysql"`
 }
 
 type ServerConfig struct {
@@ -1068,7 +1073,7 @@ type RateLimitConfig struct {
 }
 
 type LimitConfig struct {
-    RequestsPerMinute int `yaml:"requests_per_minute"`
+    RequestsPerSecond int `yaml:"requests_per_second"`
     Burst             int `yaml:"burst"`
 }
 
@@ -1076,13 +1081,6 @@ type MetricsConfig struct {
     Enabled bool   `yaml:"enabled"`
     Port    int    `yaml:"port"`
     Path    string `yaml:"path"`
-}
-
-type AuditConfig struct {
-    Enabled       bool   `yaml:"enabled"`
-    FilePath      string `yaml:"file_path"`
-    MySQLEnabled  bool   `yaml:"mysql_enabled"`
-    RetentionDays int    `yaml:"retention_days"`
 }
 
 ```
@@ -1131,8 +1129,8 @@ func (c *Config) Validate() error {
         return fmt.Errorf("invalid server port: %d", c.Server.Port)
     }
     
-    if c.MySQL.Database == "" {
-        return fmt.Errorf("mysql database cannot be empty")
+    if c.Databases.System.MySQL.Database == "" {
+        return fmt.Errorf("databases.system.mysql database cannot be empty")
     }
     
     if c.State.FilePath == "" {
@@ -1153,8 +1151,8 @@ func (c *Config) Validate() error {
 
 // applyEnvOverrides overrides config with environment variables
 func (c *Config) applyEnvOverrides() {
-    if mysqlPass := os.Getenv("CTS_MYSQL_PASSWORD"); mysqlPass != "" {
-        c.MySQL.Password = mysqlPass
+    if mysqlPass := os.Getenv("CTS_DATABASES_SYSTEM_MYSQL_PASSWORD"); mysqlPass != "" {
+        c.Databases.System.MySQL.Password = mysqlPass
     }
     
     if logLevel := os.Getenv("CTS_LOG_LEVEL"); logLevel != "" {
@@ -1210,8 +1208,8 @@ func TestLoad(t *testing.T) {
         t.Errorf("Expected port=8443, got %d", cfg.Server.Port)
     }
     
-    if cfg.MySQL.Database != "ct_system" {
-        t.Errorf("Expected database=ct_system, got %s", cfg.MySQL.Database)
+    if cfg.Databases.System.MySQL.Database != "ct_system" {
+        t.Errorf("Expected database=ct_system, got %s", cfg.Databases.System.MySQL.Database)
     }
 }
 
@@ -1225,7 +1223,7 @@ func TestValidate(t *testing.T) {
             name: "valid config",
             cfg: Config{
                 Server:      ServerConfig{Port: 8443},
-                MySQL:       MySQLConfig{Database: "ct_system"},
+                Databases:   DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system"}}},
                 State:       StateConfig{FilePath: "state/daemon.state"},
                 Logging:     LoggingConfig{Level: "info", Format: "text"},
             },
@@ -1235,7 +1233,7 @@ func TestValidate(t *testing.T) {
             name: "invalid port",
             cfg: Config{
                 Server:      ServerConfig{Port: 99999},  // Invalid
-                MySQL:       MySQLConfig{Database: "ct_system"},
+                Databases:   DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system"}}},
                 State:       StateConfig{FilePath: "state/daemon.state"},
                 Logging:     LoggingConfig{Level: "info", Format: "text"},
             },
@@ -1245,7 +1243,7 @@ func TestValidate(t *testing.T) {
             name: "invalid log level",
             cfg: Config{
                 Server:      ServerConfig{Port: 8443},
-                MySQL:       MySQLConfig{Database: "ct_system"},
+                Databases:   DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system"}}},
                 State:       StateConfig{FilePath: "state/daemon.state"},
                 Logging:     LoggingConfig{Level: "verbose", Format: "text"},  // Invalid
             },
@@ -1264,22 +1262,22 @@ func TestValidate(t *testing.T) {
 }
 
 func TestEnvOverrides(t *testing.T) {
-    os.Setenv("CTS_MYSQL_PASSWORD", "secret123")
+    os.Setenv("CTS_DATABASES_SYSTEM_MYSQL_PASSWORD", "secret123")
     os.Setenv("CTS_LOG_LEVEL", "error")
     defer func() {
-        os.Unsetenv("CTS_MYSQL_PASSWORD")
+        os.Unsetenv("CTS_DATABASES_SYSTEM_MYSQL_PASSWORD")
         os.Unsetenv("CTS_LOG_LEVEL")
     }()
     
     cfg := &Config{
-        MySQL:       MySQLConfig{Password: "default"},
+        Databases:   DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Password: "default"}}},
         Logging:     LoggingConfig{Level: "debug"},
     }
     
     cfg.applyEnvOverrides()
     
-    if cfg.MySQL.Password != "secret123" {
-        t.Errorf("Expected password=secret123, got %s", cfg.MySQL.Password)
+    if cfg.Databases.System.MySQL.Password != "secret123" {
+        t.Errorf("Expected password=secret123, got %s", cfg.Databases.System.MySQL.Password)
     }
     
     if cfg.Logging.Level != "error" {
@@ -1300,8 +1298,11 @@ server:
         limits:
         max_header_bytes: 1048576
   
-mysql:
-  database: "ct_system"
+databases:
+    system:
+        engine: "mysql"
+        mysql:
+            database: "ct_system"
   
 state:
   file_path: "state/daemon.state"
@@ -1704,7 +1705,7 @@ func main() {
 ```yaml
 logging:
   level: debug           # debug, info, warn, error
-  dir: logs             # Директория для логов
+    error_path: "/var/log/cts-core/error.log"
     max_size_mb: 100      # Максимальный размер файла перед ротацией
 ```
 
@@ -1719,7 +1720,7 @@ go build -o bin/cts-core cmd/cts-core/main.go
 # (логи в файл, console output опционален)
 
 # Check logs:
-tail -f logs/error.log
+tail -f /var/log/cts-core/error.log
 # 2026-01-28 10:00:00.123456 [INFO] [main] CTS-Core starting environment=development version=0.0.1
 # 2026-01-28 10:00:00.123789 [INFO] [main] CTS-Core initialized successfully
 
@@ -1954,7 +1955,7 @@ services:
         condition: service_healthy
     volumes:
       - ./conf:/app/conf:ro
-      - ./logs:/app/logs
+    - ./logs:/var/log/cts-core
       - ./state:/app/state
       - ./pki:/app/pki:ro
     networks:
@@ -2027,14 +2028,20 @@ temp/
 Добавить секцию для Docker:
 
 ```yaml
-# MySQL Database
-database:
-  host: mysql        # В Docker используем имя сервиса
-  port: 3306
-  user: ctuser
-  password: ctpass_here
-  database: ct_system
-  # ...
+# Databases
+databases:
+    system:
+        engine: mysql
+        mysql:
+            host: mysql        # В Docker используем имя сервиса
+            port: 3306
+            user: ctuser
+            password: ctpass_here
+            database: ct_system
+    audit:
+        engine: ""
+    quotes:
+        engine: ""
 
 # HSM Service
 hsm:
@@ -2087,7 +2094,7 @@ docker compose ps
 docker compose exec mysql mysql -uctuser -pctpass_here ct_system -e "SHOW TABLES;"
 
 # Check CTS-Core logs
-docker compose exec cts-core cat logs/error.log
+docker compose exec cts-core cat /var/log/cts-core/error.log
 
 # Check state file
 docker compose exec cts-core ls -lh state/
@@ -2370,7 +2377,7 @@ sudo ls -la /opt/cts-core/
 sudo systemctl status cts-core
 
 # Check application logs
-sudo tail -f /opt/cts-core/logs/error.log
+sudo tail -f /var/log/cts-core/error.log
 ```
 
 ### Database connection issues
@@ -2773,7 +2780,7 @@ git status
 | **4.1** | Admin WS | WebSocket для www-go | 🟡 High | 2d |
 | **4.2** | Full REST | CRUD для trades, status, rate limiting (1000 req/min) | 🟡 High | 3d |
 | **4.3** | Trade Results | Обработка trade.result с 3-level структурой | 🔴 Critical | 3d |
-| **4.4** | Audit Log | JSON файл primary (logs/audit.log) | 🟢 Medium | 2d |
+| **4.4** | Audit Log | JSON файл primary (/var/log/cts-core/audit.log) | 🟢 Medium | 2d |
 | **4.5** | Integration | E2E тесты, stress tests | 🟡 High | 5d |
 
 **Trade result processing:**

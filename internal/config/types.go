@@ -5,7 +5,7 @@ import "time"
 // Config is the root configuration structure
 type Config struct {
 	Server    ServerConfig    `yaml:"server"`
-	MySQL     MySQLConfig     `yaml:"mysql"`
+	Databases DatabasesConfig `yaml:"databases"`
 	HSM       HSMConfig       `yaml:"hsm"`
 	State     StateConfig     `yaml:"state"`
 	Logging   LoggingConfig   `yaml:"logging"`
@@ -13,7 +13,21 @@ type Config struct {
 	Scheduler SchedulerConfig `yaml:"scheduler"`
 	RateLimit RateLimitConfig `yaml:"rate_limit"`
 	Metrics   MetricsConfig   `yaml:"metrics"`
-	Audit     AuditConfig     `yaml:"audit"`
+}
+
+// DatabasesConfig contains unified database targets by function.
+type DatabasesConfig struct {
+	System DatabaseTargetConfig `yaml:"system"`
+	Audit  DatabaseTargetConfig `yaml:"audit"`
+	Quotes DatabaseTargetConfig `yaml:"quotes"`
+}
+
+// DatabaseTargetConfig contains selected engine and engine-specific sections.
+type DatabaseTargetConfig struct {
+	Engine     string           `yaml:"engine"`
+	MySQL      MySQLConfig      `yaml:"mysql"`
+	ClickHouse ClickHouseConfig `yaml:"clickhouse"`
+	PostgreSQL PostgreSQLConfig `yaml:"postgresql"`
 }
 
 // ServerConfig contains REST API server settings
@@ -59,6 +73,24 @@ type MySQLConfig struct {
 	Retry    RetryConfig `yaml:"retry"`
 }
 
+// ClickHouseConfig is reserved for unified databases schema.
+type ClickHouseConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Database string `yaml:"database"`
+}
+
+// PostgreSQLConfig is reserved for unified databases schema.
+type PostgreSQLConfig struct {
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Database string `yaml:"database"`
+}
+
 // PoolConfig contains connection pool settings
 type PoolConfig struct {
 	MaxOpenConns    int           `yaml:"max_open_conns"`
@@ -99,26 +131,24 @@ type StateConfig struct {
 
 // LoggingConfig contains logging settings
 type LoggingConfig struct {
-	Level               string `yaml:"level"`
-	Dir                 string `yaml:"dir"`
-	MaxSizeMB           int    `yaml:"max_size_mb"`
-	MaxBackups          int    `yaml:"max_backups"`
-	MaxAgeDays          int    `yaml:"max_age_days"`
-	Compress            bool   `yaml:"compress"`
-	ErrorPath           string `yaml:"error_path"`
-	AccessPath          string `yaml:"access_path"`
-	OutRequestPath      string `yaml:"out_request_path"`
-	WSAccessPath        string `yaml:"ws_access_path"`
-	WSOutPath           string `yaml:"ws_out_path"`
-	AuditPath           string `yaml:"audit_path"`
-	AccessToStdout      bool   `yaml:"access_to_stdout"`
-	OutRequestToStdout  bool   `yaml:"out_request_to_stdout"`
-	WSAccessToStdout    bool   `yaml:"ws_access_to_stdout"`
-	WSOutToStdout       bool   `yaml:"ws_out_to_stdout"`
-	AuditToStdout       bool   `yaml:"audit_to_stdout"`
-	PostPayload         bool   `yaml:"post_payload"`
-	PostPayloadMaxBytes int    `yaml:"post_payload_max_bytes"`
-	WSDebug             bool   `yaml:"ws_debug"`
+	Level              string `yaml:"level"`
+	Format             string `yaml:"format"`
+	Dir                string `yaml:"dir"`
+	MaxSizeMB          int    `yaml:"max_size_mb"`
+	MaxBackups         int    `yaml:"max_backups"`
+	MaxAgeDays         int    `yaml:"max_age_days"`
+	Compress           bool   `yaml:"compress"`
+	ErrorPath          string `yaml:"error_path"`
+	AccessPath         string `yaml:"access_path"`
+	OutRequestPath     string `yaml:"out_request_path"`
+	WSInPath           string `yaml:"ws_in_path"`
+	WSOutPath          string `yaml:"ws_out_path"`
+	AuditPath          string `yaml:"audit_path"`
+	AccessToStdout     bool   `yaml:"access_to_stdout"`
+	OutRequestToStdout bool   `yaml:"out_request_to_stdout"`
+	WSInToStdout       bool   `yaml:"ws_in_to_stdout"`
+	WSOutToStdout      bool   `yaml:"ws_out_to_stdout"`
+	AuditToStdout      bool   `yaml:"audit_to_stdout"`
 }
 
 // SessionConfig contains session management settings
@@ -144,16 +174,16 @@ type RateLimitConfig struct {
 
 // LimitConfig contains rate limit values
 type LimitConfig struct {
-	RequestsPerMinute int `yaml:"requests_per_minute"`
-	MessagesPerMinute int `yaml:"messages_per_minute"`
+	RequestsPerSecond int `yaml:"requests_per_second"`
+	MessagesPerSecond int `yaml:"messages_per_second"`
 	Burst             int `yaml:"burst"`
 }
 
-func (l LimitConfig) PerMinute() int {
-	if l.RequestsPerMinute > 0 {
-		return l.RequestsPerMinute
+func (l LimitConfig) PerSecond() int {
+	if l.RequestsPerSecond > 0 {
+		return l.RequestsPerSecond
 	}
-	return l.MessagesPerMinute
+	return l.MessagesPerSecond
 }
 
 // MetricsConfig contains Prometheus metrics settings
@@ -161,12 +191,4 @@ type MetricsConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Port    int    `yaml:"port"`
 	Path    string `yaml:"path"`
-}
-
-// AuditConfig contains audit logging settings
-type AuditConfig struct {
-	Enabled       bool   `yaml:"enabled"`
-	FilePath      string `yaml:"file_path"`
-	MySQLEnabled  bool   `yaml:"mysql_enabled"`
-	RetentionDays int    `yaml:"retention_days"`
 }

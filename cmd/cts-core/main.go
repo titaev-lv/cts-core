@@ -36,6 +36,7 @@ func main() {
 	// Initialize logger
 	if err := logger.InitWithOptions(logger.Options{
 		Level:              cfg.Logging.Level,
+		Format:             cfg.Logging.Format,
 		Dir:                cfg.Logging.Dir,
 		MaxFileSizeMB:      cfg.Logging.MaxSizeMB,
 		MaxBackups:         cfg.Logging.MaxBackups,
@@ -44,12 +45,12 @@ func main() {
 		ErrorPath:          cfg.Logging.ErrorPath,
 		AccessPath:         cfg.Logging.AccessPath,
 		OutRequestPath:     cfg.Logging.OutRequestPath,
-		WSAccessPath:       cfg.Logging.WSAccessPath,
+		WSInPath:           cfg.Logging.WSInPath,
 		WSOutPath:          cfg.Logging.WSOutPath,
 		AuditPath:          cfg.Logging.AuditPath,
 		AccessToStdout:     cfg.Logging.AccessToStdout,
 		OutRequestToStdout: cfg.Logging.OutRequestToStdout,
-		WSAccessToStdout:   cfg.Logging.WSAccessToStdout,
+		WSInToStdout:       cfg.Logging.WSInToStdout,
 		WSOutToStdout:      cfg.Logging.WSOutToStdout,
 		AuditToStdout:      cfg.Logging.AuditToStdout,
 	}); err != nil {
@@ -69,18 +70,18 @@ func main() {
 
 	// Phase 1.2 - Initialize MySQL pool
 	mysqlCfg := db.MySQLConfig{
-		Host:            cfg.MySQL.Host,
-		Port:            cfg.MySQL.Port,
-		User:            cfg.MySQL.User,
-		Password:        cfg.MySQL.Password,
-		Database:        cfg.MySQL.Database,
-		TLSEnabled:      cfg.MySQL.TLS.Enabled,
-		CertPath:        cfg.MySQL.TLS.CertPath,
-		KeyPath:         cfg.MySQL.TLS.KeyPath,
-		CAPath:          cfg.MySQL.TLS.CAPath,
-		MaxOpenConns:    cfg.MySQL.Pool.MaxOpenConns,
-		MaxIdleConns:    cfg.MySQL.Pool.MaxIdleConns,
-		ConnMaxLifetime: cfg.MySQL.Pool.ConnMaxLifetime,
+		Host:            cfg.Databases.System.MySQL.Host,
+		Port:            cfg.Databases.System.MySQL.Port,
+		User:            cfg.Databases.System.MySQL.User,
+		Password:        cfg.Databases.System.MySQL.Password,
+		Database:        cfg.Databases.System.MySQL.Database,
+		TLSEnabled:      cfg.Databases.System.MySQL.TLS.Enabled,
+		CertPath:        cfg.Databases.System.MySQL.TLS.CertPath,
+		KeyPath:         cfg.Databases.System.MySQL.TLS.KeyPath,
+		CAPath:          cfg.Databases.System.MySQL.TLS.CAPath,
+		MaxOpenConns:    cfg.Databases.System.MySQL.Pool.MaxOpenConns,
+		MaxIdleConns:    cfg.Databases.System.MySQL.Pool.MaxIdleConns,
+		ConnMaxLifetime: cfg.Databases.System.MySQL.Pool.ConnMaxLifetime,
 		ConnMaxIdleTime: 2 * time.Minute, // Fixed value for now
 	}
 	log.Debug("MySQL config", "host", mysqlCfg.Host, "port", mysqlCfg.Port, "database", mysqlCfg.Database, "tls", mysqlCfg.TLSEnabled)
@@ -202,10 +203,9 @@ func main() {
 	// TODO: Phase 1.4 - Load state
 
 	router := rest.NewRouter(dbClient, rest.Options{
-		WSDebug:               cfg.Logging.WSDebug,
-		RESTRequestsPerMinute: cfg.RateLimit.REST.PerMinute(),
+		RESTRequestsPerSecond: cfg.RateLimit.REST.PerSecond(),
 		RESTBurst:             cfg.RateLimit.REST.Burst,
-		WSRequestsPerMinute:   cfg.RateLimit.WebSocket.PerMinute(),
+		WSRequestsPerSecond:   cfg.RateLimit.WebSocket.PerSecond(),
 		WSBurst:               cfg.RateLimit.WebSocket.Burst,
 	})
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)

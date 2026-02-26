@@ -189,7 +189,7 @@ UPDATE REENCRYPTION_JOBS SET status = 'pending' WHERE id = 123;
 
 - ✅ Plaintext never written to disk (only in memory during re-encryption)
 - ✅ All HSM communication via mTLS
-- ✅ Audit trail in AUDIT_LOG + logs/audit.log
+- ✅ Audit trail in AUDIT_LOG + /var/log/cts-core/audit.log
 - ✅ Old KEK versions retained in HSM (30 days policy)
 - ✅ Progress tracking allows pause/resume without data loss
 - ✅ Failed records isolated - don't block entire job

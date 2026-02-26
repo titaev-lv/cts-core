@@ -246,7 +246,7 @@ Core: "OK, trying Trader-EU instead"
 -- Optional: Core-side limits (in addition to trader autonomy)
 CREATE TABLE CORE_RESOURCE_POLICY (
     EXCHANGE_ID INT,
-    POLICY_TYPE ENUM('max_concurrent_tasks_per_trader', 'max_total_orders_per_minute'),
+  POLICY_TYPE ENUM('max_concurrent_tasks_per_trader', 'max_total_orders_per_second'),
     THRESHOLD DECIMAL(20, 8),
     ACTION ENUM('warn', 'throttle', 'block')
 );

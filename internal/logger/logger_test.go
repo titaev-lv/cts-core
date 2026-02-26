@@ -156,7 +156,7 @@ func TestLogLevels(t *testing.T) {
 		Compress:           true,
 		AccessToStdout:     false,
 		OutRequestToStdout: false,
-		WSAccessToStdout:   false,
+		WSInToStdout:       false,
 		WSOutToStdout:      false,
 		AuditToStdout:      false,
 	}); err != nil {

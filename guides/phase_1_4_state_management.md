@@ -752,11 +752,11 @@ type StateConfig struct {
 
 ```go
 type Config struct {
-    Server   ServerConfig   `yaml:"server"`
-    Database DatabaseConfig `yaml:"database"`
-    HSM      HSMConfig      `yaml:"hsm"`
-    State    StateConfig    `yaml:"state"` // <-- ADD THIS
-    Logging  LoggingConfig  `yaml:"logging"`
+    Server    ServerConfig    `yaml:"server"`
+    Databases DatabasesConfig `yaml:"databases"`
+    HSM       HSMConfig       `yaml:"hsm"`
+    State     StateConfig     `yaml:"state"` // <-- ADD THIS
+    Logging   LoggingConfig   `yaml:"logging"`
 }
 ```
 

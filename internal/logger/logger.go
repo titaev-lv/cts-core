@@ -33,6 +33,7 @@ func init() {
 // Init инициализирует систему логирования
 type Options struct {
 	Level              string
+	Format             string
 	Dir                string
 	MaxFileSizeMB      int
 	MaxBackups         int
@@ -41,12 +42,12 @@ type Options struct {
 	ErrorPath          string
 	AccessPath         string
 	OutRequestPath     string
-	WSAccessPath       string
+	WSInPath           string
 	WSOutPath          string
 	AuditPath          string
 	AccessToStdout     bool
 	OutRequestToStdout bool
-	WSAccessToStdout   bool
+	WSInToStdout       bool
 	WSOutToStdout      bool
 	AuditToStdout      bool
 }
@@ -78,6 +79,9 @@ func InitWithOptions(opts Options) error {
 	if opts.MaxAgeDays <= 0 {
 		opts.MaxAgeDays = 30
 	}
+	if opts.Format == "" {
+		opts.Format = "json"
+	}
 
 	// Parse log level
 	switch strings.ToLower(opts.Level) {
@@ -96,14 +100,14 @@ func InitWithOptions(opts Options) error {
 	opts.ErrorPath = defaultLogPath(opts.ErrorPath, opts.Dir, "error.log")
 	opts.AccessPath = defaultLogPath(opts.AccessPath, opts.Dir, "access.log")
 	opts.OutRequestPath = defaultLogPath(opts.OutRequestPath, opts.Dir, "out_request.log")
-	opts.WSAccessPath = defaultLogPath(opts.WSAccessPath, opts.Dir, "ws_access.log")
+	opts.WSInPath = defaultLogPath(opts.WSInPath, opts.Dir, "ws_in.log")
 	opts.WSOutPath = defaultLogPath(opts.WSOutPath, opts.Dir, "ws_out.log")
 	opts.AuditPath = defaultLogPath(opts.AuditPath, opts.Dir, "audit.log")
 
 	Log = buildLogger("error", opts.ErrorPath, true, opts)
 	AccessLog = buildLogger("access", opts.AccessPath, opts.AccessToStdout, opts)
 	OutReqLog = buildLogger("out_request", opts.OutRequestPath, opts.OutRequestToStdout, opts)
-	WSAccLog = buildLogger("ws_access", opts.WSAccessPath, opts.WSAccessToStdout, opts)
+	WSAccLog = buildLogger("ws_access", opts.WSInPath, opts.WSInToStdout, opts)
 	WSOutLog = buildLogger("ws_out", opts.WSOutPath, opts.WSOutToStdout, opts)
 	AuditLog = buildLogger("audit", opts.AuditPath, opts.AuditToStdout, opts)
 
@@ -133,18 +137,31 @@ func buildLogger(name string, path string, toStdout bool, opts Options) *slog.Lo
 		writer = io.MultiWriter(os.Stdout, file)
 	}
 
-	handler := slog.NewJSONHandler(writer, &slog.HandlerOptions{
+	handler := newHandler(opts.Format, writer, &slog.HandlerOptions{
 		Level:       logLevel,
 		ReplaceAttr: replaceTimeAttr,
 	})
-	if name == "access" {
-		handler = slog.NewJSONHandler(writer, &slog.HandlerOptions{
+	if name == "access" || name == "ws_access" {
+		handler = newHandler(opts.Format, writer, &slog.HandlerOptions{
 			Level:       logLevel,
 			ReplaceAttr: replaceAccessAttr,
 		})
 	}
+	if name == "audit" {
+		handler = newHandler(opts.Format, writer, &slog.HandlerOptions{
+			Level:       logLevel,
+			ReplaceAttr: replaceAuditAttr,
+		})
+	}
 
 	return slog.New(handler)
+}
+
+func newHandler(format string, writer io.Writer, opts *slog.HandlerOptions) slog.Handler {
+	if strings.EqualFold(format, "text") {
+		return slog.NewTextHandler(writer, opts)
+	}
+	return slog.NewJSONHandler(writer, opts)
 }
 
 // Get возвращает логгер для конкретного модуля
@@ -171,7 +188,7 @@ func GetOutRequest(module string) *slog.Logger {
 
 func GetWSAccess(module string) *slog.Logger {
 	if WSAccLog == nil {
-		return Get(module)
+		return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: replaceAccessAttr})).With("module", module)
 	}
 	return WSAccLog.With("module", module)
 }
@@ -255,7 +272,15 @@ func replaceTimeAttr(_ []string, attr slog.Attr) slog.Attr {
 
 func replaceAccessAttr(groups []string, attr slog.Attr) slog.Attr {
 	attr = replaceTimeAttr(groups, attr)
-	if attr.Key == slog.MessageKey || attr.Key == "module" {
+	if attr.Key == slog.MessageKey || attr.Key == "module" || attr.Key == slog.LevelKey {
+		return slog.Attr{}
+	}
+	return attr
+}
+
+func replaceAuditAttr(groups []string, attr slog.Attr) slog.Attr {
+	attr = replaceTimeAttr(groups, attr)
+	if attr.Key == slog.LevelKey {
 		return slog.Attr{}
 	}
 	return attr

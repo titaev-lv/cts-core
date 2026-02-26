@@ -23,11 +23,11 @@ services:
       - TZ=Europe/Moscow
       # Override config via ENV (optional)
       - CTS_ENVIRONMENT=development
-      # - CTS_MYSQL_PASSWORD=your_password
+      # - CTS_DATABASES_SYSTEM_MYSQL_PASSWORD=your_password
       # - CTS_LOG_LEVEL=debug
     # MySQL подключение: используется host.docker.internal или IP хоста
-    # В config.yaml: database.host = "host.docker.internal" (Docker Desktop)
-    # или database.host = "172.17.0.1" (Linux)
+    # В config.yaml: databases.system.mysql.host = "host.docker.internal" (Docker Desktop)
+    # или databases.system.mysql.host = "172.17.0.1" (Linux)
     extra_hosts:
       - "host.docker.internal:host-gateway"  # Для доступа к MySQL на хосте
     restart: unless-stopped

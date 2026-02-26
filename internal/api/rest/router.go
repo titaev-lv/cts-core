@@ -9,10 +9,9 @@ import (
 
 // Options configures REST router behavior.
 type Options struct {
-	WSDebug               bool
-	RESTRequestsPerMinute int
+	RESTRequestsPerSecond int
 	RESTBurst             int
-	WSRequestsPerMinute   int
+	WSRequestsPerSecond   int
 	WSBurst               int
 }
 
@@ -31,13 +30,13 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) *gin.Engine {
 
 	healthHandler := NewHealthHandler(dbClient)
 	rest := router.Group("/")
-	rest.Use(middleware.PerIPRateLimit(opts.RESTRequestsPerMinute, opts.RESTBurst))
+	rest.Use(middleware.PerIPRateLimit(opts.RESTRequestsPerSecond, opts.RESTBurst))
 	rest.GET("/health", healthHandler.Health)
 	rest.GET("/ready", healthHandler.Ready)
 	rest.GET("/live", healthHandler.Live)
 
-	wsHandler := ws.NewHandler(opts.WSDebug)
-	router.GET("/ws", middleware.PerIPRateLimit(opts.WSRequestsPerMinute, opts.WSBurst), wsHandler.Serve)
+	wsHandler := ws.NewHandler()
+	router.GET("/ws", middleware.PerIPRateLimit(opts.WSRequestsPerSecond, opts.WSBurst), wsHandler.Serve)
 
 	return router
 }

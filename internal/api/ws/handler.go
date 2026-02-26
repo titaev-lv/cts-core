@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -14,16 +13,14 @@ import (
 )
 
 type Handler struct {
-	wsDebug   bool
 	upgrader  websocket.Upgrader
 	accessLog *slog.Logger
 	outLog    *slog.Logger
 }
 
 // NewHandler creates a WebSocket handler with logging.
-func NewHandler(wsDebug bool) *Handler {
+func NewHandler() *Handler {
 	return &Handler{
-		wsDebug: wsDebug,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -66,15 +63,6 @@ func (h *Handler) Serve(c *gin.Context) {
 
 		msgID++
 		h.accessLog.Info("ws_in", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "msg_type", msgType, "size_bytes", len(payload))
-
-		if h.wsDebug {
-			start := time.Now()
-			if err := conn.WriteMessage(msgType, payload); err != nil {
-				h.outLog.Warn("ws_out", "event", "echo_error", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "error", err)
-				continue
-			}
-			h.outLog.Info("ws_out", "event", "echo", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "latency_ms", time.Since(start).Milliseconds(), "size_bytes", len(payload))
-		}
 	}
 }
 

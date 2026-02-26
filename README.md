@@ -164,7 +164,7 @@ make build
 Language: Go 1.24.9
 Framework: Gin (REST API)
 WebSocket: gorilla/websocket
-Database:
+Databases:
   Transactional: MySQL 9 (mTLS)
   Time-series: ClickHouse
 Security:

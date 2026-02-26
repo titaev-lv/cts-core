@@ -21,15 +21,15 @@ func TestLoad(t *testing.T) {
 		t.Errorf("Expected server.limits.max_header_bytes=1048576, got %d", cfg.Server.Limits.MaxHeaderBytes)
 	}
 
-	if cfg.MySQL.Database != "ct_system" {
-		t.Errorf("Expected database=ct_system, got %s", cfg.MySQL.Database)
+	if cfg.Databases.System.MySQL.Database != "ct_system" {
+		t.Errorf("Expected database=ct_system, got %s", cfg.Databases.System.MySQL.Database)
 	}
 
 	if cfg.Logging.Level != "debug" {
 		t.Errorf("Expected log level=debug, got %s", cfg.Logging.Level)
 	}
-	if cfg.Logging.Dir != "logs" {
-		t.Errorf("Expected log dir=logs, got %s", cfg.Logging.Dir)
+	if cfg.Logging.Dir != "/var/log/cts-core" {
+		t.Errorf("Expected log dir=/var/log/cts-core, got %s", cfg.Logging.Dir)
 	}
 	if cfg.Logging.MaxSizeMB != 100 {
 		t.Errorf("Expected max_size_mb=100, got %d", cfg.Logging.MaxSizeMB)
@@ -40,26 +40,26 @@ func TestLoad(t *testing.T) {
 	if cfg.Logging.MaxAgeDays != 30 {
 		t.Errorf("Expected max_age_days=30, got %d", cfg.Logging.MaxAgeDays)
 	}
-	if !cfg.Logging.Compress {
-		t.Error("Expected compress=true")
+	if cfg.Logging.Compress {
+		t.Error("Expected compress=false")
 	}
-	if cfg.Logging.ErrorPath != "logs/error.log" {
-		t.Errorf("Expected error_path=logs/error.log, got %s", cfg.Logging.ErrorPath)
+	if cfg.Logging.ErrorPath != "/var/log/cts-core/error.log" {
+		t.Errorf("Expected error_path=/var/log/cts-core/error.log, got %s", cfg.Logging.ErrorPath)
 	}
-	if cfg.Logging.AccessPath != "logs/access.log" {
-		t.Errorf("Expected access_path=logs/access.log, got %s", cfg.Logging.AccessPath)
+	if cfg.Logging.AccessPath != "/var/log/cts-core/access.log" {
+		t.Errorf("Expected access_path=/var/log/cts-core/access.log, got %s", cfg.Logging.AccessPath)
 	}
-	if cfg.Logging.OutRequestPath != "logs/out_request.log" {
-		t.Errorf("Expected out_request_path=logs/out_request.log, got %s", cfg.Logging.OutRequestPath)
+	if cfg.Logging.OutRequestPath != "/var/log/cts-core/out_request.log" {
+		t.Errorf("Expected out_request_path=/var/log/cts-core/out_request.log, got %s", cfg.Logging.OutRequestPath)
 	}
-	if cfg.Logging.WSAccessPath != "logs/ws_access.log" {
-		t.Errorf("Expected ws_access_path=logs/ws_access.log, got %s", cfg.Logging.WSAccessPath)
+	if cfg.Logging.WSInPath != "/var/log/cts-core/ws_in.log" {
+		t.Errorf("Expected ws_in_path=/var/log/cts-core/ws_in.log, got %s", cfg.Logging.WSInPath)
 	}
-	if cfg.Logging.WSOutPath != "logs/ws_out.log" {
-		t.Errorf("Expected ws_out_path=logs/ws_out.log, got %s", cfg.Logging.WSOutPath)
+	if cfg.Logging.WSOutPath != "/var/log/cts-core/ws_out.log" {
+		t.Errorf("Expected ws_out_path=/var/log/cts-core/ws_out.log, got %s", cfg.Logging.WSOutPath)
 	}
-	if cfg.Logging.AuditPath != "logs/audit.log" {
-		t.Errorf("Expected audit_path=logs/audit.log, got %s", cfg.Logging.AuditPath)
+	if cfg.Logging.AuditPath != "/var/log/cts-core/audit.log" {
+		t.Errorf("Expected audit_path=/var/log/cts-core/audit.log, got %s", cfg.Logging.AuditPath)
 	}
 	if !cfg.Logging.AccessToStdout {
 		t.Error("Expected access_to_stdout=true")
@@ -67,23 +67,14 @@ func TestLoad(t *testing.T) {
 	if cfg.Logging.OutRequestToStdout {
 		t.Error("Expected out_request_to_stdout=false")
 	}
-	if cfg.Logging.WSAccessToStdout {
-		t.Error("Expected ws_access_to_stdout=false")
+	if cfg.Logging.WSInToStdout {
+		t.Error("Expected ws_in_to_stdout=false")
 	}
 	if cfg.Logging.WSOutToStdout {
 		t.Error("Expected ws_out_to_stdout=false")
 	}
 	if cfg.Logging.AuditToStdout {
 		t.Error("Expected audit_to_stdout=false")
-	}
-	if cfg.Logging.PostPayload {
-		t.Error("Expected post_payload=false")
-	}
-	if cfg.Logging.PostPayloadMaxBytes != 2048 {
-		t.Errorf("Expected post_payload_max_bytes=2048, got %d", cfg.Logging.PostPayloadMaxBytes)
-	}
-	if cfg.Logging.WSDebug {
-		t.Error("Expected ws_debug=false")
 	}
 
 	// Test HSM dual-context configuration
@@ -125,19 +116,19 @@ func TestValidate(t *testing.T) {
 						KeyPath:  "pki/server/cts-core.key",
 					},
 				},
-				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-				State:   StateConfig{FilePath: "state/daemon.state"},
-				Logging: LoggingConfig{Level: "info", Dir: "logs"},
+				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+				State:     StateConfig{FilePath: "state/daemon.state"},
+				Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid config with tls disabled and empty cert paths",
 			cfg: Config{
-				Server:  ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
-				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-				State:   StateConfig{FilePath: "state/daemon.state"},
-				Logging: LoggingConfig{Level: "info", Dir: "logs"},
+				Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+				State:     StateConfig{FilePath: "state/daemon.state"},
+				Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: false,
 		},
@@ -148,9 +139,9 @@ func TestValidate(t *testing.T) {
 					Enabled: true,
 					KeyPath: "pki/server/cts-core.key",
 				}},
-				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-				State:   StateConfig{FilePath: "state/daemon.state"},
-				Logging: LoggingConfig{Level: "info", Dir: "logs"},
+				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+				State:     StateConfig{FilePath: "state/daemon.state"},
+				Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: true,
 		},
@@ -161,39 +152,39 @@ func TestValidate(t *testing.T) {
 					Enabled:  true,
 					CertPath: "pki/server/cts-core.crt",
 				}},
-				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-				State:   StateConfig{FilePath: "state/daemon.state"},
-				Logging: LoggingConfig{Level: "info", Dir: "logs"},
+				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+				State:     StateConfig{FilePath: "state/daemon.state"},
+				Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid port",
 			cfg: Config{
-				Server:  ServerConfig{Port: 99999}, // Invalid
-				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-				State:   StateConfig{FilePath: "state/daemon.state"},
-				Logging: LoggingConfig{Level: "info", Dir: "logs"},
+				Server:    ServerConfig{Port: 99999}, // Invalid
+				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+				State:     StateConfig{FilePath: "state/daemon.state"},
+				Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid log level",
 			cfg: Config{
-				Server:  ServerConfig{Port: 8443},
-				MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-				State:   StateConfig{FilePath: "state/daemon.state"},
-				Logging: LoggingConfig{Level: "verbose", Dir: "logs"}, // Invalid
+				Server:    ServerConfig{Port: 8443},
+				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+				State:     StateConfig{FilePath: "state/daemon.state"},
+				Logging:   LoggingConfig{Level: "verbose", Dir: "logs"}, // Invalid
 			},
 			wantErr: true,
 		},
 		{
 			name: "empty database",
 			cfg: Config{
-				Server:  ServerConfig{Port: 8443},
-				MySQL:   MySQLConfig{Database: "", Port: 3306}, // Invalid
-				State:   StateConfig{FilePath: "state/daemon.state"},
-				Logging: LoggingConfig{Level: "info", Dir: "logs"},
+				Server:    ServerConfig{Port: 8443},
+				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "", Port: 3306}}}, // Invalid
+				State:     StateConfig{FilePath: "state/daemon.state"},
+				Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 			},
 			wantErr: true,
 		},
@@ -211,22 +202,22 @@ func TestValidate(t *testing.T) {
 
 func TestEnvOverrides(t *testing.T) {
 	// Set environment variables
-	os.Setenv("CTS_MYSQL_PASSWORD", "secret123")
+	os.Setenv("CTS_DATABASES_SYSTEM_MYSQL_PASSWORD", "secret123")
 	os.Setenv("CTS_LOG_LEVEL", "error")
 	defer func() {
-		os.Unsetenv("CTS_MYSQL_PASSWORD")
+		os.Unsetenv("CTS_DATABASES_SYSTEM_MYSQL_PASSWORD")
 		os.Unsetenv("CTS_LOG_LEVEL")
 	}()
 
 	cfg := &Config{
-		MySQL:   MySQLConfig{Password: "default"},
-		Logging: LoggingConfig{Level: "debug"},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Password: "default"}}},
+		Logging:   LoggingConfig{Level: "debug"},
 	}
 
 	cfg.applyEnvOverrides()
 
-	if cfg.MySQL.Password != "secret123" {
-		t.Errorf("Expected password=secret123, got %s", cfg.MySQL.Password)
+	if cfg.Databases.System.MySQL.Password != "secret123" {
+		t.Errorf("Expected password=secret123, got %s", cfg.Databases.System.MySQL.Password)
 	}
 
 	if cfg.Logging.Level != "error" {
@@ -236,10 +227,10 @@ func TestEnvOverrides(t *testing.T) {
 
 func TestValidateServerTimeoutDefaults(t *testing.T) {
 	cfg := Config{
-		Server:  ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
-		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-		State:   StateConfig{FilePath: "state/daemon.state"},
-		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -263,9 +254,9 @@ func TestValidateServerTimeoutBounds(t *testing.T) {
 				Read: -1 * time.Second,
 			},
 		},
-		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-		State:   StateConfig{FilePath: "state/daemon.state"},
-		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 	}
 
 	if err := cfg.Validate(); err == nil {
@@ -282,9 +273,9 @@ func TestValidateServerMaxHeaderBytesBounds(t *testing.T) {
 				MaxHeaderBytes: 1024,
 			},
 		},
-		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-		State:   StateConfig{FilePath: "state/daemon.state"},
-		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 	}
 
 	if err := cfg.Validate(); err == nil {
@@ -301,9 +292,9 @@ func TestValidateServerHTTP2Invalid(t *testing.T) {
 				MaxFrameSize: "invalid",
 			},
 		},
-		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-		State:   StateConfig{FilePath: "state/daemon.state"},
-		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 	}
 
 	if err := cfg.Validate(); err == nil {
@@ -313,12 +304,12 @@ func TestValidateServerHTTP2Invalid(t *testing.T) {
 
 func TestValidateRateLimitDefaultsAndAlias(t *testing.T) {
 	cfg := Config{
-		Server:  ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
-		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-		State:   StateConfig{FilePath: "state/daemon.state"},
-		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 		RateLimit: RateLimitConfig{
-			WebSocket: LimitConfig{MessagesPerMinute: 777, Burst: 10},
+			WebSocket: LimitConfig{MessagesPerSecond: 777, Burst: 10},
 		},
 	}
 
@@ -326,27 +317,27 @@ func TestValidateRateLimitDefaultsAndAlias(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 
-	if cfg.RateLimit.REST.PerMinute() == 0 {
+	if cfg.RateLimit.REST.PerSecond() == 0 {
 		t.Fatal("expected rate_limit.rest default to be set")
 	}
-	if cfg.RateLimit.WebSocket.PerMinute() != 777 {
-		t.Fatalf("expected websocket alias messages_per_minute=777, got %d", cfg.RateLimit.WebSocket.PerMinute())
+	if cfg.RateLimit.WebSocket.PerSecond() != 777 {
+		t.Fatalf("expected websocket messages_per_second=777, got %d", cfg.RateLimit.WebSocket.PerSecond())
 	}
 }
 
 func TestValidateRateLimitInvalid(t *testing.T) {
 	cfg := Config{
-		Server:  ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
-		MySQL:   MySQLConfig{Database: "ct_system", Port: 3306},
-		State:   StateConfig{FilePath: "state/daemon.state"},
-		Logging: LoggingConfig{Level: "info", Dir: "logs"},
+		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 		RateLimit: RateLimitConfig{
-			REST: LimitConfig{RequestsPerMinute: -1, Burst: 0},
+			REST: LimitConfig{RequestsPerSecond: -1, Burst: 0},
 		},
 	}
 
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected Validate() to fail for invalid rate_limit.rest.requests_per_minute")
+		t.Fatal("expected Validate() to fail for invalid rate_limit.rest.requests_per_second")
 	}
 }
 
