@@ -1,10 +1,14 @@
 package rest
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/titaev-lv/cts-core/internal/api/middleware"
 	"github.com/titaev-lv/cts-core/internal/api/ws"
 	"github.com/titaev-lv/cts-core/internal/db"
+	"github.com/titaev-lv/cts-core/internal/hsm"
+	"github.com/titaev-lv/cts-core/internal/state"
 )
 
 // Options configures REST router behavior.
@@ -13,6 +17,11 @@ type Options struct {
 	RESTBurst             int
 	WSRequestsPerSecond   int
 	WSBurst               int
+	HSMTrading            *hsm.Client
+	HSMTwoFA              *hsm.Client
+	StateManager          *state.Manager
+	StartedAt             time.Time
+	ServiceVersion        string
 }
 
 // NewRouter configures REST routes and middleware.
@@ -28,14 +37,22 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) *gin.Engine {
 		middleware.AuditLog(),
 	)
 
-	healthHandler := NewHealthHandler(dbClient)
+	wsHandler := ws.NewHandler()
+	healthHandler := NewHealthHandler(dbClient, HealthHandlerOptions{
+		HSMTrading:     opts.HSMTrading,
+		HSMTwoFA:       opts.HSMTwoFA,
+		StateManager:   opts.StateManager,
+		WSHandler:      wsHandler,
+		StartedAt:      opts.StartedAt,
+		ServiceName:    "cts-core",
+		ServiceVersion: opts.ServiceVersion,
+	})
 	rest := router.Group("/")
 	rest.Use(middleware.PerIPRateLimit(opts.RESTRequestsPerSecond, opts.RESTBurst))
 	rest.GET("/health", healthHandler.Health)
 	rest.GET("/ready", healthHandler.Ready)
 	rest.GET("/live", healthHandler.Live)
 
-	wsHandler := ws.NewHandler()
 	router.GET("/ws", middleware.PerIPRateLimit(opts.WSRequestsPerSecond, opts.WSBurst), wsHandler.Serve)
 
 	return router

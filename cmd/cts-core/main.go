@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -18,8 +19,11 @@ import (
 	"github.com/titaev-lv/cts-core/internal/db/repository"
 	"github.com/titaev-lv/cts-core/internal/hsm"
 	"github.com/titaev-lv/cts-core/internal/logger"
+	"github.com/titaev-lv/cts-core/internal/state"
 	"golang.org/x/net/http2"
 )
+
+const version = "0.0.1"
 
 func main() {
 	// Parse command line flags
@@ -65,8 +69,10 @@ func main() {
 	log.Debug("Loaded configuration", "path", *configPath)
 
 	log.Info("CTS-Core starting",
-		"version", "0.0.1",
+		"version", version,
 		"log_level", cfg.Logging.Level)
+
+	startedAt := time.Now().UTC()
 
 	// Phase 1.2 - Initialize MySQL pool
 	mysqlCfg := db.MySQLConfig{
@@ -200,13 +206,34 @@ func main() {
 
 	log.Info("HSM clients initialized", "trading_context", cfg.HSM.Trading.Context, "2fa_context", cfg.HSM.TwoFA.Context)
 
-	// TODO: Phase 1.4 - Load state
+	stateManager, err := state.NewManager(state.ManagerConfig{
+		StateFile:    cfg.State.FilePath,
+		BackupDir:    filepath.Join(filepath.Dir(cfg.State.FilePath), "backups"),
+		MaxBackups:   cfg.State.BackupCount,
+		SyncInterval: cfg.State.SyncInterval,
+	}, logger.Get("state"))
+	if err != nil {
+		log.Error("Failed to initialize state manager", "error", err)
+		os.Exit(1)
+	}
+
+	if err := stateManager.Load(); err != nil {
+		log.Error("Failed to load state", "error", err)
+		os.Exit(1)
+	}
+	stateManager.SetServerStatus("running")
+	stateManager.StartBackgroundSync()
 
 	router := rest.NewRouter(dbClient, rest.Options{
 		RESTRequestsPerSecond: cfg.RateLimit.REST.PerSecond(),
 		RESTBurst:             cfg.RateLimit.REST.Burst,
 		WSRequestsPerSecond:   cfg.RateLimit.WebSocket.PerSecond(),
 		WSBurst:               cfg.RateLimit.WebSocket.Burst,
+		HSMTrading:            hsmTradingClient,
+		HSMTwoFA:              hsm2FAClient,
+		StateManager:          stateManager,
+		StartedAt:             startedAt,
+		ServiceVersion:        version,
 	})
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 
@@ -260,9 +287,17 @@ func main() {
 	select {
 	case <-shutdownCtx.Done():
 		log.Info("Shutdown signal received")
+		stateManager.SetServerStatus("stopping")
 	case serveErr := <-serverErrCh:
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			log.Error("REST server stopped with error", "error", serveErr)
+			if closeErr := stateManager.Close(); closeErr != nil {
+				log.Error("State manager close failed", "error", closeErr)
+			}
+			os.Exit(1)
+		}
+		if closeErr := stateManager.Close(); closeErr != nil {
+			log.Error("State manager close failed", "error", closeErr)
 			os.Exit(1)
 		}
 		return
@@ -272,6 +307,15 @@ func main() {
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Error("REST server shutdown failed", "error", err)
+		if closeErr := stateManager.Close(); closeErr != nil {
+			log.Error("State manager close failed", "error", closeErr)
+		}
+		os.Exit(1)
+	}
+
+	stateManager.SetServerStatus("stopped")
+	if closeErr := stateManager.Close(); closeErr != nil {
+		log.Error("State manager close failed", "error", closeErr)
 		os.Exit(1)
 	}
 

@@ -31,6 +31,12 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"  # Для доступа к MySQL на хосте
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -x cts-core >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     # Uncomment if REST API needed (Phase 1.5):
     # ports:
     #   - "8080:8080"

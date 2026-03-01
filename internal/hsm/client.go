@@ -342,3 +342,13 @@ func (c *Client) Decrypt(ctx context.Context, context string, keyID string, ciph
 
 	return plaintext, nil
 }
+
+// Health fetches HSM service health status.
+func (c *Client) Health(ctx context.Context) (*HealthResponse, error) {
+	var resp HealthResponse
+	if err := c.doRequest(ctx, "GET", "/health", nil, &resp); err != nil {
+		return nil, fmt.Errorf("health request failed: %w", err)
+	}
+
+	return &resp, nil
+}

@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"log/slog"
 	"net/http"
+	"sync/atomic"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -16,6 +18,15 @@ type Handler struct {
 	upgrader  websocket.Upgrader
 	accessLog *slog.Logger
 	outLog    *slog.Logger
+	active    atomic.Int64
+	total     atomic.Int64
+	lastSeen  atomic.Int64
+}
+
+type Stats struct {
+	ActiveConnections int64 `json:"active_connections"`
+	TotalConnections  int64 `json:"total_connections"`
+	LastConnectUnix   int64 `json:"last_connect_unix,omitempty"`
 }
 
 // NewHandler creates a WebSocket handler with logging.
@@ -47,6 +58,10 @@ func (h *Handler) Serve(c *gin.Context) {
 	path := c.Request.URL.Path
 
 	h.accessLog.Info("ws_connect", "conn_id", connID, "request_id", requestID, "ip", clientIP, "user_agent", userAgent, "ws_path", path)
+	h.active.Add(1)
+	h.total.Add(1)
+	h.lastSeen.Store(time.Now().Unix())
+	defer h.active.Add(-1)
 
 	msgID := int64(0)
 	if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"connected\"}")); err == nil {
@@ -63,6 +78,14 @@ func (h *Handler) Serve(c *gin.Context) {
 
 		msgID++
 		h.accessLog.Info("ws_in", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "msg_type", msgType, "size_bytes", len(payload))
+	}
+}
+
+func (h *Handler) GetStats() Stats {
+	return Stats{
+		ActiveConnections: h.active.Load(),
+		TotalConnections:  h.total.Load(),
+		LastConnectUnix:   h.lastSeen.Load(),
 	}
 }
 
