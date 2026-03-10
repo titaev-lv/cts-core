@@ -1,11 +1,12 @@
 # CTS-Core Architecture
 
-> **Версия документа**: 1.1.0
-> **Дата**: 2026-01-25
-> **Статус**: В разработке (Phase 1.3 реализован, Phase 1.4/1.5 в работе)
+> **Версия документа**: 1.2.0
+> **Обновлено**: 2026-03-10
+> **Статус**: Актуализирован (Phase 1.4 завершен, Phase 1.5 частично)
 
 ## Оглавление
 
+0. [Статус реализации](#0-статус-реализации)
 1. [Обзор системы](#1-обзор-системы)
 2. [Принятые решения](#2-принятые-решения)
 3. [Целевая архитектура](#3-целевая-архитектура)
@@ -17,6 +18,18 @@
 9. [API Design](#9-api-design)
 10. [База данных](#10-база-данных)
 11. [План разработки](#11-план-разработки)
+
+---
+
+## 0. Статус реализации
+
+Срез по коду на 2026-03-10:
+
+- Реализовано: config/logger, MySQL client + repositories, HSM clients (Trading + 2FA), state manager, REST `/health` `/ready` `/live`, WS handler stub.
+- Частично: REST/WS integration foundation.
+- Не завершено: `/metrics` + Prometheus wiring, полный runtime WS protocol layer (`trader.register`, `trader.heartbeat`), session manager и scheduler runtime logic.
+
+Документ ниже описывает целевую архитектуру. Для фактического статуса приоритет у кода и `DEVELOPMENT_PLAN.md`.
 
 ---
 
@@ -222,7 +235,7 @@ sequenceDiagram
 - Отправка ордеров
 - Запись tick data в ClickHouse
 
-> **Примечание:** Базовая структура daemon2 уже разработана в `/other-sub-system/daemon2/`
+> **Примечание:** Историческая базовая структура trader была в daemon2. Актуальный сервис в этом workspace: `/services/trader/`.
 
 ```mermaid
 flowchart TB
@@ -607,7 +620,7 @@ flowchart TB
     end
     
     subgraph CTS_CORE["🎛️ CTS-Core"]
-        CTS[cts-core<br/>No HSM access]
+        CTS[cts-core<br/>No direct decrypt of exchange creds]
     end
     
     CA -->|Issue certs| WWW & CTS & T1 & T2
