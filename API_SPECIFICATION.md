@@ -149,6 +149,7 @@ event:
 {
   "type": "request",
   "action": "trader.register",
+  "request_id": "req-1",
   "payload": {
     "trader_id": "trader-eu-1",
     "version": "1.0.0",
@@ -173,20 +174,14 @@ event:
 {
   "type": "response",
   "action": "trader.register_ack",
-  "correlation_id": "...",
+  "request_id": "req-1",
+  "ts": 1737823200000,
   "payload": {
     "status": "ok",
     "trader_id": "trader-eu-1",
     "session_id": "session-uuid",
     "session_timeout_sec": 30,
-    "server_time": 1737823200000,
-    "pending_tasks": [
-      {
-        "task_id": "task-1",
-        "task_type": "trade",
-        "trade_id": 123
-      }
-    ]
+    "server_time": 1737823200000
   }
 }
 ```
@@ -196,22 +191,27 @@ event:
 {
   "type": "response",
   "action": "error",
-  "correlation_id": "...",
+  "request_id": "req-1",
+  "ts": 1737823200001,
   "payload": {
-    "code": "TRADER_NOT_REGISTERED",
-    "message": "Trader ID not found in database",
+    "code": "INVALID_PAYLOAD",
+    "message": "trader_id is required",
     "details": {
-      "trader_id": "trader-eu-1"
+      "field": "trader_id"
     }
   }
 }
 ```
 
+`request_id` behavior:
+- If trader sends `request_id`, CTS-Core mirrors it in response.
+- If trader omits `request_id`, CTS-Core generates server id (`srv-<msg_id>`).
+
 **Errors:**
-- `TRADER_NOT_REGISTERED` - Trader не pre-registered в БД
-- `INVALID_CERTIFICATE` - mTLS certificate invalid
-- `TRADER_SUSPENDED` - Trader suspended by admin
-- `DUPLICATE_CONNECTION` - Trader уже подключен
+- `INVALID_MESSAGE` - malformed JSON, non-text frame, or unsupported message type
+- `INVALID_PAYLOAD` - payload validation error (missing `trader_id`, `version`, or bad JSON)
+- `UNKNOWN_ACTION` - unsupported WS action
+- `DUPLICATE_CONNECTION` - duplicate `trader.register` in same WS session
 
 ---
 
