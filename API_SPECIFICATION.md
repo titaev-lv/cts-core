@@ -219,7 +219,7 @@ event:
 
 Периодический heartbeat (каждые 5 сек).
 
-**Event:**
+**Event mode (fire-and-forget):**
 ```json
 {
   "type": "event",
@@ -254,12 +254,51 @@ event:
 }
 ```
 
+**Request mode (ack expected):**
+```json
+{
+  "type": "request",
+  "action": "trader.heartbeat",
+  "request_id": "hb-1",
+  "payload": {
+    "trader_id": "trader-eu-1",
+    "session_id": "session-uuid",
+    "status": "active"
+  }
+}
+```
+
+**Response for request mode:**
+```json
+{
+  "type": "response",
+  "action": "trader.heartbeat_ack",
+  "request_id": "hb-1",
+  "ts": 1737823200100,
+  "payload": {
+    "status": "ok",
+    "trader_id": "trader-eu-1",
+    "session_id": "session-uuid",
+    "server_time": 1737823200100
+  }
+}
+```
+
 **Status values:**
 - `idle` - Нет активных задач
 - `active` - Есть активные задачи, нормальная загрузка
 - `busy` - Высокая загрузка (> 80% CPU или > 90% tasks)
 
-**Note:** Нет response. Если CTS-Core не получает heartbeat > 15 сек → disconnect.
+**Validation rules (current):**
+- `trader.register` must be completed before heartbeat.
+- `payload.trader_id` is required and must match registered trader.
+- if `payload.session_id` is set, it must match active session.
+
+**Errors:**
+- `INVALID_MESSAGE` - heartbeat before register
+- `INVALID_PAYLOAD` - malformed payload or identity mismatch
+
+**Note:** Event mode has no response; request mode returns `trader.heartbeat_ack`.
 
 ---
 

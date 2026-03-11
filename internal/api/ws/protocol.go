@@ -7,11 +7,14 @@ import (
 
 const (
 	msgTypeRequest  = "request"
+	msgTypeEvent    = "event"
 	msgTypeResponse = "response"
 
-	actionTraderRegister = "trader.register"
-	actionRegisterAck    = "trader.register_ack"
-	actionError          = "error"
+	actionTraderRegister  = "trader.register"
+	actionRegisterAck     = "trader.register_ack"
+	actionTraderHeartbeat = "trader.heartbeat"
+	actionHeartbeatAck    = "trader.heartbeat_ack"
+	actionError           = "error"
 )
 
 const (
@@ -46,6 +49,19 @@ type registerAck struct {
 	ServerTime        int64  `json:"server_time"`
 }
 
+type heartbeatRequest struct {
+	TraderID  string `json:"trader_id"`
+	SessionID string `json:"session_id"`
+	Status    string `json:"status,omitempty"`
+}
+
+type heartbeatAck struct {
+	Status     string `json:"status"`
+	TraderID   string `json:"trader_id"`
+	SessionID  string `json:"session_id"`
+	ServerTime int64  `json:"server_time"`
+}
+
 type errorPayload struct {
 	Code    string                 `json:"code"`
 	Message string                 `json:"message"`
@@ -73,6 +89,17 @@ func newRegisterAckEnvelope(requestID string, ack registerAck) envelope {
 	return envelope{
 		Type:      msgTypeResponse,
 		Action:    actionRegisterAck,
+		RequestID: requestID,
+		Payload:   payload,
+		TS:        time.Now().UnixMilli(),
+	}
+}
+
+func newHeartbeatAckEnvelope(requestID string, ack heartbeatAck) envelope {
+	payload, _ := json.Marshal(ack)
+	return envelope{
+		Type:      msgTypeResponse,
+		Action:    actionHeartbeatAck,
 		RequestID: requestID,
 		Payload:   payload,
 		TS:        time.Now().UnixMilli(),

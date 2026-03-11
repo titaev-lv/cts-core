@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -142,6 +143,85 @@ func TestRegisterWithoutRequestIDGetsServerRequestID(t *testing.T) {
 	}
 }
 
+func TestHeartbeatRequestAfterRegisterReturnsAck(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	registerTrader(t, conn, "trader-eu-1", "reg-1")
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "hb-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-eu-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+
+	resp := readEnvelope(t, conn)
+	if resp.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q, got %q", actionHeartbeatAck, resp.Action)
+	}
+	if resp.RequestID != "hb-1" {
+		t.Fatalf("expected request_id hb-1, got %q", resp.RequestID)
+	}
+
+	var ack heartbeatAck
+	if err := json.Unmarshal(resp.Payload, &ack); err != nil {
+		t.Fatalf("unmarshal heartbeat ack: %v", err)
+	}
+	if ack.Status != "ok" || ack.TraderID != "trader-eu-1" || ack.SessionID == "" {
+		t.Fatalf("unexpected heartbeat ack payload: %+v", ack)
+	}
+}
+
+func TestHeartbeatBeforeRegisterReturnsError(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "hb-2",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-eu-1",
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+
+	resp := readEnvelope(t, conn)
+	assertErrorCode(t, resp, errInvalidMessage)
+}
+
+func TestHeartbeatEventAfterRegisterHasNoResponse(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	registerTrader(t, conn, "trader-eu-1", "reg-2")
+
+	hbEvent := envelope{
+		Type:   msgTypeEvent,
+		Action: actionTraderHeartbeat,
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-eu-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hbEvent)
+
+	if _, _, err := readMessageWithTimeout(conn, 150*time.Millisecond); err == nil {
+		t.Fatalf("expected no response for heartbeat event")
+	}
+}
+
 func dialTestWS(t *testing.T) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -214,4 +294,32 @@ func mustJSON(t *testing.T, v interface{}) json.RawMessage {
 		t.Fatalf("marshal payload: %v", err)
 	}
 	return b
+}
+
+func registerTrader(t *testing.T, conn *websocket.Conn, traderID, requestID string) {
+	t.Helper()
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: requestID,
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": traderID,
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	if resp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, resp.Action)
+	}
+}
+
+func readMessageWithTimeout(conn *websocket.Conn, timeout time.Duration) (int, []byte, error) {
+	_ = conn.SetReadDeadline(time.Now().Add(timeout))
+	msgType, b, err := conn.ReadMessage()
+	_ = conn.SetReadDeadline(time.Time{})
+	return msgType, b, err
 }

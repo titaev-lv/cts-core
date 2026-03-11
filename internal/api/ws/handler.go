@@ -67,6 +67,8 @@ func (h *Handler) Serve(c *gin.Context) {
 
 	sessionID := generateConnID()
 	registeredTraderID := ""
+	sessionState := "connected"
+	lastHeartbeatMs := int64(0)
 
 	msgID := int64(0)
 	if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"connected\"}")); err == nil {
@@ -99,13 +101,18 @@ func (h *Handler) Serve(c *gin.Context) {
 
 		msgRequestID = resolveRequestID(msg.RequestID, msgID)
 
-		if msg.Type != msgTypeRequest {
+		if msg.Type != msgTypeRequest && msg.Type != msgTypeEvent {
 			h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "Unsupported message type", map[string]interface{}{"type": msg.Type}))
 			continue
 		}
 
 		switch msg.Action {
 		case actionTraderRegister:
+			if msg.Type != msgTypeRequest {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "trader.register must be request type", nil))
+				continue
+			}
+
 			if registeredTraderID != "" {
 				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errDuplicateConnection, "Trader already registered for this connection", map[string]interface{}{"trader_id": registeredTraderID}))
 				continue
@@ -128,6 +135,7 @@ func (h *Handler) Serve(c *gin.Context) {
 			}
 
 			registeredTraderID = req.TraderID
+			sessionState = "registered"
 			h.sendEnvelope(conn, connID, msgID, newRegisterAckEnvelope(msgRequestID, registerAck{
 				Status:            "ok",
 				TraderID:          req.TraderID,
@@ -136,6 +144,45 @@ func (h *Handler) Serve(c *gin.Context) {
 				ServerTime:        time.Now().UnixMilli(),
 			}))
 			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", req.TraderID, "version", req.Version, "region", req.Region)
+		case actionTraderHeartbeat:
+			if registeredTraderID == "" {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "trader.register is required before heartbeat", nil))
+				continue
+			}
+
+			var req heartbeatRequest
+			if err := json.Unmarshal(msg.Payload, &req); err != nil {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "Invalid heartbeat payload", map[string]interface{}{"error": err.Error()}))
+				continue
+			}
+
+			if req.TraderID == "" {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id is required", nil))
+				continue
+			}
+
+			if req.TraderID != registeredTraderID {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id does not match registered trader", map[string]interface{}{"registered_trader_id": registeredTraderID, "received_trader_id": req.TraderID}))
+				continue
+			}
+
+			if req.SessionID != "" && req.SessionID != sessionID {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "session_id does not match active session", map[string]interface{}{"session_id": req.SessionID}))
+				continue
+			}
+
+			lastHeartbeatMs = time.Now().UnixMilli()
+			sessionState = "active"
+			h.accessLog.Info("ws_heartbeat", "conn_id", connID, "request_id", msgRequestID, "trader_id", req.TraderID, "session_id", sessionID, "status", req.Status, "last_heartbeat_ms", lastHeartbeatMs, "session_state", sessionState)
+
+			if msg.Type == msgTypeRequest {
+				h.sendEnvelope(conn, connID, msgID, newHeartbeatAckEnvelope(msgRequestID, heartbeatAck{
+					Status:     "ok",
+					TraderID:   req.TraderID,
+					SessionID:  sessionID,
+					ServerTime: lastHeartbeatMs,
+				}))
+			}
 		default:
 			h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errUnknownAction, "Unsupported action", map[string]interface{}{"action": msg.Action}))
 		}
