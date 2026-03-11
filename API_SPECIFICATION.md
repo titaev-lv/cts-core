@@ -1,14 +1,15 @@
 # CTS-Core Complete API Specification
 
-> **Версия документа**: 1.0.0  
-> **Дата**: 2026-01-27  
-> **Статус**: Спецификация (требует review)  
+> **Версия документа**: 1.1.0  
+> **Обновлено**: 2026-03-10  
+> **Статус**: Целевая спецификация (реализация частичная)  
 > **Связь с**: ARCHITECTURE.md, TRADER_MODES.md, DEVELOPMENT_PLAN.md
 
 ---
 
 ## Оглавление
 
+0. [Статус реализации](#0-статус-реализации)
 1. [Обзор API](#1-обзор-api)
 2. [WebSocket Protocol](#2-websocket-protocol)
 3. [REST API](#3-rest-api)
@@ -16,6 +17,18 @@
 5. [Error Handling](#5-error-handling)
 6. [Rate Limiting](#6-rate-limiting)
 7. [Versioning](#7-versioning)
+
+---
+
+## 0. Статус реализации
+
+Срез по коду на 2026-03-10:
+
+- Реализовано: REST `/health`, `/ready`, `/live`; базовый WS handler (stub).
+- Не завершено: `/metrics` endpoint и Prometheus wiring.
+- Не завершено: полный runtime WS protocol (`trader.register`, `trader.heartbeat`, lifecycle/session orchestration).
+
+Ниже описан целевой API-контракт. Для текущего runtime-поведения приоритет у кода.
 
 ---
 
@@ -38,26 +51,26 @@ WebSocket:
 REST API:
   https://cts-core:8443/api/v1/*   - REST endpoints
   https://cts-core:8443/health     - Health check (public)
-  https://cts-core:8443/metrics    - Prometheus metrics (public)
+  https://cts-core:8443/metrics    - Prometheus metrics (public, planned)
 ```
 
 ### 1.2 Разделение ответственности
 
 ```yaml
 WebSocket (real-time):
-  ✅ Trader registration & heartbeat
-  ✅ Task assignment & cancellation
-  ✅ Trade execution & results
-  ✅ Monitor data streaming
-  ✅ Metrics reporting
-  ✅ Real-time notifications
+  - target: Trader registration & heartbeat
+  - target: Task assignment & cancellation
+  - target: Trade execution & results
+  - target: Monitor data streaming
+  - target: Metrics reporting
+  - target: Real-time notifications
 
 REST API (stateless):
-  ✅ CRUD для traders, trades, monitors
-  ✅ Query historical data
-  ✅ Admin configuration
-  ✅ Bulk operations
-  ✅ Reporting & analytics
+  - target: CRUD для traders, trades, monitors
+  - target: Query historical data
+  - target: Admin configuration
+  - target: Bulk operations
+  - target: Reporting & analytics
 ```
 
 ---

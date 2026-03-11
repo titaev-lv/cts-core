@@ -32,7 +32,7 @@ This isolation is verified in integration tests: [integration_test.go](integrati
 
 ## Architecture Decision: CTS-Core Does NOT Decrypt User Credentials
 
-### Original Design (from CONTEXT.md, ARCHITECTURE.md)
+### Original Design (from ARCHITECTURE.md)
 
 > **CTS-Core НЕ имеет доступа к HSM** — Только передаёт зашифрованные данные
 
@@ -234,8 +234,7 @@ KEK (Key Encryption Key) - stored in HSM
 
 ## References
 
-- [CONTEXT.md](../../CONTEXT.md) - Project context (line 44: CTS-Core НЕ имеет доступа к HSM)
 - [ARCHITECTURE.md](../../ARCHITECTURE.md) - Full architecture (section 6.7: Key Rotation)
 - [integration_test.go](integration_test.go) - ACL isolation tests
 - [README_TESTS.md](README_TESTS.md) - Testing guide
-- [hsm-service](../../../other-sub-system/hsm-service/) - HSM service implementation
+- `services/hsm-service` - HSM service implementation

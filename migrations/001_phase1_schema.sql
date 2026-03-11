@@ -34,8 +34,26 @@ USE ct_system;
 -- INT max: 4.3 billion (insufficient for long-term high-frequency trading)
 -- BIGINT max: 9.2 quintillion (sufficient for decades)
 
-ALTER TABLE ARBITRAGE_TRANS 
-MODIFY COLUMN ID BIGINT NOT NULL AUTO_INCREMENT;
+-- Idempotent safety: re-running migration should not fail if already BIGINT.
+SELECT COUNT(*) INTO @tbl_arbitrage_trans_exists
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ARBITRAGE_TRANS';
+
+SELECT COUNT(*) INTO @arbitrage_trans_id_is_bigint
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'ARBITRAGE_TRANS'
+    AND COLUMN_NAME = 'ID'
+    AND DATA_TYPE = 'bigint';
+
+SET @sql = IF(
+        @tbl_arbitrage_trans_exists = 1 AND @arbitrage_trans_id_is_bigint = 0,
+        'ALTER TABLE ARBITRAGE_TRANS MODIFY COLUMN ID BIGINT NOT NULL AUTO_INCREMENT',
+        'SELECT ''skip: ARBITRAGE_TRANS.ID already BIGINT or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ============================================================================
 -- 1. TRADER: Trader Registration
@@ -99,16 +117,106 @@ COMMENT='Trader connection history (7 days retention)';
 -- Purpose: Add trader assignment tracking to existing MONITORING table
 -- Note: Assumes MONITORING table already exists
 
-ALTER TABLE MONITORING 
-ADD COLUMN ASSIGNED_TRADER_ID INT DEFAULT NULL COMMENT 'TRADER.ID currently assigned',
-ADD COLUMN ASSIGNED_AT TIMESTAMP NULL DEFAULT NULL COMMENT 'When task was assigned',
-ADD COLUMN BACKUP_TRADER_ID INT DEFAULT NULL COMMENT 'Backup TRADER.ID (monitoring duplication)',
-ADD INDEX idx_assigned_trader (ASSIGNED_TRADER_ID),
-ADD INDEX idx_assignment (ASSIGNED_TRADER_ID, ASSIGNED_AT),
-ADD CONSTRAINT fk_monitoring_assigned_trader 
-    FOREIGN KEY (ASSIGNED_TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE,
-ADD CONSTRAINT fk_monitoring_backup_trader 
-    FOREIGN KEY (BACKUP_TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE;
+SELECT COUNT(*) INTO @tbl_monitoring_exists
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'MONITORING';
+
+SELECT COUNT(*) INTO @col_monitoring_assigned_trader_id_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'MONITORING' AND COLUMN_NAME = 'ASSIGNED_TRADER_ID';
+
+SET @sql = IF(
+    @tbl_monitoring_exists = 1 AND @col_monitoring_assigned_trader_id_exists = 0,
+    'ALTER TABLE MONITORING ADD COLUMN ASSIGNED_TRADER_ID INT DEFAULT NULL COMMENT ''TRADER.ID currently assigned''',
+    'SELECT ''skip: MONITORING.ASSIGNED_TRADER_ID already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @col_monitoring_assigned_at_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'MONITORING' AND COLUMN_NAME = 'ASSIGNED_AT';
+
+SET @sql = IF(
+    @tbl_monitoring_exists = 1 AND @col_monitoring_assigned_at_exists = 0,
+    'ALTER TABLE MONITORING ADD COLUMN ASSIGNED_AT TIMESTAMP NULL DEFAULT NULL COMMENT ''When task was assigned''',
+    'SELECT ''skip: MONITORING.ASSIGNED_AT already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @col_monitoring_backup_trader_id_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'MONITORING' AND COLUMN_NAME = 'BACKUP_TRADER_ID';
+
+SET @sql = IF(
+    @tbl_monitoring_exists = 1 AND @col_monitoring_backup_trader_id_exists = 0,
+    'ALTER TABLE MONITORING ADD COLUMN BACKUP_TRADER_ID INT DEFAULT NULL COMMENT ''Backup TRADER.ID (monitoring duplication)''',
+    'SELECT ''skip: MONITORING.BACKUP_TRADER_ID already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @idx_monitoring_assigned_trader_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'MONITORING' AND INDEX_NAME = 'idx_assigned_trader';
+
+SET @sql = IF(
+    @tbl_monitoring_exists = 1 AND @idx_monitoring_assigned_trader_exists = 0,
+    'ALTER TABLE MONITORING ADD INDEX idx_assigned_trader (ASSIGNED_TRADER_ID)',
+    'SELECT ''skip: MONITORING.idx_assigned_trader already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @idx_monitoring_assignment_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'MONITORING' AND INDEX_NAME = 'idx_assignment';
+
+SET @sql = IF(
+    @tbl_monitoring_exists = 1 AND @idx_monitoring_assignment_exists = 0,
+    'ALTER TABLE MONITORING ADD INDEX idx_assignment (ASSIGNED_TRADER_ID, ASSIGNED_AT)',
+    'SELECT ''skip: MONITORING.idx_assignment already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @fk_monitoring_assigned_trader_exists
+FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'MONITORING'
+  AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+  AND CONSTRAINT_NAME = 'fk_monitoring_assigned_trader';
+
+SET @sql = IF(
+    @tbl_monitoring_exists = 1 AND @fk_monitoring_assigned_trader_exists = 0,
+    'ALTER TABLE MONITORING ADD CONSTRAINT fk_monitoring_assigned_trader FOREIGN KEY (ASSIGNED_TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE',
+    'SELECT ''skip: MONITORING.fk_monitoring_assigned_trader already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @fk_monitoring_backup_trader_exists
+FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'MONITORING'
+  AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+  AND CONSTRAINT_NAME = 'fk_monitoring_backup_trader';
+
+SET @sql = IF(
+    @tbl_monitoring_exists = 1 AND @fk_monitoring_backup_trader_exists = 0,
+    'ALTER TABLE MONITORING ADD CONSTRAINT fk_monitoring_backup_trader FOREIGN KEY (BACKUP_TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE',
+    'SELECT ''skip: MONITORING.fk_monitoring_backup_trader already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ============================================================================
 -- 3.1. TRADE: ALTER to add trader assignment
@@ -116,13 +224,77 @@ ADD CONSTRAINT fk_monitoring_backup_trader
 -- Purpose: Track which trader is executing trade tasks
 -- Note: Simpler than MONITORING (no backup trader needed for trades)
 
-ALTER TABLE TRADE
-ADD COLUMN TRADER_ID INT DEFAULT NULL COMMENT 'TRADER.ID executing this trade task',
-ADD COLUMN ASSIGNED_AT TIMESTAMP NULL DEFAULT NULL COMMENT 'When trader was assigned',
-ADD INDEX idx_trader (TRADER_ID),
-ADD INDEX idx_assignment (TRADER_ID, ASSIGNED_AT),
-ADD CONSTRAINT fk_trade_trader 
-    FOREIGN KEY (TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE;
+SELECT COUNT(*) INTO @tbl_trade_exists
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRADE';
+
+SELECT COUNT(*) INTO @col_trade_trader_id_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRADE' AND COLUMN_NAME = 'TRADER_ID';
+
+SET @sql = IF(
+    @tbl_trade_exists = 1 AND @col_trade_trader_id_exists = 0,
+    'ALTER TABLE TRADE ADD COLUMN TRADER_ID INT DEFAULT NULL COMMENT ''TRADER.ID executing this trade task''',
+    'SELECT ''skip: TRADE.TRADER_ID already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @col_trade_assigned_at_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRADE' AND COLUMN_NAME = 'ASSIGNED_AT';
+
+SET @sql = IF(
+    @tbl_trade_exists = 1 AND @col_trade_assigned_at_exists = 0,
+    'ALTER TABLE TRADE ADD COLUMN ASSIGNED_AT TIMESTAMP NULL DEFAULT NULL COMMENT ''When trader was assigned''',
+    'SELECT ''skip: TRADE.ASSIGNED_AT already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @idx_trade_trader_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRADE' AND INDEX_NAME = 'idx_trader';
+
+SET @sql = IF(
+    @tbl_trade_exists = 1 AND @idx_trade_trader_exists = 0,
+    'ALTER TABLE TRADE ADD INDEX idx_trader (TRADER_ID)',
+    'SELECT ''skip: TRADE.idx_trader already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @idx_trade_assignment_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRADE' AND INDEX_NAME = 'idx_assignment';
+
+SET @sql = IF(
+    @tbl_trade_exists = 1 AND @idx_trade_assignment_exists = 0,
+    'ALTER TABLE TRADE ADD INDEX idx_assignment (TRADER_ID, ASSIGNED_AT)',
+    'SELECT ''skip: TRADE.idx_assignment already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @fk_trade_trader_exists
+FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+WHERE TABLE_SCHEMA = DATABASE()
+  AND TABLE_NAME = 'TRADE'
+  AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+  AND CONSTRAINT_NAME = 'fk_trade_trader';
+
+SET @sql = IF(
+    @tbl_trade_exists = 1 AND @fk_trade_trader_exists = 0,
+    'ALTER TABLE TRADE ADD CONSTRAINT fk_trade_trader FOREIGN KEY (TRADER_ID) REFERENCES TRADER(ID) ON DELETE SET NULL ON UPDATE CASCADE',
+    'SELECT ''skip: TRADE.fk_trade_trader already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ============================================================================
 -- 4. TRADER_EXCHANGE_RESOURCE: Trader Resource Usage (Metrics from Traders)
@@ -149,7 +321,7 @@ CREATE TABLE IF NOT EXISTS TRADER_EXCHANGE_RESOURCE (
     LAST_UPDATED TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     RESET_AT TIMESTAMP NOT NULL COMMENT 'When USED_VALUE resets (calculated by trader)',
     
-    UNIQUE KEY uk_resource (TRADER_ID, EXCHANGE_ID, EXCHANGE_ACCOUNT_ID, RESOURCE_TYPE),
+    KEY idx_resource_legacy (TRADER_ID, EXCHANGE_ID, EXCHANGE_ACCOUNT_ID, RESOURCE_TYPE),
     INDEX idx_trader (TRADER_ID),
     INDEX idx_exchange (EXCHANGE_ID),
     INDEX idx_account (EXCHANGE_ACCOUNT_ID),
@@ -163,6 +335,157 @@ CREATE TABLE IF NOT EXISTS TRADER_EXCHANGE_RESOURCE (
         REFERENCES EXCHANGE_ACCOUNTS(ID) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 COMMENT='Trader resource usage tracking (IP-level + account-level limits)';
+
+-- Data fix + idempotent safety for existing installations.
+-- Keep the earliest row for duplicate IP-level metrics and remove the rest.
+DELETE t1
+FROM TRADER_EXCHANGE_RESOURCE t1
+JOIN TRADER_EXCHANGE_RESOURCE t2
+    ON t1.TRADER_ID = t2.TRADER_ID
+ AND t1.EXCHANGE_ID = t2.EXCHANGE_ID
+ AND t1.RESOURCE_TYPE = t2.RESOURCE_TYPE
+ AND t1.EXCHANGE_ACCOUNT_ID IS NULL
+ AND t2.EXCHANGE_ACCOUNT_ID IS NULL
+ AND t1.ID > t2.ID;
+
+-- Cleanup old D-variant artifacts so migration can be safely re-run.
+SELECT COUNT(*) INTO @fk_trader_resource_account_exists
+FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE'
+    AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+    AND CONSTRAINT_NAME = 'fk_trader_resource_account';
+
+SET @sql = IF(
+        @fk_trader_resource_account_exists > 0,
+        'ALTER TABLE TRADER_EXCHANGE_RESOURCE DROP FOREIGN KEY fk_trader_resource_account',
+        'SELECT ''skip: TRADER_EXCHANGE_RESOURCE.fk_trader_resource_account not present'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @fk_trader_resource_exchange_account_exists
+FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE'
+    AND CONSTRAINT_TYPE = 'FOREIGN KEY'
+    AND CONSTRAINT_NAME = 'fk_trader_resource_exchange_account';
+
+SET @sql = IF(
+        @fk_trader_resource_exchange_account_exists > 0,
+        'ALTER TABLE TRADER_EXCHANGE_RESOURCE DROP FOREIGN KEY fk_trader_resource_exchange_account',
+        'SELECT ''skip: TRADER_EXCHANGE_RESOURCE.fk_trader_resource_exchange_account not present'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @uk_resource_strict_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE'
+    AND INDEX_NAME = 'uk_resource_strict';
+
+SET @sql = IF(
+        @uk_resource_strict_exists > 0,
+        'ALTER TABLE TRADER_EXCHANGE_RESOURCE DROP INDEX uk_resource_strict',
+        'SELECT ''skip: TRADER_EXCHANGE_RESOURCE.uk_resource_strict not present'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @col_trader_resource_nn_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE'
+    AND COLUMN_NAME = 'EXCHANGE_ACCOUNT_ID_NN';
+
+SET @sql = IF(
+        @col_trader_resource_nn_exists > 0,
+        'ALTER TABLE TRADER_EXCHANGE_RESOURCE DROP COLUMN EXCHANGE_ACCOUNT_ID_NN',
+        'SELECT ''skip: TRADER_EXCHANGE_RESOURCE.EXCHANGE_ACCOUNT_ID_NN not present'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @uk_resource_legacy_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE'
+    AND INDEX_NAME = 'uk_resource';
+
+SET @sql = IF(
+        @uk_resource_legacy_exists > 0,
+        'ALTER TABLE TRADER_EXCHANGE_RESOURCE DROP INDEX uk_resource',
+        'SELECT ''skip: TRADER_EXCHANGE_RESOURCE.uk_resource not present'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @idx_account_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE'
+    AND INDEX_NAME = 'idx_account';
+
+SET @sql = IF(
+        @idx_account_exists = 0,
+        'ALTER TABLE TRADER_EXCHANGE_RESOURCE ADD INDEX idx_account (EXCHANGE_ACCOUNT_ID)',
+        'SELECT ''skip: TRADER_EXCHANGE_RESOURCE.idx_account already exists'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @uk_resource_strict_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE'
+    AND INDEX_NAME = 'uk_resource_strict';
+
+SET @sql = IF(
+        @uk_resource_strict_exists = 0,
+        'CREATE UNIQUE INDEX uk_resource_strict ON TRADER_EXCHANGE_RESOURCE (TRADER_ID, EXCHANGE_ID, (IFNULL(EXCHANGE_ACCOUNT_ID, 0)), RESOURCE_TYPE)',
+        'SELECT ''skip: TRADER_EXCHANGE_RESOURCE.uk_resource_strict already exists'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @fk_trader_resource_account_exists
+FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE'
+    AND COLUMN_NAME = 'EXCHANGE_ACCOUNT_ID'
+    AND REFERENCED_TABLE_NAME = 'EXCHANGE_ACCOUNTS';
+
+SET @sql = IF(
+        @fk_trader_resource_account_exists = 0,
+        'ALTER TABLE TRADER_EXCHANGE_RESOURCE ADD CONSTRAINT fk_trader_resource_account FOREIGN KEY (EXCHANGE_ACCOUNT_ID) REFERENCES EXCHANGE_ACCOUNTS(ID) ON DELETE CASCADE ON UPDATE CASCADE',
+        'SELECT ''skip: TRADER_EXCHANGE_RESOURCE account FK already exists'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @idx_resource_legacy_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE'
+    AND INDEX_NAME = 'idx_resource_legacy';
+
+SET @sql = IF(
+        @idx_resource_legacy_exists = 0,
+        'ALTER TABLE TRADER_EXCHANGE_RESOURCE ADD KEY idx_resource_legacy (TRADER_ID, EXCHANGE_ID, EXCHANGE_ACCOUNT_ID, RESOURCE_TYPE)',
+        'SELECT ''skip: TRADER_EXCHANGE_RESOURCE.idx_resource_legacy already exists'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- ============================================================================
 -- 6. ARBITRAGE_ORDER: Middle Level (Orders per Exchange)
@@ -247,7 +570,7 @@ COMMENT='Individual fills/partials within ARBITRAGE_ORDER (bottom level)';
 -- Purpose: Track admin operations for compliance
 -- Primary storage: JSON file (logs/audit.log)
 -- Secondary storage: MySQL (for UI/queries in Phase 2)
--- Retention: 7 days in MySQL, 30 days in file
+-- Retention: 180 days in MySQL, 30 days in file
 
 CREATE TABLE IF NOT EXISTS AUDIT_LOG (
     ID BIGINT PRIMARY KEY AUTO_INCREMENT,
@@ -285,10 +608,48 @@ COMMENT='Audit trail (Phase 2, primary storage is JSON file)';
 -- Without version, can't re-encrypt after key rotation!
 -- Note: enc_alg NOT stored - HSM API doesn't use it (always AES-256-GCM, embedded in key_id)
 
-ALTER TABLE USER_2FA
-ADD COLUMN ENC_KEY_VERSION INT DEFAULT NULL COMMENT 'HSM KEK version from KEY_ID (e.g., kek-2fa-v1 → 1)',
-ADD COLUMN NEEDS_REENCRYPTION BOOLEAN DEFAULT FALSE COMMENT 'Flag for re-encryption job',
-ADD INDEX idx_reencryption (NEEDS_REENCRYPTION, ENC_KEY_VERSION) COMMENT 'For re-encryption job';
+SELECT COUNT(*) INTO @tbl_user_2fa_exists
+FROM INFORMATION_SCHEMA.TABLES
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'USER_2FA';
+
+SELECT COUNT(*) INTO @col_user_2fa_enc_key_version_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'USER_2FA' AND COLUMN_NAME = 'ENC_KEY_VERSION';
+
+SET @sql = IF(
+    @tbl_user_2fa_exists = 1 AND @col_user_2fa_enc_key_version_exists = 0,
+    'ALTER TABLE USER_2FA ADD COLUMN ENC_KEY_VERSION INT DEFAULT NULL COMMENT ''HSM KEK version from KEY_ID (e.g., kek-2fa-v1 → 1)''',
+    'SELECT ''skip: USER_2FA.ENC_KEY_VERSION already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @col_user_2fa_needs_reenc_exists
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'USER_2FA' AND COLUMN_NAME = 'NEEDS_REENCRYPTION';
+
+SET @sql = IF(
+    @tbl_user_2fa_exists = 1 AND @col_user_2fa_needs_reenc_exists = 0,
+    'ALTER TABLE USER_2FA ADD COLUMN NEEDS_REENCRYPTION BOOLEAN DEFAULT FALSE COMMENT ''Flag for re-encryption job''',
+    'SELECT ''skip: USER_2FA.NEEDS_REENCRYPTION already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SELECT COUNT(*) INTO @idx_user_2fa_reenc_exists
+FROM INFORMATION_SCHEMA.STATISTICS
+WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'USER_2FA' AND INDEX_NAME = 'idx_reencryption';
+
+SET @sql = IF(
+    @tbl_user_2fa_exists = 1 AND @idx_user_2fa_reenc_exists = 0,
+    'ALTER TABLE USER_2FA ADD INDEX idx_reencryption (NEEDS_REENCRYPTION, ENC_KEY_VERSION) COMMENT ''For re-encryption job''',
+    'SELECT ''skip: USER_2FA.idx_reencryption already exists or table missing'''
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- Set current version for existing records (if any)
 -- UPDATE USER_2FA SET ENC_KEY_VERSION = 1 WHERE ENC_KEY_VERSION IS NULL AND SECRET_ENC IS NOT NULL;
@@ -399,7 +760,13 @@ INSERT INTO SCHEDULER_TASKS (TASK_NAME, TASK_TYPE, SCHEDULE_CRON, ENABLED, CONFI
     ('cleanup_audit_logs', 'cleanup', '0 3 * * *', TRUE, '{"retention_days": 180}'),
     ('reset_daily_limits', 'maintenance', '0 0 * * *', TRUE, '{}'),
     ('check_reencryption_jobs', 'reencryption', NULL, TRUE, '{"check_interval_sec": 60}')
-ON DUPLICATE KEY UPDATE DATE_MODIFY = CURRENT_TIMESTAMP;
+ON DUPLICATE KEY UPDATE
+    TASK_TYPE = VALUES(TASK_TYPE),
+    SCHEDULE_CRON = VALUES(SCHEDULE_CRON),
+    SCHEDULE_INTERVAL_SEC = VALUES(SCHEDULE_INTERVAL_SEC),
+    ENABLED = VALUES(ENABLED),
+    CONFIG = VALUES(CONFIG),
+    DATE_MODIFY = CURRENT_TIMESTAMP;
 
 -- ============================================================================
 -- Sample Data (Optional - for testing)
@@ -418,8 +785,8 @@ ON DUPLICATE KEY UPDATE DATE_MODIFY = CURRENT_TIMESTAMP;
 -- Cleanup old trader sessions (older than 7 days)
 -- DELETE FROM TRADER_SESSION WHERE ENDED_AT IS NOT NULL AND ENDED_AT < DATE_SUB(NOW(), INTERVAL 7 DAY);
 
--- Cleanup old audit logs (older than 7 days)
--- DELETE FROM AUDIT_LOG WHERE TIMESTAMP < DATE_SUB(NOW(), INTERVAL 7 DAY);
+-- Cleanup old audit logs (older than 180 days)
+-- DELETE FROM AUDIT_LOG WHERE TIMESTAMP < DATE_SUB(NOW(), INTERVAL 180 DAY);
 
 -- Reset daily limits (run daily at midnight)
 -- UPDATE EXCHANGE_LIMITS 
