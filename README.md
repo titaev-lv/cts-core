@@ -15,9 +15,9 @@
   - REST health endpoints: `/health`, `/ready`, `/live`
   - WS handler (базовый stub)
 - Еще не завершено:
-  - `/metrics` endpoint и Prometheus wiring
   - Полный WebSocket протокол (`trader.register`, heartbeat, commands)
   - Session manager и scheduler в runtime-слое
+  - `/metrics` endpoint, Prometheus wiring и интеграционные тесты (отложено до рабочего WS runtime)
 
 ## Быстрый старт
 
@@ -54,13 +54,14 @@ mysql -h 127.0.0.1 -u root -proot -e "USE ct_system; SHOW TABLES;"
 
 ## Roadmap (операционный)
 
-1. Закрыть Phase 1.5 полностью:
-   - `/metrics`
-   - базовые runtime-метрики
-2. Перейти к Phase 2:
+1. Закрыть Phase 2 runtime основу:
    - WS protocol layer
    - session lifecycle
    - scheduler skeleton
+2. После Phase 2 закрыть Phase 1.5 finalization:
+  - `/metrics`
+  - базовые runtime-метрики
+  - integration tests
 3. Синхронизировать документацию с фактической реализацией.
 
 ## Связанные сервисы

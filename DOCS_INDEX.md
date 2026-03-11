@@ -26,16 +26,11 @@
 - `RATE_LIMITS_ARCHITECTURE.md`
 - `TEST_COVERAGE_MODELS.md`
 - `CROSS_PROJECT_WWW_GO.md`
-- `guides/phase_1_4_state_management.md`
-- `guides/phase_1_5_rest_server.md`
 
 ## Документы с риском устаревания
 
 - `DEVELOPMENT_PLAN.md`:
     - содержит старые чек-листы "in progress" для уже сделанных частей.
-- `guides/phase_1_5_rest_server.md`:
-    - включает шаблонные шаги, не полностью совпадающие с текущим кодом.
-
 Примечание: `CONTEXT.md` удален как устаревший дубликат. Его роль закрыта `README.md` + `DOCS_INDEX.md` + профильными документами.
 
 ## Что считать источником истины

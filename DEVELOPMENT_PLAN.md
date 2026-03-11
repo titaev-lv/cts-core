@@ -2,7 +2,7 @@
 
 > Версия: 2.0.0
 > Обновлено: 2026-03-10
-> Статус: Phase 1.4 Complete | Phase 1.5 Partial | Next: Phase 2
+> Статус: Phase 1.4 Complete | Phase 2 Priority | Phase 1.5 Finalization Deferred
 > Связанные документы: `ARCHITECTURE.md`, `API_SPECIFICATION.md`, `DOCS_INDEX.md`, `CROSS_PROJECT_WWW_GO.md`
 
 ## 1. Цель
@@ -20,8 +20,8 @@
   - Phase 1.3: HSM client (Trading + 2FA)
   - Phase 1.4: state manager (`state/daemon.state`, backup, background sync)
 - Частично завершено:
-  - Phase 1.5: REST/WS foundation (`/health`, `/ready`, `/live`, middleware, WS stub)
-- Осталось по Phase 1.5:
+  - Phase 1.5 foundation: REST/WS base (`/health`, `/ready`, `/live`, middleware, WS stub)
+- Отложено до Phase 2 WS runtime:
   - `/metrics` endpoint
   - Prometheus wiring
   - REST/WS integration tests
@@ -38,16 +38,7 @@
 
 ## 3. План по фазам
 
-### Phase 1.5 (закрыть)
-
-- Реализовать `/metrics`.
-- Добавить базовые runtime/db/hsm/ws метрики.
-- Добавить интеграционные тесты для REST/WS health-path.
-
-Критерий завершения:
-- `/health`, `/ready`, `/live`, `/metrics` доступны и покрыты тестами.
-
-### Phase 2 (Core Features)
+### Phase 2 (Core Features, current priority)
 
 - WebSocket protocol layer:
   - `trader.register`
@@ -63,6 +54,22 @@
 Критерий завершения:
 - трейдер может пройти полный базовый цикл connect -> register -> heartbeat -> disconnect.
 
+### Phase 1.5 Finalization (after Phase 2 WS protocol)
+
+- Реализовать `/metrics`.
+- Добавить базовые runtime/db/hsm/ws метрики.
+- Добавить интеграционные тесты для REST/WS health-path.
+
+Code touchpoints:
+
+- `cmd/cts-core/main.go`
+- `internal/api/`
+- `internal/middleware/`
+- `internal/ws/`
+
+Критерий завершения:
+- `/health`, `/ready`, `/live`, `/metrics` доступны и покрыты тестами.
+
 ### Phase 3 (Business Logic)
 
 - Load balancing/scoring.
@@ -77,10 +84,10 @@
 
 ## 4. Приоритетный backlog (ближайшие задачи)
 
-1. Добавить `/metrics` + exporter.
-2. Поднять WS protocol state machine (минимальный контракт из `API_SPECIFICATION.md`).
-3. Реализовать runtime session lifecycle.
-4. Довести интеграцию `web-ui-go` по `TRADER`/`TRADER_SESSION`/`AUDIT_LOG`.
+1. Поднять WS protocol state machine (минимальный контракт из `API_SPECIFICATION.md`).
+2. Реализовать runtime session lifecycle.
+3. Добавить scheduler runtime skeleton.
+4. После WS runtime: добавить `/metrics` + exporter и integration tests.
 
 ## 5. Риски
 
