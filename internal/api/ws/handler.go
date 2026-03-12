@@ -67,7 +67,7 @@ func (h *Handler) Serve(c *gin.Context) {
 
 	sessionID := generateConnID()
 	registeredTraderID := ""
-	sessionState := "connected"
+	sessionState := sessionStateConnected
 	lastHeartbeatMs := int64(0)
 
 	msgID := int64(0)
@@ -79,7 +79,9 @@ func (h *Handler) Serve(c *gin.Context) {
 	for {
 		msgType, rawPayload, err := conn.ReadMessage()
 		if err != nil {
-			h.accessLog.Warn("ws_disconnect", "conn_id", connID, "request_id", requestID, "trader_id", registeredTraderID, "error", err)
+			reason := classifyDisconnectReason(err)
+			sessionState = sessionStateDisconnected
+			h.accessLog.Warn("ws_disconnect", "conn_id", connID, "request_id", requestID, "trader_id", registeredTraderID, "session_state", sessionState, "disconnect_reason", reason, "last_heartbeat_ms", lastHeartbeatMs, "error", err)
 			return
 		}
 
@@ -135,7 +137,7 @@ func (h *Handler) Serve(c *gin.Context) {
 			}
 
 			registeredTraderID = req.TraderID
-			sessionState = "registered"
+			sessionState = sessionStateRegistered
 			h.sendEnvelope(conn, connID, msgID, newRegisterAckEnvelope(msgRequestID, registerAck{
 				Status:            "ok",
 				TraderID:          req.TraderID,
@@ -172,7 +174,7 @@ func (h *Handler) Serve(c *gin.Context) {
 			}
 
 			lastHeartbeatMs = time.Now().UnixMilli()
-			sessionState = "active"
+			sessionState = sessionStateActive
 			h.accessLog.Info("ws_heartbeat", "conn_id", connID, "request_id", msgRequestID, "trader_id", req.TraderID, "session_id", sessionID, "status", req.Status, "last_heartbeat_ms", lastHeartbeatMs, "session_state", sessionState)
 
 			if msg.Type == msgTypeRequest {
