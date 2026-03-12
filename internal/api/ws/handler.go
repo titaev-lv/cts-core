@@ -17,12 +17,13 @@ import (
 )
 
 type Handler struct {
-	upgrader  websocket.Upgrader
-	accessLog *slog.Logger
-	outLog    *slog.Logger
-	active    atomic.Int64
-	total     atomic.Int64
-	lastSeen  atomic.Int64
+	upgrader         websocket.Upgrader
+	accessLog        *slog.Logger
+	outLog           *slog.Logger
+	heartbeatTimeout time.Duration
+	active           atomic.Int64
+	total            atomic.Int64
+	lastSeen         atomic.Int64
 }
 
 type Stats struct {
@@ -39,8 +40,9 @@ func NewHandler() *Handler {
 			WriteBufferSize: 1024,
 			CheckOrigin:     func(_ *http.Request) bool { return true },
 		},
-		accessLog: logger.GetWSAccess("ws"),
-		outLog:    logger.GetWSOut("ws"),
+		accessLog:        logger.GetWSAccess("ws"),
+		outLog:           logger.GetWSOut("ws"),
+		heartbeatTimeout: 15 * time.Second,
 	}
 }
 
@@ -66,9 +68,7 @@ func (h *Handler) Serve(c *gin.Context) {
 	defer h.active.Add(-1)
 
 	sessionID := generateConnID()
-	registeredTraderID := ""
-	sessionState := sessionStateConnected
-	lastHeartbeatMs := int64(0)
+	session := newSessionRuntime(sessionID)
 
 	msgID := int64(0)
 	if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"connected\"}")); err == nil {
@@ -79,9 +79,15 @@ func (h *Handler) Serve(c *gin.Context) {
 	for {
 		msgType, rawPayload, err := conn.ReadMessage()
 		if err != nil {
+			nowMs := time.Now().UnixMilli()
 			reason := classifyDisconnectReason(err)
-			sessionState = sessionStateDisconnected
-			h.accessLog.Warn("ws_disconnect", "conn_id", connID, "request_id", requestID, "trader_id", registeredTraderID, "session_state", sessionState, "disconnect_reason", reason, "last_heartbeat_ms", lastHeartbeatMs, "error", err)
+			if reason == disconnectReasonTimeout && session.markTimedOut(nowMs) {
+				h.accessLog.Warn("ws_timeout", "conn_id", connID, "request_id", requestID, "trader_id", session.traderID, "session_id", session.sessionID, "session_state", session.state, "timed_out_at_ms", session.timedOutAtMs, "last_heartbeat_ms", session.lastHeartbeatMs)
+			}
+
+			stateBeforeDisconnect := session.state
+			session.markDisconnected()
+			h.accessLog.Warn("ws_disconnect", "conn_id", connID, "request_id", requestID, "trader_id", session.traderID, "session_id", session.sessionID, "previous_session_state", stateBeforeDisconnect, "session_state", session.state, "disconnect_reason", reason, "last_heartbeat_ms", session.lastHeartbeatMs, "error", err)
 			return
 		}
 
@@ -115,8 +121,8 @@ func (h *Handler) Serve(c *gin.Context) {
 				continue
 			}
 
-			if registeredTraderID != "" {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errDuplicateConnection, "Trader already registered for this connection", map[string]interface{}{"trader_id": registeredTraderID}))
+			if session.traderID != "" {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errDuplicateConnection, "Trader already registered for this connection", map[string]interface{}{"trader_id": session.traderID}))
 				continue
 			}
 
@@ -136,18 +142,21 @@ func (h *Handler) Serve(c *gin.Context) {
 				continue
 			}
 
-			registeredTraderID = req.TraderID
-			sessionState = sessionStateRegistered
+			nowMs := time.Now().UnixMilli()
+			session.markRegistered(req.TraderID, nowMs)
+			if h.heartbeatTimeout > 0 {
+				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
+			}
 			h.sendEnvelope(conn, connID, msgID, newRegisterAckEnvelope(msgRequestID, registerAck{
 				Status:            "ok",
 				TraderID:          req.TraderID,
-				SessionID:         sessionID,
+				SessionID:         session.sessionID,
 				SessionTimeoutSec: 30,
-				ServerTime:        time.Now().UnixMilli(),
+				ServerTime:        nowMs,
 			}))
 			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", req.TraderID, "version", req.Version, "region", req.Region)
 		case actionTraderHeartbeat:
-			if registeredTraderID == "" {
+			if session.traderID == "" {
 				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "trader.register is required before heartbeat", nil))
 				continue
 			}
@@ -163,26 +172,29 @@ func (h *Handler) Serve(c *gin.Context) {
 				continue
 			}
 
-			if req.TraderID != registeredTraderID {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id does not match registered trader", map[string]interface{}{"registered_trader_id": registeredTraderID, "received_trader_id": req.TraderID}))
+			if req.TraderID != session.traderID {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id does not match registered trader", map[string]interface{}{"registered_trader_id": session.traderID, "received_trader_id": req.TraderID}))
 				continue
 			}
 
-			if req.SessionID != "" && req.SessionID != sessionID {
+			if req.SessionID != "" && req.SessionID != session.sessionID {
 				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "session_id does not match active session", map[string]interface{}{"session_id": req.SessionID}))
 				continue
 			}
 
-			lastHeartbeatMs = time.Now().UnixMilli()
-			sessionState = sessionStateActive
-			h.accessLog.Info("ws_heartbeat", "conn_id", connID, "request_id", msgRequestID, "trader_id", req.TraderID, "session_id", sessionID, "status", req.Status, "last_heartbeat_ms", lastHeartbeatMs, "session_state", sessionState)
+			nowMs := time.Now().UnixMilli()
+			session.markHeartbeat(nowMs)
+			if h.heartbeatTimeout > 0 {
+				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
+			}
+			h.accessLog.Info("ws_heartbeat", "conn_id", connID, "request_id", msgRequestID, "trader_id", req.TraderID, "session_id", session.sessionID, "status", req.Status, "last_heartbeat_ms", session.lastHeartbeatMs, "session_state", session.state)
 
 			if msg.Type == msgTypeRequest {
 				h.sendEnvelope(conn, connID, msgID, newHeartbeatAckEnvelope(msgRequestID, heartbeatAck{
 					Status:     "ok",
 					TraderID:   req.TraderID,
-					SessionID:  sessionID,
-					ServerTime: lastHeartbeatMs,
+					SessionID:  session.sessionID,
+					ServerTime: session.lastHeartbeatMs,
 				}))
 			}
 		default:

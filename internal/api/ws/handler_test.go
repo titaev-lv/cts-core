@@ -222,12 +222,47 @@ func TestHeartbeatEventAfterRegisterHasNoResponse(t *testing.T) {
 	}
 }
 
+func TestHeartbeatTimeoutClosesConnection(t *testing.T) {
+	h := NewHandler()
+	h.heartbeatTimeout = 60 * time.Millisecond
+
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+	registerTrader(t, conn, "trader-timeout-1", "reg-timeout")
+
+	// Keep socket idle past heartbeat timeout; server should close the connection.
+	time.Sleep(140 * time.Millisecond)
+
+	if _, _, err := readMessageWithTimeout(conn, 200*time.Millisecond); err == nil {
+		t.Fatalf("expected read error after heartbeat timeout disconnect")
+	}
+}
+
 func dialTestWS(t *testing.T) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	r := gin.New()
-	h := NewHandler()
+	r.GET("/ws", NewHandler().Serve)
+
+	ts := httptest.NewServer(r)
+	t.Cleanup(ts.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial ws: %v", err)
+	}
+	return conn
+}
+
+func dialTestWSWithHandler(t *testing.T, h *Handler) *websocket.Conn {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
 	r.GET("/ws", h.Serve)
 
 	ts := httptest.NewServer(r)
