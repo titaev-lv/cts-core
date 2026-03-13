@@ -166,6 +166,21 @@ func (m *Manager) SetRuntimeWS(active int64, lastConnectUnix int64) {
 	m.state.UpdatedAt = time.Now().UTC()
 }
 
+func (m *Manager) SetRuntimeWSHeartbeat(lastHeartbeatUnix int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Runtime.LastWSHeartbeatUnix = lastHeartbeatUnix
+	m.state.UpdatedAt = time.Now().UTC()
+}
+
+func (m *Manager) IncrementRuntimeWSTimeout(lastTimeoutUnix int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Runtime.LastWSTimeoutUnix = lastTimeoutUnix
+	m.state.Runtime.WSTimeoutCount++
+	m.state.UpdatedAt = time.Now().UTC()
+}
+
 func (m *Manager) GetState() DaemonState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

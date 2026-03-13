@@ -289,6 +289,46 @@ func TestRuntimeStateSyncAndConfiguredSessionTimeoutSec(t *testing.T) {
 	})
 }
 
+func TestRuntimeLifecycleTelemetrySync(t *testing.T) {
+	sink := &testRuntimeStateSink{}
+	h := NewHandlerWithOptions(HandlerOptions{
+		HeartbeatTimeout: 80 * time.Millisecond,
+		StateManager:     sink,
+	})
+
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+	registerTrader(t, conn, "trader-life-1", "reg-life-1")
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "hb-life-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-life-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+	_ = readEnvelope(t, conn)
+
+	waitForCondition(t, 300*time.Millisecond, func() bool {
+		_, _, lastHB, _, _ := sink.lifecycleSnapshot()
+		return lastHB > 0
+	})
+
+	// Let read deadline expire to trigger timeout path.
+	time.Sleep(160 * time.Millisecond)
+	_, _, _ = readMessageWithTimeout(conn, 200*time.Millisecond)
+
+	waitForCondition(t, 300*time.Millisecond, func() bool {
+		_, _, _, lastTimeout, timeoutCount := sink.lifecycleSnapshot()
+		return lastTimeout > 0 && timeoutCount > 0
+	})
+}
+
 func dialTestWS(t *testing.T) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -409,9 +449,12 @@ func readMessageWithTimeout(conn *websocket.Conn, timeout time.Duration) (int, [
 }
 
 type testRuntimeStateSink struct {
-	mu              sync.Mutex
-	active          int64
-	lastConnectUnix int64
+	mu                sync.Mutex
+	active            int64
+	lastConnectUnix   int64
+	lastHeartbeatUnix int64
+	lastTimeoutUnix   int64
+	timeoutCount      int64
 }
 
 func (s *testRuntimeStateSink) SetRuntimeWS(active int64, lastConnectUnix int64) {
@@ -421,10 +464,29 @@ func (s *testRuntimeStateSink) SetRuntimeWS(active int64, lastConnectUnix int64)
 	s.lastConnectUnix = lastConnectUnix
 }
 
+func (s *testRuntimeStateSink) SetRuntimeWSHeartbeat(lastHeartbeatUnix int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastHeartbeatUnix = lastHeartbeatUnix
+}
+
+func (s *testRuntimeStateSink) IncrementRuntimeWSTimeout(lastTimeoutUnix int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.lastTimeoutUnix = lastTimeoutUnix
+	s.timeoutCount++
+}
+
 func (s *testRuntimeStateSink) snapshot() (int64, int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.active, s.lastConnectUnix
+}
+
+func (s *testRuntimeStateSink) lifecycleSnapshot() (int64, int64, int64, int64, int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.active, s.lastConnectUnix, s.lastHeartbeatUnix, s.lastTimeoutUnix, s.timeoutCount
 }
 
 func waitForCondition(t *testing.T, timeout time.Duration, fn func() bool) {

@@ -17,6 +17,9 @@ type ServerState struct {
 type RuntimeState struct {
 	ActiveWSConnections int64 `json:"active_ws_connections"`
 	LastWSConnectUnix   int64 `json:"last_ws_connect_unix"`
+	LastWSHeartbeatUnix int64 `json:"last_ws_heartbeat_unix"`
+	LastWSTimeoutUnix   int64 `json:"last_ws_timeout_unix"`
+	WSTimeoutCount      int64 `json:"ws_timeout_count"`
 }
 
 func NewDaemonState() *DaemonState {

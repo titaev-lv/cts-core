@@ -107,4 +107,30 @@ func TestUpdatedAtChangesOnMutations(t *testing.T) {
 	if !afterWS.After(afterStatus) {
 		t.Fatalf("expected UpdatedAt to move forward after SetRuntimeWS")
 	}
+
+	time.Sleep(10 * time.Millisecond)
+	heartbeatUnix := time.Now().Unix()
+	mgr.SetRuntimeWSHeartbeat(heartbeatUnix)
+	afterHB := mgr.GetState().UpdatedAt
+	if !afterHB.After(afterWS) {
+		t.Fatalf("expected UpdatedAt to move forward after SetRuntimeWSHeartbeat")
+	}
+	if got := mgr.GetState().Runtime.LastWSHeartbeatUnix; got != heartbeatUnix {
+		t.Fatalf("expected LastWSHeartbeatUnix=%d, got %d", heartbeatUnix, got)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	timeoutUnix := time.Now().Unix()
+	mgr.IncrementRuntimeWSTimeout(timeoutUnix)
+	afterTimeout := mgr.GetState().UpdatedAt
+	if !afterTimeout.After(afterHB) {
+		t.Fatalf("expected UpdatedAt to move forward after IncrementRuntimeWSTimeout")
+	}
+	state := mgr.GetState()
+	if state.Runtime.LastWSTimeoutUnix != timeoutUnix {
+		t.Fatalf("expected LastWSTimeoutUnix=%d, got %d", timeoutUnix, state.Runtime.LastWSTimeoutUnix)
+	}
+	if state.Runtime.WSTimeoutCount != 1 {
+		t.Fatalf("expected WSTimeoutCount=1, got %d", state.Runtime.WSTimeoutCount)
+	}
 }

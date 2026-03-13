@@ -32,6 +32,14 @@ type runtimeStateSink interface {
 	SetRuntimeWS(active int64, lastConnectUnix int64)
 }
 
+type runtimeHeartbeatSink interface {
+	SetRuntimeWSHeartbeat(lastHeartbeatUnix int64)
+}
+
+type runtimeTimeoutSink interface {
+	IncrementRuntimeWSTimeout(lastTimeoutUnix int64)
+}
+
 type HandlerOptions struct {
 	HeartbeatInterval time.Duration
 	HeartbeatTimeout  time.Duration
@@ -115,6 +123,7 @@ func (h *Handler) Serve(c *gin.Context) {
 			nowMs := time.Now().UnixMilli()
 			reason := classifyDisconnectReason(err)
 			if reason == disconnectReasonTimeout && session.markTimedOut(nowMs) {
+				h.syncRuntimeTimeout(nowMs / 1000)
 				h.accessLog.Warn("ws_timeout", "conn_id", connID, "request_id", requestID, "trader_id", session.traderID, "session_id", session.sessionID, "session_state", session.state, "timed_out_at_ms", session.timedOutAtMs, "last_heartbeat_ms", session.lastHeartbeatMs)
 			}
 
@@ -218,6 +227,7 @@ func (h *Handler) Serve(c *gin.Context) {
 
 			nowMs := time.Now().UnixMilli()
 			session.markHeartbeat(nowMs)
+			h.syncRuntimeHeartbeat(nowMs / 1000)
 			if h.heartbeatTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
 			}
@@ -265,6 +275,28 @@ func (h *Handler) syncRuntimeState() {
 		return
 	}
 	h.stateManager.SetRuntimeWS(h.active.Load(), h.lastSeen.Load())
+}
+
+func (h *Handler) syncRuntimeHeartbeat(lastHeartbeatUnix int64) {
+	if h.stateManager == nil {
+		return
+	}
+	sink, ok := h.stateManager.(runtimeHeartbeatSink)
+	if !ok {
+		return
+	}
+	sink.SetRuntimeWSHeartbeat(lastHeartbeatUnix)
+}
+
+func (h *Handler) syncRuntimeTimeout(lastTimeoutUnix int64) {
+	if h.stateManager == nil {
+		return
+	}
+	sink, ok := h.stateManager.(runtimeTimeoutSink)
+	if !ok {
+		return
+	}
+	sink.IncrementRuntimeWSTimeout(lastTimeoutUnix)
 }
 
 func generateConnID() string {
