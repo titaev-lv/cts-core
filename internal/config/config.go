@@ -141,6 +141,35 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid rate_limit.websocket.burst: %d", c.RateLimit.WebSocket.Burst)
 	}
 
+	if c.Session.HeartbeatInterval == 0 {
+		c.Session.HeartbeatInterval = 5 * time.Second
+	}
+	if c.Session.HeartbeatTimeout == 0 {
+		c.Session.HeartbeatTimeout = 15 * time.Second
+	}
+	if c.Session.GracePeriod == 0 {
+		c.Session.GracePeriod = 60 * time.Second
+	}
+	if c.Session.CleanupInterval == 0 {
+		c.Session.CleanupInterval = 5 * time.Minute
+	}
+
+	if c.Session.HeartbeatInterval <= 0 || c.Session.HeartbeatInterval > 24*time.Hour {
+		return fmt.Errorf("invalid session.heartbeat_interval: %s", c.Session.HeartbeatInterval)
+	}
+	if c.Session.HeartbeatTimeout <= 0 || c.Session.HeartbeatTimeout > 24*time.Hour {
+		return fmt.Errorf("invalid session.heartbeat_timeout: %s", c.Session.HeartbeatTimeout)
+	}
+	if c.Session.HeartbeatTimeout < c.Session.HeartbeatInterval {
+		return fmt.Errorf("invalid session settings: heartbeat_timeout (%s) must be >= heartbeat_interval (%s)", c.Session.HeartbeatTimeout, c.Session.HeartbeatInterval)
+	}
+	if c.Session.GracePeriod <= 0 || c.Session.GracePeriod > 24*time.Hour {
+		return fmt.Errorf("invalid session.grace_period: %s", c.Session.GracePeriod)
+	}
+	if c.Session.CleanupInterval <= 0 || c.Session.CleanupInterval > 24*time.Hour {
+		return fmt.Errorf("invalid session.cleanup_interval: %s", c.Session.CleanupInterval)
+	}
+
 	// Validate state file path
 	if c.State.FilePath == "" {
 		return fmt.Errorf("state file path cannot be empty")

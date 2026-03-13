@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -240,6 +241,54 @@ func TestHeartbeatTimeoutClosesConnection(t *testing.T) {
 	}
 }
 
+func TestRuntimeStateSyncAndConfiguredSessionTimeoutSec(t *testing.T) {
+	sink := &testRuntimeStateSink{}
+	h := NewHandlerWithOptions(HandlerOptions{
+		HeartbeatTimeout: 3 * time.Second,
+		StateManager:     sink,
+	})
+
+	conn := dialTestWSWithHandler(t, h)
+	consumeConnected(t, conn)
+
+	// Wait until connect side updates runtime counters.
+	waitForCondition(t, 200*time.Millisecond, func() bool {
+		active, _ := sink.snapshot()
+		return active == 1
+	})
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "cfg-timeout-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-cfg-1",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	if resp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, resp.Action)
+	}
+	var ack registerAck
+	if err := json.Unmarshal(resp.Payload, &ack); err != nil {
+		t.Fatalf("unmarshal ack: %v", err)
+	}
+	if ack.SessionTimeoutSec != 3 {
+		t.Fatalf("expected session_timeout_sec=3, got %d", ack.SessionTimeoutSec)
+	}
+
+	_ = conn.Close()
+
+	waitForCondition(t, 200*time.Millisecond, func() bool {
+		active, _ := sink.snapshot()
+		return active == 0
+	})
+}
+
 func dialTestWS(t *testing.T) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -357,4 +406,35 @@ func readMessageWithTimeout(conn *websocket.Conn, timeout time.Duration) (int, [
 	msgType, b, err := conn.ReadMessage()
 	_ = conn.SetReadDeadline(time.Time{})
 	return msgType, b, err
+}
+
+type testRuntimeStateSink struct {
+	mu              sync.Mutex
+	active          int64
+	lastConnectUnix int64
+}
+
+func (s *testRuntimeStateSink) SetRuntimeWS(active int64, lastConnectUnix int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.active = active
+	s.lastConnectUnix = lastConnectUnix
+}
+
+func (s *testRuntimeStateSink) snapshot() (int64, int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.active, s.lastConnectUnix
+}
+
+func waitForCondition(t *testing.T, timeout time.Duration, fn func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if fn() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("condition was not met in %s", timeout)
 }

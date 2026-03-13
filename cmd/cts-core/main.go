@@ -229,6 +229,8 @@ func main() {
 		RESTBurst:             cfg.RateLimit.REST.Burst,
 		WSRequestsPerSecond:   cfg.RateLimit.WebSocket.PerSecond(),
 		WSBurst:               cfg.RateLimit.WebSocket.Burst,
+		WSHeartbeatInterval:   cfg.Session.HeartbeatInterval,
+		WSHeartbeatTimeout:    cfg.Session.HeartbeatTimeout,
 		HSMTrading:            hsmTradingClient,
 		HSMTwoFA:              hsm2FAClient,
 		StateManager:          stateManager,

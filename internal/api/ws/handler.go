@@ -17,13 +17,25 @@ import (
 )
 
 type Handler struct {
-	upgrader         websocket.Upgrader
-	accessLog        *slog.Logger
-	outLog           *slog.Logger
-	heartbeatTimeout time.Duration
-	active           atomic.Int64
-	total            atomic.Int64
-	lastSeen         atomic.Int64
+	upgrader          websocket.Upgrader
+	accessLog         *slog.Logger
+	outLog            *slog.Logger
+	heartbeatInterval time.Duration
+	heartbeatTimeout  time.Duration
+	stateManager      runtimeStateSink
+	active            atomic.Int64
+	total             atomic.Int64
+	lastSeen          atomic.Int64
+}
+
+type runtimeStateSink interface {
+	SetRuntimeWS(active int64, lastConnectUnix int64)
+}
+
+type HandlerOptions struct {
+	HeartbeatInterval time.Duration
+	HeartbeatTimeout  time.Duration
+	StateManager      runtimeStateSink
 }
 
 type Stats struct {
@@ -34,15 +46,32 @@ type Stats struct {
 
 // NewHandler creates a WebSocket handler with logging.
 func NewHandler() *Handler {
+	return NewHandlerWithOptions(HandlerOptions{})
+}
+
+// NewHandlerWithOptions creates a WebSocket handler with explicit runtime options.
+func NewHandlerWithOptions(opts HandlerOptions) *Handler {
+	heartbeatInterval := opts.HeartbeatInterval
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = 5 * time.Second
+	}
+
+	heartbeatTimeout := opts.HeartbeatTimeout
+	if heartbeatTimeout <= 0 {
+		heartbeatTimeout = 15 * time.Second
+	}
+
 	return &Handler{
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
 			CheckOrigin:     func(_ *http.Request) bool { return true },
 		},
-		accessLog:        logger.GetWSAccess("ws"),
-		outLog:           logger.GetWSOut("ws"),
-		heartbeatTimeout: 15 * time.Second,
+		accessLog:         logger.GetWSAccess("ws"),
+		outLog:            logger.GetWSOut("ws"),
+		heartbeatInterval: heartbeatInterval,
+		heartbeatTimeout:  heartbeatTimeout,
+		stateManager:      opts.StateManager,
 	}
 }
 
@@ -65,7 +94,11 @@ func (h *Handler) Serve(c *gin.Context) {
 	h.active.Add(1)
 	h.total.Add(1)
 	h.lastSeen.Store(time.Now().Unix())
-	defer h.active.Add(-1)
+	h.syncRuntimeState()
+	defer func() {
+		h.active.Add(-1)
+		h.syncRuntimeState()
+	}()
 
 	sessionID := generateConnID()
 	session := newSessionRuntime(sessionID)
@@ -147,11 +180,12 @@ func (h *Handler) Serve(c *gin.Context) {
 			if h.heartbeatTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
 			}
+			timeoutSec := durationSecondsCeil(h.heartbeatTimeout)
 			h.sendEnvelope(conn, connID, msgID, newRegisterAckEnvelope(msgRequestID, registerAck{
 				Status:            "ok",
 				TraderID:          req.TraderID,
 				SessionID:         session.sessionID,
-				SessionTimeoutSec: 30,
+				SessionTimeoutSec: timeoutSec,
 				ServerTime:        nowMs,
 			}))
 			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", req.TraderID, "version", req.Version, "region", req.Region)
@@ -226,6 +260,13 @@ func (h *Handler) GetStats() Stats {
 	}
 }
 
+func (h *Handler) syncRuntimeState() {
+	if h.stateManager == nil {
+		return
+	}
+	h.stateManager.SetRuntimeWS(h.active.Load(), h.lastSeen.Load())
+}
+
 func generateConnID() string {
 	buf := make([]byte, 12)
 	if _, err := rand.Read(buf); err != nil {
@@ -239,4 +280,15 @@ func resolveRequestID(requestID string, msgID int64) string {
 		return requestID
 	}
 	return fmt.Sprintf("srv-%d", msgID)
+}
+
+func durationSecondsCeil(d time.Duration) int {
+	if d <= 0 {
+		return 1
+	}
+	secs := int((d + time.Second - 1) / time.Second)
+	if secs < 1 {
+		return 1
+	}
+	return secs
 }

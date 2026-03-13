@@ -17,6 +17,8 @@ type Options struct {
 	RESTBurst             int
 	WSRequestsPerSecond   int
 	WSBurst               int
+	WSHeartbeatInterval   time.Duration
+	WSHeartbeatTimeout    time.Duration
 	HSMTrading            *hsm.Client
 	HSMTwoFA              *hsm.Client
 	StateManager          *state.Manager
@@ -37,7 +39,11 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) *gin.Engine {
 		middleware.AuditLog(),
 	)
 
-	wsHandler := ws.NewHandler()
+	wsHandler := ws.NewHandlerWithOptions(ws.HandlerOptions{
+		HeartbeatInterval: opts.WSHeartbeatInterval,
+		HeartbeatTimeout:  opts.WSHeartbeatTimeout,
+		StateManager:      opts.StateManager,
+	})
 	healthHandler := NewHealthHandler(dbClient, HealthHandlerOptions{
 		HSMTrading:     opts.HSMTrading,
 		HSMTwoFA:       opts.HSMTwoFA,
