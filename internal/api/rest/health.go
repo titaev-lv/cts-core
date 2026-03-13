@@ -15,7 +15,7 @@ import (
 
 // HealthHandler handles health check requests
 type HealthHandler struct {
-	dbClient       *db.MySQLClient
+	dbClient       dbPinger
 	hsmTrading     *hsm.Client
 	hsmTwoFA       *hsm.Client
 	stateManager   *state.Manager
@@ -23,6 +23,10 @@ type HealthHandler struct {
 	startedAt      time.Time
 	serviceName    string
 	serviceVersion string
+}
+
+type dbPinger interface {
+	Ping() error
 }
 
 type HealthHandlerOptions struct {
@@ -77,8 +81,10 @@ func (h *HealthHandler) Health(c *gin.Context) {
 	}
 
 	stateSnapshot := gin.H{}
+	runtimeSnapshot := state.RuntimeState{}
 	if h.stateManager != nil {
 		snapshot := h.stateManager.GetState()
+		runtimeSnapshot = snapshot.Runtime
 		stateSnapshot = gin.H{
 			"version":         snapshot.Version,
 			"updated_at":      snapshot.UpdatedAt,
@@ -115,16 +121,22 @@ func (h *HealthHandler) Health(c *gin.Context) {
 			"hsm_trading": hsmTradingComponent,
 			"hsm_2fa":     hsmTwoFAComponent,
 			"websocket": gin.H{
-				"status":             "ok",
-				"active_connections": wsStats.ActiveConnections,
-				"total_connections":  wsStats.TotalConnections,
-				"last_connect_unix":  wsStats.LastConnectUnix,
+				"status":              "ok",
+				"active_connections":  wsStats.ActiveConnections,
+				"total_connections":   wsStats.TotalConnections,
+				"last_connect_unix":   wsStats.LastConnectUnix,
+				"last_heartbeat_unix": runtimeSnapshot.LastWSHeartbeatUnix,
+				"last_timeout_unix":   runtimeSnapshot.LastWSTimeoutUnix,
+				"timeout_count":       runtimeSnapshot.WSTimeoutCount,
 			},
 			"traders": gin.H{
 				"status":                  traderStatus,
 				"source":                  "ws_ping_pong",
 				"aggregation_implemented": false,
 				"connected_count":         wsStats.ActiveConnections,
+				"last_heartbeat_unix":     runtimeSnapshot.LastWSHeartbeatUnix,
+				"last_timeout_unix":       runtimeSnapshot.LastWSTimeoutUnix,
+				"timeout_count":           runtimeSnapshot.WSTimeoutCount,
 			},
 		},
 		"runtime": gin.H{
@@ -163,6 +175,10 @@ func (h *HealthHandler) Live(c *gin.Context) {
 }
 
 func (h *HealthHandler) checkDatabase() gin.H {
+	if h.dbClient == nil {
+		return gin.H{"status": "not_configured"}
+	}
+
 	started := time.Now()
 	if err := h.dbClient.Ping(); err != nil {
 		return gin.H{
