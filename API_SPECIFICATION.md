@@ -22,11 +22,11 @@
 
 ## 0. Статус реализации
 
-Срез по коду на 2026-03-10:
+Срез по коду на 2026-03-13:
 
-- Реализовано: REST `/health`, `/ready`, `/live`; базовый WS handler (stub).
+- Реализовано: REST `/health`, `/ready`, `/live`; WS `trader.register` + `trader.heartbeat` (request/event), lifecycle timeout handling.
 - Не завершено: `/metrics` endpoint и Prometheus wiring.
-- Не завершено: полный runtime WS protocol (`trader.register`, `trader.heartbeat`, lifecycle/session orchestration).
+- Не завершено: полный runtime WS protocol (task dispatch/results, admin WS actions, DB-backed session orchestration).
 
 Ниже описан целевой API-контракт. Для текущего runtime-поведения приоритет у кода.
 
@@ -1425,15 +1425,96 @@ Health check (public, no auth).
 **Response:**
 ```json
 {
-  "status": "healthy",
-  "timestamp": 1737823200000,
-  "version": "1.0.0",
-  "uptime_seconds": 86400,
-  "checks": {
-    "database": "ok",
-    "redis": "ok",
-    "websocket": "ok"
+  "status": "ok",
+  "service": {
+    "name": "cts-core",
+    "version": "0.0.1",
+    "started_at_unix": 1737823100,
+    "uptime_sec": 100,
+    "timestamp_unix": 1737823200
+  },
+  "components": {
+    "database": {
+      "status": "ok",
+      "latency_ms": 1.2
+    },
+    "hsm_trading": {
+      "status": "ok",
+      "latency_ms": 3.4,
+      "hsm_status": "ok",
+      "hsm_available": true,
+      "kek_status": "loaded"
+    },
+    "hsm_2fa": {
+      "status": "ok",
+      "latency_ms": 3.1,
+      "hsm_status": "ok",
+      "hsm_available": true,
+      "kek_status": "loaded"
+    },
+    "websocket": {
+      "status": "ok",
+      "active_connections": 1,
+      "total_connections": 42,
+      "last_connect_unix": 1737823190,
+      "last_heartbeat_unix": 1737823198,
+      "last_timeout_unix": 1737823000,
+      "timeout_count": 2
+    },
+    "traders": {
+      "status": "connected",
+      "source": "ws_ping_pong",
+      "aggregation_implemented": false,
+      "connected_count": 1,
+      "last_heartbeat_unix": 1737823198,
+      "last_timeout_unix": 1737823000,
+      "timeout_count": 2
+    }
+  },
+  "runtime": {
+    "goroutines": 22,
+    "memory_alloc_mb": 35,
+    "memory_sys_mb": 64,
+    "gc_cycles": 5,
+    "num_cpu": 16
+  },
+  "state": {
+    "version": "1.0",
+    "updated_at": "2026-03-13T08:00:00Z",
+    "updated_at_unix": 1773388800,
+    "server": {
+      "started_at": "2026-03-13T07:58:20Z",
+      "status": "running"
+    },
+    "runtime": {
+      "active_ws_connections": 1,
+      "last_ws_connect_unix": 1737823190,
+      "last_ws_heartbeat_unix": 1737823198,
+      "last_ws_timeout_unix": 1737823000,
+      "ws_timeout_count": 2
+    }
   }
+}
+```
+
+**HTTP status semantics:**
+- `200 OK`: `status = "ok"`
+- `503 Service Unavailable`: `status = "degraded"` (например, `database` или `hsm_trading` не `ok`)
+
+---
+
+#### GET /ready
+
+Readiness endpoint. Текущая реализация делегирует в тот же обработчик, что и `/health`.
+
+#### GET /live
+
+Liveness endpoint. Возвращает простой payload:
+
+```json
+{
+  "status": "ok",
+  "timestamp": 1737823200
 }
 ```
 
