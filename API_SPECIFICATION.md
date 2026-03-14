@@ -195,7 +195,10 @@ event:
     "code": "INVALID_PAYLOAD",
     "message": "trader_id is required",
     "details": {
-      "field": "trader_id"
+      "field": "trader_id",
+      "path": "payload.trader_id",
+      "expected_type": "string",
+      "reason": "required"
     }
   }
 }
@@ -1624,7 +1627,51 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 }
 ```
 
-### 5.2 Error Codes
+`details` для `INVALID_PAYLOAD` (текущая реализация):
+- `field` - логическое имя поля
+- `path` - путь в payload
+- `expected_type` - ожидаемый тип (для `reason=required` или parse errors)
+- `expected` - ожидаемое значение (для `reason=mismatch`)
+- `received` - полученное значение (для `reason=mismatch`)
+- `reason` - причина (`required`, `mismatch`, parse reason)
+
+Пример (`mismatch`):
+```json
+{
+  "type": "response",
+  "action": "error",
+  "request_id": "hb-1",
+  "ts": 1737823200001,
+  "payload": {
+    "code": "INVALID_PAYLOAD",
+    "message": "trader_id does not match registered trader",
+    "details": {
+      "field": "trader_id",
+      "path": "payload.trader_id",
+      "expected": "trader-eu-1",
+      "received": "other-trader",
+      "reason": "mismatch"
+    }
+  }
+}
+```
+
+### 5.2 WebSocket Implemented Error Codes (Phase 2)
+
+| Code | HTTP-equivalent | Описание |
+|------|------------------|----------|
+| `INVALID_MESSAGE` | 400 | Некорректный формат WS-сообщения |
+| `INVALID_PAYLOAD` | 400 | Ошибка структуры/содержимого payload |
+| `UNKNOWN_ACTION` | 400 | Неизвестное WS-действие |
+| `UNSUPPORTED_VERSION` | 400 | Неподдерживаемая версия WS-протокола |
+| `DUPLICATE_REQUEST` | 409 | Повторный `request_id` в окне дедупликации |
+| `DUPLICATE_CONNECTION` | 409 | Повторный `trader.register` в рамках одного WS-соединения |
+| `MESSAGE_TOO_LARGE` | 413 | Превышен размер WS payload |
+| `RATE_LIMITED` | 429 | Превышен лимит входящих WS-сообщений на соединение |
+| `ACTION_FLOOD` | 429 | Слишком много неизвестных `action` в окне времени |
+| `INTERNAL_ERROR` | 500 | Внутренняя ошибка сервера (например, сбой persistence path) |
+
+### 5.3 Error Codes
 
 | Code | HTTP | Описание |
 |------|------|----------|

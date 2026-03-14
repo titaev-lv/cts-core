@@ -749,6 +749,9 @@ func assertErrorCode(t *testing.T, resp envelope, code string) {
 	if p.Code != code {
 		t.Fatalf("expected error code %q, got %q", code, p.Code)
 	}
+	if !isSupportedWSErrorCode(p.Code) {
+		t.Fatalf("error code %q is not in supported WS error codes registry", p.Code)
+	}
 }
 
 func assertErrorDetail(t *testing.T, resp envelope, key string, expected string) {

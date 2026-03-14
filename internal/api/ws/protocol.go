@@ -32,6 +32,24 @@ const (
 	errActionFlood         = "ACTION_FLOOD"
 )
 
+var supportedWSErrorCodes = map[string]struct{}{
+	errInvalidMessage:      {},
+	errInvalidPayload:      {},
+	errUnknownAction:       {},
+	errDuplicateConnection: {},
+	errInternalError:       {},
+	errUnsupportedVersion:  {},
+	errRateLimited:         {},
+	errDuplicateRequest:    {},
+	errMessageTooLarge:     {},
+	errActionFlood:         {},
+}
+
+func isSupportedWSErrorCode(code string) bool {
+	_, ok := supportedWSErrorCodes[code]
+	return ok
+}
+
 type envelope struct {
 	Type            string          `json:"type"`
 	Action          string          `json:"action"`
