@@ -17,6 +17,7 @@ type Options struct {
 	RESTBurst             int
 	WSRequestsPerSecond   int
 	WSBurst               int
+	WSHandler             *ws.Handler
 	WSHeartbeatInterval   time.Duration
 	WSHeartbeatTimeout    time.Duration
 	HSMTrading            *hsm.Client
@@ -27,7 +28,7 @@ type Options struct {
 }
 
 // NewRouter configures REST routes and middleware.
-func NewRouter(dbClient *db.MySQLClient, opts Options) *gin.Engine {
+func NewRouter(dbClient *db.MySQLClient, opts Options) (*gin.Engine, *ws.Handler) {
 	gin.SetMode(gin.ReleaseMode)
 
 	router := gin.New()
@@ -39,12 +40,15 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) *gin.Engine {
 		middleware.AuditLog(),
 	)
 
-	wsHandler := ws.NewHandlerWithOptions(ws.HandlerOptions{
-		HeartbeatInterval: opts.WSHeartbeatInterval,
-		HeartbeatTimeout:  opts.WSHeartbeatTimeout,
-		Persistence:       newWSSessionPersistence(dbClient),
-		StateManager:      opts.StateManager,
-	})
+	wsHandler := opts.WSHandler
+	if wsHandler == nil {
+		wsHandler = ws.NewHandlerWithOptions(ws.HandlerOptions{
+			HeartbeatInterval: opts.WSHeartbeatInterval,
+			HeartbeatTimeout:  opts.WSHeartbeatTimeout,
+			Persistence:       newWSSessionPersistence(dbClient),
+			StateManager:      opts.StateManager,
+		})
+	}
 	healthHandler := NewHealthHandler(dbClient, HealthHandlerOptions{
 		HSMTrading:     opts.HSMTrading,
 		HSMTwoFA:       opts.HSMTwoFA,
@@ -62,5 +66,5 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) *gin.Engine {
 
 	router.GET("/ws", middleware.PerIPRateLimit(opts.WSRequestsPerSecond, opts.WSBurst), wsHandler.Serve)
 
-	return router
+	return router, wsHandler
 }

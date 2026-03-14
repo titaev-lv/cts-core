@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -21,6 +22,8 @@ type Handler struct {
 	upgrader          websocket.Upgrader
 	accessLog         *slog.Logger
 	outLog            *slog.Logger
+	sessionsMu        sync.RWMutex
+	sessions          map[string]TraderSnapshot
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
 	persistence       SessionPersistence
@@ -79,6 +82,16 @@ type Stats struct {
 	LastConnectUnix   int64 `json:"last_connect_unix,omitempty"`
 }
 
+// TraderSnapshot is a runtime view of a single trader WS session.
+type TraderSnapshot struct {
+	TraderID          string `json:"trader_id"`
+	SessionID         string `json:"session_id"`
+	State             string `json:"state"`
+	RegisteredAtUnix  int64  `json:"registered_at_unix"`
+	LastHeartbeatUnix int64  `json:"last_heartbeat_unix"`
+	TimedOutAtUnix    int64  `json:"timed_out_at_unix"`
+}
+
 // NewHandler creates a WebSocket handler with logging.
 func NewHandler() *Handler {
 	return NewHandlerWithOptions(HandlerOptions{})
@@ -104,6 +117,7 @@ func NewHandlerWithOptions(opts HandlerOptions) *Handler {
 		},
 		accessLog:         logger.GetWSAccess("ws"),
 		outLog:            logger.GetWSOut("ws"),
+		sessions:          make(map[string]TraderSnapshot),
 		heartbeatInterval: heartbeatInterval,
 		heartbeatTimeout:  heartbeatTimeout,
 		persistence:       opts.Persistence,
@@ -168,6 +182,7 @@ func (h *Handler) Serve(c *gin.Context) {
 
 			stateBeforeDisconnect := session.state
 			session.markDisconnected()
+			h.deleteSessionSnapshot(session.sessionID)
 			h.accessLog.Warn("ws_disconnect", "conn_id", connID, "request_id", requestID, "trader_id", session.traderID, "session_id", session.sessionID, "previous_session_state", stateBeforeDisconnect, "session_state", session.state, "disconnect_reason", reason, "last_heartbeat_ms", session.lastHeartbeatMs, "error", err)
 			return
 		}
@@ -252,6 +267,7 @@ func (h *Handler) Serve(c *gin.Context) {
 			}
 
 			session.markRegistered(req.TraderID, nowMs)
+			h.upsertSessionSnapshot(session)
 			if h.heartbeatTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
 			}
@@ -302,6 +318,7 @@ func (h *Handler) Serve(c *gin.Context) {
 			}
 
 			session.markHeartbeat(nowMs)
+			h.upsertSessionSnapshot(session)
 			h.syncRuntimeHeartbeat(nowMs / 1000)
 			if h.heartbeatTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
@@ -343,6 +360,45 @@ func (h *Handler) GetStats() Stats {
 		TotalConnections:  h.total.Load(),
 		LastConnectUnix:   h.lastSeen.Load(),
 	}
+}
+
+// GetTraderSnapshots returns a copy of current runtime trader session snapshots.
+func (h *Handler) GetTraderSnapshots() []TraderSnapshot {
+	h.sessionsMu.RLock()
+	defer h.sessionsMu.RUnlock()
+
+	items := make([]TraderSnapshot, 0, len(h.sessions))
+	for _, snapshot := range h.sessions {
+		items = append(items, snapshot)
+	}
+	return items
+}
+
+func (h *Handler) upsertSessionSnapshot(session *sessionRuntime) {
+	if session == nil || session.traderID == "" {
+		return
+	}
+
+	h.sessionsMu.Lock()
+	h.sessions[session.sessionID] = TraderSnapshot{
+		TraderID:          session.traderID,
+		SessionID:         session.sessionID,
+		State:             string(session.state),
+		RegisteredAtUnix:  session.registeredAtMs / 1000,
+		LastHeartbeatUnix: session.lastHeartbeatMs / 1000,
+		TimedOutAtUnix:    session.timedOutAtMs / 1000,
+	}
+	h.sessionsMu.Unlock()
+}
+
+func (h *Handler) deleteSessionSnapshot(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+
+	h.sessionsMu.Lock()
+	delete(h.sessions, sessionID)
+	h.sessionsMu.Unlock()
 }
 
 func (h *Handler) syncRuntimeState() {

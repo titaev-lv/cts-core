@@ -377,6 +377,39 @@ func TestValidateSessionTimeoutLessThanInterval(t *testing.T) {
 	}
 }
 
+func TestValidateSchedulerDefaults(t *testing.T) {
+	cfg := Config{
+		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	if cfg.Scheduler.TaskAssignmentInterval == 0 || cfg.Scheduler.LatencyCheckInterval == 0 || cfg.Scheduler.ResourceCheckInterval == 0 {
+		t.Fatalf("expected scheduler defaults to be populated, got %+v", cfg.Scheduler)
+	}
+}
+
+func TestValidateSchedulerIntervalInvalid(t *testing.T) {
+	cfg := Config{
+		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
+		Scheduler: SchedulerConfig{
+			TaskAssignmentInterval: -1 * time.Second,
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected Validate() to fail for negative scheduler.task_assignment_interval")
+	}
+}
+
 func TestHSMDualContext(t *testing.T) {
 	// Load config with HSM dual-context configuration
 	cfg, err := Load("../../conf/config.example.yaml")

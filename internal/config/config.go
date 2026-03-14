@@ -170,6 +170,26 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid session.cleanup_interval: %s", c.Session.CleanupInterval)
 	}
 
+	if c.Scheduler.TaskAssignmentInterval == 0 {
+		c.Scheduler.TaskAssignmentInterval = 1 * time.Second
+	}
+	if c.Scheduler.LatencyCheckInterval == 0 {
+		c.Scheduler.LatencyCheckInterval = 60 * time.Second
+	}
+	if c.Scheduler.ResourceCheckInterval == 0 {
+		c.Scheduler.ResourceCheckInterval = 30 * time.Second
+	}
+
+	if c.Scheduler.TaskAssignmentInterval <= 0 || c.Scheduler.TaskAssignmentInterval > 24*time.Hour {
+		return fmt.Errorf("invalid scheduler.task_assignment_interval: %s", c.Scheduler.TaskAssignmentInterval)
+	}
+	if c.Scheduler.LatencyCheckInterval <= 0 || c.Scheduler.LatencyCheckInterval > 24*time.Hour {
+		return fmt.Errorf("invalid scheduler.latency_check_interval: %s", c.Scheduler.LatencyCheckInterval)
+	}
+	if c.Scheduler.ResourceCheckInterval <= 0 || c.Scheduler.ResourceCheckInterval > 24*time.Hour {
+		return fmt.Errorf("invalid scheduler.resource_check_interval: %s", c.Scheduler.ResourceCheckInterval)
+	}
+
 	// Validate state file path
 	if c.State.FilePath == "" {
 		return fmt.Errorf("state file path cannot be empty")

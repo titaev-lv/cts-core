@@ -19,6 +19,7 @@ import (
 	"github.com/titaev-lv/cts-core/internal/db/repository"
 	"github.com/titaev-lv/cts-core/internal/hsm"
 	"github.com/titaev-lv/cts-core/internal/logger"
+	"github.com/titaev-lv/cts-core/internal/scheduler"
 	"github.com/titaev-lv/cts-core/internal/state"
 	"golang.org/x/net/http2"
 )
@@ -224,7 +225,7 @@ func main() {
 	stateManager.SetServerStatus("running")
 	stateManager.StartBackgroundSync()
 
-	router := rest.NewRouter(dbClient, rest.Options{
+	router, wsHandler := rest.NewRouter(dbClient, rest.Options{
 		RESTRequestsPerSecond: cfg.RateLimit.REST.PerSecond(),
 		RESTBurst:             cfg.RateLimit.REST.Burst,
 		WSRequestsPerSecond:   cfg.RateLimit.WebSocket.PerSecond(),
@@ -237,6 +238,17 @@ func main() {
 		StartedAt:             startedAt,
 		ServiceVersion:        version,
 	})
+
+	schedulerEngine := scheduler.NewEngine(
+		scheduler.Config{
+			Interval:      cfg.Scheduler.TaskAssignmentInterval,
+			HealthyWindow: cfg.Session.HeartbeatTimeout,
+		},
+		wsHandler,
+		nil,
+		logger.Get("scheduler"),
+	)
+	schedulerEngine.Start()
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 
 	httpServer := &http.Server{
@@ -289,8 +301,10 @@ func main() {
 	select {
 	case <-shutdownCtx.Done():
 		log.Info("Shutdown signal received")
+		schedulerEngine.Stop()
 		stateManager.SetServerStatus("stopping")
 	case serveErr := <-serverErrCh:
+		schedulerEngine.Stop()
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			log.Error("REST server stopped with error", "error", serveErr)
 			if closeErr := stateManager.Close(); closeErr != nil {
@@ -309,6 +323,7 @@ func main() {
 	defer cancel()
 	if err := httpServer.Shutdown(ctx); err != nil {
 		log.Error("REST server shutdown failed", "error", err)
+		schedulerEngine.Stop()
 		if closeErr := stateManager.Close(); closeErr != nil {
 			log.Error("State manager close failed", "error", closeErr)
 		}
