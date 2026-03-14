@@ -54,6 +54,10 @@
 Критерий завершения:
 - трейдер может пройти полный базовый цикл connect -> register -> heartbeat -> disconnect.
 
+Операционный smoke-runbook (Sprint 6):
+- `guides/PHASE2_SMOKE_RUNBOOK.md`
+- helper script: `scripts/smoke_phase2_ws_lifecycle.sh`
+
 ### Phase 1.5 Finalization (after Phase 2 WS protocol)
 
 - Реализовать `/metrics`.

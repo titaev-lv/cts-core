@@ -25,6 +25,7 @@
 Срез по коду на 2026-03-13:
 
 - Реализовано: REST `/health`, `/ready`, `/live`; WS `trader.register` + `trader.heartbeat` (request/event), lifecycle timeout handling.
+- Операционная smoke-проверка Phase 2: `guides/PHASE2_SMOKE_RUNBOOK.md`.
 - Не завершено: `/metrics` endpoint и Prometheus wiring.
 - Не завершено: полный runtime WS protocol (task dispatch/results, admin WS actions, DB-backed session orchestration).
 

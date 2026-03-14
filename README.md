@@ -51,6 +51,13 @@ mysql -h 127.0.0.1 -u root -proot -e "USE ct_system; SHOW TABLES;"
 - `API_SPECIFICATION.md` - целевой API контракт
 - `HSM_KEY_ROTATION.md` - текущее состояние ротации ключей
 - `CROSS_PROJECT_WWW_GO.md` - интеграция `cts-core <-> web-ui-go`
+- `guides/PHASE2_SMOKE_RUNBOOK.md` - smoke-проверка Phase 2 в docker compose
+
+Быстрый smoke запуск (Phase 2):
+
+```bash
+./scripts/smoke_phase2_ws_lifecycle.sh
+```
 
 ## Roadmap (операционный)
 
