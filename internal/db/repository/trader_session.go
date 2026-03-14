@@ -163,7 +163,18 @@ func (r *traderSessionRepository) UpdateHeartbeat(ctx context.Context, sessionID
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("session not found or already ended: %s", sessionID)
+		session, lookupErr := r.GetBySessionID(ctx, sessionID)
+		if lookupErr != nil {
+			return fmt.Errorf("failed to verify heartbeat update state: %w", lookupErr)
+		}
+		if session == nil {
+			return fmt.Errorf("session not found: %s", sessionID)
+		}
+		if session.EndedAt.Valid {
+			return fmt.Errorf("session already ended: %s", sessionID)
+		}
+		// MySQL may report 0 affected rows if LAST_HEARTBEAT value did not change.
+		return nil
 	}
 
 	return nil

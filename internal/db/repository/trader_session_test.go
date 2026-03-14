@@ -181,6 +181,57 @@ func TestTraderSessionRepository_UpdateHeartbeat(t *testing.T) {
 	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestTraderSessionRepository_UpdateHeartbeat_IdempotentWhenTimestampUnchanged(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	repo := NewTraderSessionRepository(sqlxDB)
+
+	mock.ExpectExec("UPDATE TRADER_SESSION SET LAST_HEARTBEAT").
+		WithArgs(sqlmock.AnyArg(), "session-uuid").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	now := time.Now()
+	rows := sqlmock.NewRows([]string{
+		"ID", "TRADER_ID", "SESSION_ID", "WS_CONNECTION_ID", "IP_ADDRESS",
+		"CONNECTED_AT", "LAST_HEARTBEAT", "ENDED_AT", "DISCONNECT_REASON", "ERROR_MESSAGE",
+	}).AddRow(1, 1, "session-uuid", "ws-123", "192.168.1.100", now, now, nil, nil, nil)
+
+	mock.ExpectQuery("SELECT .* FROM TRADER_SESSION WHERE SESSION_ID").
+		WithArgs("session-uuid").
+		WillReturnRows(rows)
+
+	err = repo.UpdateHeartbeat(context.Background(), "session-uuid")
+
+	assert.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTraderSessionRepository_UpdateHeartbeat_NotFound(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	repo := NewTraderSessionRepository(sqlxDB)
+
+	mock.ExpectExec("UPDATE TRADER_SESSION SET LAST_HEARTBEAT").
+		WithArgs(sqlmock.AnyArg(), "missing-session").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	mock.ExpectQuery("SELECT .* FROM TRADER_SESSION WHERE SESSION_ID").
+		WithArgs("missing-session").
+		WillReturnError(sql.ErrNoRows)
+
+	err = repo.UpdateHeartbeat(context.Background(), "missing-session")
+
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "session not found")
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestTraderSessionRepository_EndSession(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)

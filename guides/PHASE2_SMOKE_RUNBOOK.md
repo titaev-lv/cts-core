@@ -31,7 +31,8 @@ What the script verifies:
 - compose services `mysql`, `hsm`, `cts-core` are up
 - `/health` is reachable from host (`http://localhost:8081/health`)
 - CTS-Core process is present in compose status
-- WS lifecycle logs are present if trader traffic exists (`ws_register`, `ws_heartbeat`, `ws_disconnect|ws_timeout`)
+- deterministic WS lifecycle via helper client (`scripts/smoke_ws_lifecycle_client.go`)
+- WS lifecycle logs are present (`ws_register`, `ws_heartbeat`, `ws_disconnect|ws_timeout`)
 
 ## 4. Manual Lifecycle Check
 
@@ -62,6 +63,12 @@ Expected events in normal flow:
 - `ws_register`
 - `ws_heartbeat`
 - `ws_disconnect` (graceful) OR `ws_timeout`
+
+4. Optional direct WS smoke client run (without full script):
+
+```bash
+CTS_WS_URL=ws://localhost:8081/ws go run ./scripts/smoke_ws_lifecycle_client.go
+```
 
 ## 5. Restart Behavior Check
 
