@@ -281,17 +281,17 @@ func (h *Handler) Serve(c *gin.Context) {
 
 			var req registerRequest
 			if err := json.Unmarshal(msg.Payload, &req); err != nil {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "Invalid register payload", map[string]interface{}{"error": err.Error()}))
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "Invalid register payload", invalidPayloadDetails("payload", "payload", "object", err.Error())))
 				continue
 			}
 
 			if req.TraderID == "" {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id is required", nil))
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id is required", requiredFieldDetails("trader_id", "payload.trader_id", "string")))
 				continue
 			}
 
 			if req.Version == "" {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "version is required", nil))
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "version is required", requiredFieldDetails("version", "payload.version", "string")))
 				continue
 			}
 
@@ -345,22 +345,22 @@ func (h *Handler) Serve(c *gin.Context) {
 
 			var req heartbeatRequest
 			if err := json.Unmarshal(msg.Payload, &req); err != nil {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "Invalid heartbeat payload", map[string]interface{}{"error": err.Error()}))
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "Invalid heartbeat payload", invalidPayloadDetails("payload", "payload", "object", err.Error())))
 				continue
 			}
 
 			if req.TraderID == "" {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id is required", nil))
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id is required", requiredFieldDetails("trader_id", "payload.trader_id", "string")))
 				continue
 			}
 
 			if req.TraderID != session.traderID {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id does not match registered trader", map[string]interface{}{"registered_trader_id": session.traderID, "received_trader_id": req.TraderID}))
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id does not match registered trader", mismatchFieldDetails("trader_id", "payload.trader_id", session.traderID, req.TraderID)))
 				continue
 			}
 
 			if req.SessionID != "" && req.SessionID != session.sessionID {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "session_id does not match active session", map[string]interface{}{"session_id": req.SessionID}))
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "session_id does not match active session", mismatchFieldDetails("session_id", "payload.session_id", session.sessionID, req.SessionID)))
 				continue
 			}
 
@@ -603,4 +603,32 @@ func normalizeRequestDedupWindow(v time.Duration) time.Duration {
 		return 1 * time.Minute
 	}
 	return v
+}
+
+func invalidPayloadDetails(field string, path string, expectedType string, reason string) map[string]interface{} {
+	return map[string]interface{}{
+		"field":         field,
+		"path":          path,
+		"expected_type": expectedType,
+		"reason":        reason,
+	}
+}
+
+func requiredFieldDetails(field string, path string, expectedType string) map[string]interface{} {
+	return map[string]interface{}{
+		"field":         field,
+		"path":          path,
+		"expected_type": expectedType,
+		"reason":        "required",
+	}
+}
+
+func mismatchFieldDetails(field string, path string, expected interface{}, received interface{}) map[string]interface{} {
+	return map[string]interface{}{
+		"field":    field,
+		"path":     path,
+		"expected": expected,
+		"received": received,
+		"reason":   "mismatch",
+	}
 }

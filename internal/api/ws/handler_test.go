@@ -67,6 +67,29 @@ func TestRegisterMissingTraderID(t *testing.T) {
 
 	resp := readEnvelope(t, conn)
 	assertErrorCode(t, resp, errInvalidPayload)
+	assertErrorDetail(t, resp, "field", "trader_id")
+	assertErrorDetail(t, resp, "path", "payload.trader_id")
+	assertErrorDetail(t, resp, "reason", "required")
+}
+
+func TestRegisterInvalidPayloadDetails(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "req-invalid-register-payload",
+		Payload:   mustJSON(t, "not-an-object"),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	assertErrorCode(t, resp, errInvalidPayload)
+	assertErrorDetail(t, resp, "field", "payload")
+	assertErrorDetail(t, resp, "path", "payload")
 }
 
 func TestUnknownAction(t *testing.T) {
@@ -199,6 +222,31 @@ func TestHeartbeatBeforeRegisterReturnsError(t *testing.T) {
 
 	resp := readEnvelope(t, conn)
 	assertErrorCode(t, resp, errInvalidMessage)
+}
+
+func TestHeartbeatTraderIDMismatchDetails(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+	registerTrader(t, conn, "trader-eu-1", "reg-mismatch-1")
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "hb-mismatch-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "other-trader",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+
+	resp := readEnvelope(t, conn)
+	assertErrorCode(t, resp, errInvalidPayload)
+	assertErrorDetail(t, resp, "field", "trader_id")
+	assertErrorDetail(t, resp, "path", "payload.trader_id")
+	assertErrorDetail(t, resp, "reason", "mismatch")
 }
 
 func TestHeartbeatEventAfterRegisterHasNoResponse(t *testing.T) {
@@ -634,6 +682,24 @@ func assertErrorCode(t *testing.T, resp envelope, code string) {
 	}
 	if p.Code != code {
 		t.Fatalf("expected error code %q, got %q", code, p.Code)
+	}
+}
+
+func assertErrorDetail(t *testing.T, resp envelope, key string, expected string) {
+	t.Helper()
+	var p errorPayload
+	if err := json.Unmarshal(resp.Payload, &p); err != nil {
+		t.Fatalf("unmarshal error payload: %v", err)
+	}
+	if p.Details == nil {
+		t.Fatalf("expected details map for error response")
+	}
+	actual, ok := p.Details[key]
+	if !ok {
+		t.Fatalf("expected details key %q to exist", key)
+	}
+	if actual != expected {
+		t.Fatalf("expected details[%q]=%q, got %v", key, expected, actual)
 	}
 }
 
