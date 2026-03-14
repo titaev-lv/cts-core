@@ -21,18 +21,29 @@ From `services/cts-core`:
 ./scripts/smoke_phase2_ws_lifecycle.sh
 ```
 
+Default mode is non-invasive:
+- does not run `docker compose up -d` (`SMOKE_SKIP_UP=1`)
+- does not run restart/stop/start checks (`SMOKE_NO_RESTART=1`)
+
 Optional mode with trader service startup:
 
 ```bash
 ./scripts/smoke_phase2_ws_lifecycle.sh --with-trader
 ```
 
+Full invasive mode (original behavior, including startup + restart/shutdown checks):
+
+```bash
+SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./scripts/smoke_phase2_ws_lifecycle.sh
+```
+
 What the script verifies:
-- compose services `mysql`, `hsm`, `cts-core` are up
+- health is reachable for already running CTS-Core stack (or starts stack if `SMOKE_SKIP_UP=0`)
 - `/health` is reachable from host (`http://localhost:8081/health`)
 - CTS-Core process is present in compose status
 - deterministic WS lifecycle via helper client (`scripts/smoke_ws_lifecycle_client.go`)
 - WS lifecycle logs are present (`ws_register`, `ws_heartbeat`, `ws_disconnect|ws_timeout`)
+- optional restart/shutdown checks if `SMOKE_NO_RESTART=0`
 
 ## 4. Manual Lifecycle Check
 

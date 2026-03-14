@@ -25,6 +25,8 @@ CTS_SMOKE_TRADER_NAME="${CTS_SMOKE_TRADER_NAME:-Smoke Trader E2E}"
 MYSQL_USER="${MYSQL_USER:-root}"
 MYSQL_PASSWORD="${MYSQL_PASSWORD:-root}"
 MYSQL_DATABASE="${MYSQL_DATABASE:-ct_system}"
+SMOKE_SKIP_UP="${SMOKE_SKIP_UP:-1}"
+SMOKE_NO_RESTART="${SMOKE_NO_RESTART:-1}"
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "docker is required" >&2
@@ -43,8 +45,12 @@ if [ "$WITH_TRADER" -eq 1 ]; then
   SERVICES+=(trader)
 fi
 
-echo "[smoke] starting services: ${SERVICES[*]}"
-docker compose -f "$COMPOSE_FILE" up -d "${SERVICES[@]}"
+if [ "$SMOKE_SKIP_UP" = "1" ]; then
+  echo "[smoke] skip startup (SMOKE_SKIP_UP=1, default)"
+else
+  echo "[smoke] starting services: ${SERVICES[*]}"
+  docker compose -f "$COMPOSE_FILE" up -d "${SERVICES[@]}"
+fi
 
 echo "[smoke] waiting for cts-core health endpoint"
 if [ -z "$CTS_HEALTH_URL" ]; then
@@ -132,15 +138,19 @@ else
   echo "[smoke] WARNING: ws lifecycle events not found in recent compose logs/output" >&2
 fi
 
-echo "[smoke] restart check"
-docker compose -f "$COMPOSE_FILE" restart cts-core >/dev/null
-sleep 2
-curl -k -fsS "$CTS_HEALTH_URL" >/dev/null
+if [ "$SMOKE_NO_RESTART" = "1" ]; then
+  echo "[smoke] skip restart/shutdown checks (SMOKE_NO_RESTART=1, default)"
+else
+  echo "[smoke] restart check"
+  docker compose -f "$COMPOSE_FILE" restart cts-core >/dev/null
+  sleep 2
+  curl -k -fsS "$CTS_HEALTH_URL" >/dev/null
 
-echo "[smoke] shutdown/start check"
-docker compose -f "$COMPOSE_FILE" stop cts-core >/dev/null
-docker compose -f "$COMPOSE_FILE" start cts-core >/dev/null
-sleep 2
-curl -k -fsS "$CTS_HEALTH_URL" >/dev/null
+  echo "[smoke] shutdown/start check"
+  docker compose -f "$COMPOSE_FILE" stop cts-core >/dev/null
+  docker compose -f "$COMPOSE_FILE" start cts-core >/dev/null
+  sleep 2
+  curl -k -fsS "$CTS_HEALTH_URL" >/dev/null
+fi
 
 echo "[smoke] PASS: phase2 compose smoke checks completed"
