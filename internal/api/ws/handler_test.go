@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -667,6 +668,163 @@ func TestUnknownActionWindowReset(t *testing.T) {
 	if _, _, err := readMessageWithTimeout(conn, 120*time.Millisecond); err == nil {
 		t.Fatalf("expected no ACTION_FLOOD after unknown action window reset")
 	}
+}
+
+func TestUnknownActionFloodIsolationAcrossConnections(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{
+		MaxUnknownActions:   2,
+		UnknownActionWindow: 10 * time.Second,
+		MaxMessagesPerSec:   100,
+	})
+
+	connFlood := dialTestWSWithHandler(t, h)
+	defer connFlood.Close()
+	connHealthy := dialTestWSWithHandler(t, h)
+	defer connHealthy.Close()
+
+	consumeConnected(t, connFlood)
+	consumeConnected(t, connHealthy)
+
+	unknownReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    "unknown.action",
+		RequestID: "iso-flood-1",
+		Payload:   mustJSON(t, map[string]interface{}{}),
+	}
+	writeJSON(t, connFlood, unknownReq)
+	assertErrorCode(t, readEnvelope(t, connFlood), errUnknownAction)
+
+	unknownReq.RequestID = "iso-flood-2"
+	writeJSON(t, connFlood, unknownReq)
+	assertErrorCode(t, readEnvelope(t, connFlood), errUnknownAction)
+	assertErrorCode(t, readEnvelope(t, connFlood), errActionFlood)
+
+	// Ensure another connection is unaffected and still accepts normal flow.
+	registerTrader(t, connHealthy, "trader-isolated-1", "iso-reg-1")
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "iso-hb-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-isolated-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, connHealthy, hbReq)
+	resp := readEnvelope(t, connHealthy)
+	if resp.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q on healthy connection, got %q", actionHeartbeatAck, resp.Action)
+	}
+}
+
+func TestParallelConnectionsRegisterHeartbeatStability(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{
+		MaxMessagesPerSec: 200,
+	})
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/ws", h.Serve)
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+
+	const workers = 20
+	errCh := make(chan error, workers)
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+
+			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			if err != nil {
+				errCh <- fmt.Errorf("dial worker %d: %w", i, err)
+				return
+			}
+			defer conn.Close()
+
+			if _, _, err := conn.ReadMessage(); err != nil {
+				errCh <- fmt.Errorf("read connected worker %d: %w", i, err)
+				return
+			}
+
+			register := envelope{
+				Type:      msgTypeRequest,
+				Action:    actionTraderRegister,
+				RequestID: fmt.Sprintf("par-reg-%d", i),
+				Payload: mustJSON(t, map[string]interface{}{
+					"trader_id": fmt.Sprintf("trader-par-%d", i),
+					"version":   "1.0.0",
+					"region":    "eu-frankfurt",
+				}),
+			}
+			b, _ := json.Marshal(register)
+			if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
+				errCh <- fmt.Errorf("write register worker %d: %w", i, err)
+				return
+			}
+
+			_, regRespRaw, err := conn.ReadMessage()
+			if err != nil {
+				errCh <- fmt.Errorf("read register ack worker %d: %w", i, err)
+				return
+			}
+			var regResp envelope
+			if err := json.Unmarshal(regRespRaw, &regResp); err != nil {
+				errCh <- fmt.Errorf("unmarshal register ack worker %d: %w", i, err)
+				return
+			}
+			if regResp.Action != actionRegisterAck {
+				errCh <- fmt.Errorf("unexpected register action worker %d: %s", i, regResp.Action)
+				return
+			}
+
+			heartbeat := envelope{
+				Type:      msgTypeRequest,
+				Action:    actionTraderHeartbeat,
+				RequestID: fmt.Sprintf("par-hb-%d", i),
+				Payload: mustJSON(t, map[string]interface{}{
+					"trader_id": fmt.Sprintf("trader-par-%d", i),
+					"status":    "active",
+				}),
+			}
+			hb, _ := json.Marshal(heartbeat)
+			if err := conn.WriteMessage(websocket.TextMessage, hb); err != nil {
+				errCh <- fmt.Errorf("write heartbeat worker %d: %w", i, err)
+				return
+			}
+
+			_, hbRespRaw, err := conn.ReadMessage()
+			if err != nil {
+				errCh <- fmt.Errorf("read heartbeat ack worker %d: %w", i, err)
+				return
+			}
+			var hbResp envelope
+			if err := json.Unmarshal(hbRespRaw, &hbResp); err != nil {
+				errCh <- fmt.Errorf("unmarshal heartbeat ack worker %d: %w", i, err)
+				return
+			}
+			if hbResp.Action != actionHeartbeatAck {
+				errCh <- fmt.Errorf("unexpected heartbeat action worker %d: %s", i, hbResp.Action)
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	waitForCondition(t, 500*time.Millisecond, func() bool {
+		return h.GetStats().ActiveConnections == 0
+	})
 }
 
 func dialTestWS(t *testing.T) *websocket.Conn {
