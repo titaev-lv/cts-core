@@ -132,7 +132,7 @@ session:
 
 # Task scheduler (Phase 1.4)
 scheduler:
-  task_assignment_interval: 1s
+  task_assignment_interval: 5s
   latency_check_interval: 60s
   resource_check_interval: 30s
 

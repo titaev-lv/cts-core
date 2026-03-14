@@ -1,11 +1,11 @@
 # CTS-Core Documentation Index
 
-Последнее обновление: 2026-03-10
+Последнее обновление: 2026-03-14
 
 ## Текущий срез
 
-- Кодовая реализация: Phase 1.4 завершен, Phase 1.5 частично.
-- В проекте уже есть runtime-сервис, state manager, health REST endpoints и WS stub.
+- Кодовая реализация: Phase 2 завершен (WS runtime lifecycle, session persistence, scheduler skeleton).
+- В проекте есть operational smoke tooling для compose проверки (`guides/PHASE2_SMOKE_RUNBOOK.md`).
 - Часть старых документов содержит статусы "Phase 0" и старые пути. Используйте этот индекс как точку входа.
 
 ## С чего начать
@@ -14,6 +14,7 @@
 2. `DEVELOPMENT_PLAN.md` - полный план фаз (проверяйте с реальным кодом).
 3. `ARCHITECTURE.md` - архитектурные решения и ограничения.
 4. `API_SPECIFICATION.md` - целевой контракт WS/REST.
+5. `guides/PHASE2_SMOKE_RUNBOOK.md` - оперативная проверка lifecycle/restart/shutdown в compose.
 
 ## Актуальные документы
 
@@ -26,11 +27,12 @@
 - `RATE_LIMITS_ARCHITECTURE.md`
 - `TEST_COVERAGE_MODELS.md`
 - `CROSS_PROJECT_WWW_GO.md`
+- `guides/PHASE2_SMOKE_RUNBOOK.md`
 
 ## Документы с риском устаревания
 
-- `DEVELOPMENT_PLAN.md`:
-    - содержит старые чек-листы "in progress" для уже сделанных частей.
+- `TEST_COVERAGE_MODELS.md`:
+    - исторический snapshot для раннего этапа моделей; используйте вместе с актуальными `go test` результатами.
 Примечание: `CONTEXT.md` удален как устаревший дубликат. Его роль закрыта `README.md` + `DOCS_INDEX.md` + профильными документами.
 
 ## Что считать источником истины

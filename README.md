@@ -4,20 +4,14 @@
 
 ## Текущий статус
 
-- Кодовая база активна и собирается.
-- Тесты проходят: `go test ./...`.
-- Миграции применены в локальной БД (таблицы `TRADER`, `TRADER_SESSION`, `TRADER_EXCHANGE_RESOURCE`, `AUDIT_LOG`, `SCHEDULER_TASKS` существуют).
-- Реализовано:
-  - Config + logger
-  - MySQL client + repositories
-  - HSM clients (Trading + 2FA)
-  - State manager (`state/daemon.state` + backup)
-  - REST health endpoints: `/health`, `/ready`, `/live`
-  - WS handler (базовый stub)
-- Еще не завершено:
-  - Полный WebSocket протокол (`trader.register`, heartbeat, commands)
-  - Session manager и scheduler в runtime-слое
-  - `/metrics` endpoint, Prometheus wiring и интеграционные тесты (отложено до рабочего WS runtime)
+- Кодовая база активна, собирается и покрыта тестами.
+- Завершена Phase 2 (Sprint 1-6):
+  - WS runtime lifecycle: `connect -> trader.register -> trader.heartbeat -> disconnect`
+  - Runtime session lifecycle + persistence в `TRADER_SESSION`
+  - Базовый scheduler cycle на активных WS-сессиях
+  - WS hardening: protocol version check, rate limiting, dedup, payload bounds, unknown-action flood guard
+  - Phase 2 smoke tooling: runbook + lifecycle smoke script + deterministic WS smoke client
+- Текущий приоритет: Phase 1.5 finalization (`/metrics`, Prometheus wiring, integration tests).
 
 ## Быстрый старт
 
@@ -59,17 +53,25 @@ mysql -h 127.0.0.1 -u root -proot -e "USE ct_system; SHOW TABLES;"
 ./scripts/smoke_phase2_ws_lifecycle.sh
 ```
 
+По умолчанию smoke-скрипт невмешивающийся:
+- `SMOKE_SKIP_UP=1` (не делает `docker compose up -d`)
+- `SMOKE_NO_RESTART=1` (не делает restart/stop/start)
+
+Полный инвазивный режим:
+
+```bash
+SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./scripts/smoke_phase2_ws_lifecycle.sh
+```
+
 ## Roadmap (операционный)
 
-1. Закрыть Phase 2 runtime основу:
-   - WS protocol layer
-   - session lifecycle
-   - scheduler skeleton
-2. После Phase 2 закрыть Phase 1.5 finalization:
+1. Закрыть Phase 1.5 finalization:
   - `/metrics`
   - базовые runtime-метрики
+  - Prometheus wiring
   - integration tests
-3. Синхронизировать документацию с фактической реализацией.
+2. Расширять Phase 3 business logic (assignment/scoring/resource-aware scheduling).
+3. Поддерживать docs parity с кодом в каждом PR.
 
 ## Связанные сервисы
 

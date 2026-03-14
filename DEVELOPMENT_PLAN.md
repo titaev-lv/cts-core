@@ -1,8 +1,8 @@
 # CTS-Core & Trader Development Plan
 
-> Версия: 2.0.0
-> Обновлено: 2026-03-10
-> Статус: Phase 1.4 Complete | Phase 2 Priority | Phase 1.5 Finalization Deferred
+> Версия: 2.1.0
+> Обновлено: 2026-03-14
+> Статус: Phase 2 Complete | Phase 1.5 Finalization Priority
 > Связанные документы: `ARCHITECTURE.md`, `API_SPECIFICATION.md`, `DOCS_INDEX.md`, `CROSS_PROJECT_WWW_GO.md`
 
 ## 1. Цель
@@ -19,12 +19,9 @@
   - Phase 1.2: MySQL client + repository layer
   - Phase 1.3: HSM client (Trading + 2FA)
   - Phase 1.4: state manager (`state/daemon.state`, backup, background sync)
-- Частично завершено:
-  - Phase 1.5 foundation: REST/WS base (`/health`, `/ready`, `/live`, middleware, WS stub)
-- Отложено до Phase 2 WS runtime:
-  - `/metrics` endpoint
-  - Prometheus wiring
-  - REST/WS integration tests
+  - Phase 2: WS runtime protocol + session lifecycle + scheduler skeleton + Sprint 6 smoke tooling
+- В работе (текущий приоритет):
+  - Phase 1.5 finalization: `/metrics`, Prometheus wiring, integration tests
 
 ### База данных (локальный контур)
 
@@ -38,27 +35,19 @@
 
 ## 3. План по фазам
 
-### Phase 2 (Core Features, current priority)
+### Phase 2 (Core Features, completed)
 
-- WebSocket protocol layer:
-  - `trader.register`
-  - `trader.heartbeat`
-  - protocol errors/ack
-- Session manager:
-  - lifecycle сессии
-  - timeout/disconnect причины
-- Task scheduler skeleton:
-  - базовый assignment cycle
-  - учет статуса трейдеров
+Результат:
+- Реализованы `trader.register` и `trader.heartbeat` (request/event, ack/error).
+- Реализован lifecycle сессий с persistence в `TRADER_SESSION`.
+- Реализован scheduler runtime cycle по active/healthy WS snapshots.
+- Добавлен protocol hardening (version checks, rate limit, dedup, payload and action flood guards).
+- Добавлен Sprint 6 operational smoke набор:
+  - `guides/PHASE2_SMOKE_RUNBOOK.md`
+  - `scripts/smoke_phase2_ws_lifecycle.sh`
+  - `scripts/smoke_ws_lifecycle_client.go`
 
-Критерий завершения:
-- трейдер может пройти полный базовый цикл connect -> register -> heartbeat -> disconnect.
-
-Операционный smoke-runbook (Sprint 6):
-- `guides/PHASE2_SMOKE_RUNBOOK.md`
-- helper script: `scripts/smoke_phase2_ws_lifecycle.sh`
-
-### Phase 1.5 Finalization (after Phase 2 WS protocol)
+### Phase 1.5 Finalization (current priority)
 
 - Реализовать `/metrics`.
 - Добавить базовые runtime/db/hsm/ws метрики.
@@ -88,10 +77,10 @@ Code touchpoints:
 
 ## 4. Приоритетный backlog (ближайшие задачи)
 
-1. Поднять WS protocol state machine (минимальный контракт из `API_SPECIFICATION.md`).
-2. Реализовать runtime session lifecycle.
-3. Добавить scheduler runtime skeleton.
-4. После WS runtime: добавить `/metrics` + exporter и integration tests.
+1. Реализовать `/metrics` endpoint и связать с текущим runtime state/health.
+2. Добавить Prometheus wiring и базовые runtime/db/hsm/ws метрики.
+3. Добавить integration tests для health/ws smoke path.
+4. Зафиксировать post-Phase-2 backlog для scheduler business logic (Phase 3).
 
 ## 5. Риски
 
