@@ -54,7 +54,7 @@ WebSocket:
 REST API:
   https://cts-core:8443/api/v1/*   - REST endpoints
   https://cts-core:8443/health     - Health check (public)
-  https://cts-core:8443/metrics    - Prometheus metrics (public, planned)
+  https://cts-core:8443/metrics    - Prometheus metrics (public)
 ```
 
 ### 1.2 Разделение ответственности
