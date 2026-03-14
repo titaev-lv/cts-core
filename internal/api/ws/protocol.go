@@ -10,6 +10,8 @@ const (
 	msgTypeEvent    = "event"
 	msgTypeResponse = "response"
 
+	supportedProtocolVersion = "2"
+
 	actionTraderRegister  = "trader.register"
 	actionRegisterAck     = "trader.register_ack"
 	actionTraderHeartbeat = "trader.heartbeat"
@@ -23,14 +25,20 @@ const (
 	errUnknownAction       = "UNKNOWN_ACTION"
 	errDuplicateConnection = "DUPLICATE_CONNECTION"
 	errInternalError       = "INTERNAL_ERROR"
+	errUnsupportedVersion  = "UNSUPPORTED_VERSION"
+	errRateLimited         = "RATE_LIMITED"
+	errDuplicateRequest    = "DUPLICATE_REQUEST"
+	errMessageTooLarge     = "MESSAGE_TOO_LARGE"
+	errActionFlood         = "ACTION_FLOOD"
 )
 
 type envelope struct {
-	Type      string          `json:"type"`
-	Action    string          `json:"action"`
-	RequestID string          `json:"request_id,omitempty"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
-	TS        int64           `json:"ts,omitempty"`
+	Type            string          `json:"type"`
+	Action          string          `json:"action"`
+	ProtocolVersion string          `json:"protocol_version,omitempty"`
+	RequestID       string          `json:"request_id,omitempty"`
+	Payload         json.RawMessage `json:"payload,omitempty"`
+	TS              int64           `json:"ts,omitempty"`
 }
 
 type registerRequest struct {

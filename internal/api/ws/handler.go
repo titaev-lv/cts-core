@@ -19,19 +19,24 @@ import (
 )
 
 type Handler struct {
-	upgrader          websocket.Upgrader
-	accessLog         *slog.Logger
-	outLog            *slog.Logger
-	sessionsMu        sync.RWMutex
-	sessions          map[string]TraderSnapshot
-	heartbeatInterval time.Duration
-	heartbeatTimeout  time.Duration
-	persistence       SessionPersistence
-	dbRetry           DBRetryConfig
-	stateManager      runtimeStateSink
-	active            atomic.Int64
-	total             atomic.Int64
-	lastSeen          atomic.Int64
+	upgrader            websocket.Upgrader
+	accessLog           *slog.Logger
+	outLog              *slog.Logger
+	sessionsMu          sync.RWMutex
+	sessions            map[string]TraderSnapshot
+	heartbeatInterval   time.Duration
+	heartbeatTimeout    time.Duration
+	maxPayloadBytes     int
+	maxMessagesPerSec   int
+	maxUnknownActions   int
+	unknownActionWindow time.Duration
+	requestDedupWindow  time.Duration
+	persistence         SessionPersistence
+	dbRetry             DBRetryConfig
+	stateManager        runtimeStateSink
+	active              atomic.Int64
+	total               atomic.Int64
+	lastSeen            atomic.Int64
 }
 
 type SessionCreateInput struct {
@@ -69,11 +74,16 @@ type runtimeTimeoutSink interface {
 }
 
 type HandlerOptions struct {
-	HeartbeatInterval time.Duration
-	HeartbeatTimeout  time.Duration
-	Persistence       SessionPersistence
-	DBRetry           DBRetryConfig
-	StateManager      runtimeStateSink
+	HeartbeatInterval   time.Duration
+	HeartbeatTimeout    time.Duration
+	MaxPayloadBytes     int
+	MaxMessagesPerSec   int
+	MaxUnknownActions   int
+	UnknownActionWindow time.Duration
+	RequestDedupWindow  time.Duration
+	Persistence         SessionPersistence
+	DBRetry             DBRetryConfig
+	StateManager        runtimeStateSink
 }
 
 type Stats struct {
@@ -115,14 +125,19 @@ func NewHandlerWithOptions(opts HandlerOptions) *Handler {
 			WriteBufferSize: 1024,
 			CheckOrigin:     func(_ *http.Request) bool { return true },
 		},
-		accessLog:         logger.GetWSAccess("ws"),
-		outLog:            logger.GetWSOut("ws"),
-		sessions:          make(map[string]TraderSnapshot),
-		heartbeatInterval: heartbeatInterval,
-		heartbeatTimeout:  heartbeatTimeout,
-		persistence:       opts.Persistence,
-		dbRetry:           normalizeDBRetryConfig(opts.DBRetry),
-		stateManager:      opts.StateManager,
+		accessLog:           logger.GetWSAccess("ws"),
+		outLog:              logger.GetWSOut("ws"),
+		sessions:            make(map[string]TraderSnapshot),
+		heartbeatInterval:   heartbeatInterval,
+		heartbeatTimeout:    heartbeatTimeout,
+		maxPayloadBytes:     normalizeMaxPayloadBytes(opts.MaxPayloadBytes),
+		maxMessagesPerSec:   normalizeMaxMessagesPerSec(opts.MaxMessagesPerSec),
+		maxUnknownActions:   normalizeMaxUnknownActions(opts.MaxUnknownActions),
+		unknownActionWindow: normalizeUnknownActionWindow(opts.UnknownActionWindow),
+		requestDedupWindow:  normalizeRequestDedupWindow(opts.RequestDedupWindow),
+		persistence:         opts.Persistence,
+		dbRetry:             normalizeDBRetryConfig(opts.DBRetry),
+		stateManager:        opts.StateManager,
 	}
 }
 
@@ -154,6 +169,11 @@ func (h *Handler) Serve(c *gin.Context) {
 	sessionID := generateConnID()
 	session := newSessionRuntime(sessionID)
 	persistedSession := false
+	requestIDs := make(map[string]time.Time)
+	rateWindowStart := time.Now().UTC()
+	rateWindowCount := 0
+	unknownWindowStart := time.Now().UTC()
+	unknownActionCount := 0
 
 	msgID := int64(0)
 	if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"connected\"}")); err == nil {
@@ -190,6 +210,24 @@ func (h *Handler) Serve(c *gin.Context) {
 		msgID++
 		h.accessLog.Info("ws_in", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "msg_type", msgType, "size_bytes", len(rawPayload))
 
+		if len(rawPayload) > h.maxPayloadBytes {
+			msgRequestID := resolveRequestID("", msgID)
+			h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errMessageTooLarge, "Payload exceeds maximum size", map[string]interface{}{"max_bytes": h.maxPayloadBytes, "size_bytes": len(rawPayload)}))
+			continue
+		}
+
+		now := time.Now().UTC()
+		if now.Sub(rateWindowStart) >= time.Second {
+			rateWindowStart = now
+			rateWindowCount = 0
+		}
+		rateWindowCount++
+		if rateWindowCount > h.maxMessagesPerSec {
+			msgRequestID := resolveRequestID("", msgID)
+			h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errRateLimited, "Inbound message rate limit exceeded", map[string]interface{}{"limit_per_sec": h.maxMessagesPerSec}))
+			continue
+		}
+
 		msgRequestID := resolveRequestID("", msgID)
 
 		if msgType != websocket.TextMessage {
@@ -204,6 +242,25 @@ func (h *Handler) Serve(c *gin.Context) {
 		}
 
 		msgRequestID = resolveRequestID(msg.RequestID, msgID)
+
+		if msg.ProtocolVersion != "" && msg.ProtocolVersion != supportedProtocolVersion {
+			h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errUnsupportedVersion, "Unsupported protocol version", map[string]interface{}{"supported": supportedProtocolVersion, "received": msg.ProtocolVersion}))
+			continue
+		}
+
+		if msg.Type == msgTypeRequest && msg.RequestID != "" {
+			cutoff := now.Add(-h.requestDedupWindow)
+			for id, ts := range requestIDs {
+				if ts.Before(cutoff) {
+					delete(requestIDs, id)
+				}
+			}
+			if _, exists := requestIDs[msg.RequestID]; exists {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errDuplicateRequest, "Duplicate request_id", map[string]interface{}{"request_id": msg.RequestID}))
+				continue
+			}
+			requestIDs[msg.RequestID] = now
+		}
 
 		if msg.Type != msgTypeRequest && msg.Type != msgTypeEvent {
 			h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "Unsupported message type", map[string]interface{}{"type": msg.Type}))
@@ -334,7 +391,16 @@ func (h *Handler) Serve(c *gin.Context) {
 				}))
 			}
 		default:
+			if now.Sub(unknownWindowStart) >= h.unknownActionWindow {
+				unknownWindowStart = now
+				unknownActionCount = 0
+			}
+			unknownActionCount++
 			h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errUnknownAction, "Unsupported action", map[string]interface{}{"action": msg.Action}))
+			if unknownActionCount >= h.maxUnknownActions {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errActionFlood, "Too many unknown actions", map[string]interface{}{"max_unknown_actions": h.maxUnknownActions}))
+				return
+			}
 		}
 	}
 }
@@ -502,4 +568,39 @@ func normalizeDBRetryConfig(cfg DBRetryConfig) DBRetryConfig {
 		cfg.MaxDelay = cfg.InitialDelay
 	}
 	return cfg
+}
+
+func normalizeMaxPayloadBytes(v int) int {
+	if v <= 0 {
+		return 64 * 1024
+	}
+	return v
+}
+
+func normalizeMaxMessagesPerSec(v int) int {
+	if v <= 0 {
+		return 100
+	}
+	return v
+}
+
+func normalizeMaxUnknownActions(v int) int {
+	if v <= 0 {
+		return 5
+	}
+	return v
+}
+
+func normalizeUnknownActionWindow(v time.Duration) time.Duration {
+	if v <= 0 {
+		return 10 * time.Second
+	}
+	return v
+}
+
+func normalizeRequestDedupWindow(v time.Duration) time.Duration {
+	if v <= 0 {
+		return 1 * time.Minute
+	}
+	return v
 }

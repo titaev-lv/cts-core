@@ -419,6 +419,84 @@ func TestRegisterFailsWhenTraderResolveFails(t *testing.T) {
 	assertErrorCode(t, resp, errInternalError)
 }
 
+func TestUnsupportedProtocolVersion(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:            msgTypeRequest,
+		Action:          actionTraderRegister,
+		ProtocolVersion: "999",
+		RequestID:       "proto-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-eu-1",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	assertErrorCode(t, resp, errUnsupportedVersion)
+}
+
+func TestDuplicateRequestID(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	registerTrader(t, conn, "trader-eu-1", "dup-req-1")
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "dup-req-2",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-eu-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+	resp := readEnvelope(t, conn)
+	if resp.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q, got %q", actionHeartbeatAck, resp.Action)
+	}
+
+	writeJSON(t, conn, hbReq)
+	dupResp := readEnvelope(t, conn)
+	assertErrorCode(t, dupResp, errDuplicateRequest)
+}
+
+func TestInboundRateLimit(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{MaxMessagesPerSec: 2})
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	registerTrader(t, conn, "trader-rl-1", "rl-reg-1")
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "rl-hb-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-rl-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+	_ = readEnvelope(t, conn)
+
+	hbReq.RequestID = "rl-hb-2"
+	writeJSON(t, conn, hbReq)
+	limitedResp := readEnvelope(t, conn)
+	assertErrorCode(t, limitedResp, errRateLimited)
+}
+
 func dialTestWS(t *testing.T) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
