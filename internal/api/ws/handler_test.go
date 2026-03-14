@@ -603,6 +603,72 @@ func TestUnknownActionFloodClosesConnection(t *testing.T) {
 	}
 }
 
+func TestDuplicateRequestIDWindowExpires(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{
+		RequestDedupWindow: 50 * time.Millisecond,
+		MaxMessagesPerSec:  100,
+	})
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+	registerTrader(t, conn, "trader-dedup-1", "dedup-reg-1")
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "dedup-window-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-dedup-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+	first := readEnvelope(t, conn)
+	if first.Action != actionHeartbeatAck {
+		t.Fatalf("expected first action %q, got %q", actionHeartbeatAck, first.Action)
+	}
+
+	time.Sleep(80 * time.Millisecond)
+	writeJSON(t, conn, hbReq)
+	second := readEnvelope(t, conn)
+	if second.Action != actionHeartbeatAck {
+		t.Fatalf("expected second action %q after dedup window expiry, got %q", actionHeartbeatAck, second.Action)
+	}
+}
+
+func TestUnknownActionWindowReset(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{
+		MaxUnknownActions:   2,
+		UnknownActionWindow: 60 * time.Millisecond,
+		MaxMessagesPerSec:   100,
+	})
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    "unknown.action",
+		RequestID: "unknown-window-1",
+		Payload:   mustJSON(t, map[string]interface{}{}),
+	}
+	writeJSON(t, conn, req)
+	resp1 := readEnvelope(t, conn)
+	assertErrorCode(t, resp1, errUnknownAction)
+
+	time.Sleep(100 * time.Millisecond)
+	req.RequestID = "unknown-window-2"
+	writeJSON(t, conn, req)
+	resp2 := readEnvelope(t, conn)
+	assertErrorCode(t, resp2, errUnknownAction)
+
+	if _, _, err := readMessageWithTimeout(conn, 120*time.Millisecond); err == nil {
+		t.Fatalf("expected no ACTION_FLOOD after unknown action window reset")
+	}
+}
+
 func dialTestWS(t *testing.T) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
