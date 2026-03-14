@@ -27,7 +27,7 @@
 - Реализовано: REST `/health`, `/ready`, `/live`; WS `trader.register` + `trader.heartbeat` (request/event), lifecycle timeout handling.
 - Реализовано: runtime session persistence (`TRADER_SESSION`) и scheduler cycle по active/healthy snapshots.
 - Реализовано: WS hardening (`UNSUPPORTED_VERSION`, `RATE_LIMITED`, `DUPLICATE_REQUEST`, `MESSAGE_TOO_LARGE`, `ACTION_FLOOD`, typed `INVALID_PAYLOAD.details`).
-- Операционная smoke-проверка Phase 2: `guides/PHASE2_SMOKE_RUNBOOK.md` + `scripts/smoke_phase2_ws_lifecycle.sh` + `scripts/smoke_ws_lifecycle_client.go`.
+- Операционная smoke-проверка Phase 2: `guides/PHASE2_SMOKE_RUNBOOK.md` + `tests/smoke_phase2_ws_lifecycle.sh` + `tests/smoke_ws_lifecycle_client.go`.
 - Не завершено: `/metrics` endpoint и Prometheus wiring.
 - Не завершено: полный runtime WS protocol (task dispatch/results, admin WS actions).
 

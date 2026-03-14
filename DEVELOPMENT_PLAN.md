@@ -44,8 +44,8 @@
 - Добавлен protocol hardening (version checks, rate limit, dedup, payload and action flood guards).
 - Добавлен Sprint 6 operational smoke набор:
   - `guides/PHASE2_SMOKE_RUNBOOK.md`
-  - `scripts/smoke_phase2_ws_lifecycle.sh`
-  - `scripts/smoke_ws_lifecycle_client.go`
+  - `tests/smoke_phase2_ws_lifecycle.sh`
+  - `tests/smoke_ws_lifecycle_client.go`
 
 ### Phase 1.5 Finalization (current priority)
 

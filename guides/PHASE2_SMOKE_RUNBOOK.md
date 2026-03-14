@@ -18,7 +18,7 @@ Validate that CTS-Core is operational in docker compose and that the base lifecy
 From `services/cts-core`:
 
 ```bash
-./scripts/smoke_phase2_ws_lifecycle.sh
+./tests/smoke_phase2_ws_lifecycle.sh
 ```
 
 Default mode is non-invasive:
@@ -28,20 +28,20 @@ Default mode is non-invasive:
 Optional mode with trader service startup:
 
 ```bash
-./scripts/smoke_phase2_ws_lifecycle.sh --with-trader
+./tests/smoke_phase2_ws_lifecycle.sh --with-trader
 ```
 
 Full invasive mode (original behavior, including startup + restart/shutdown checks):
 
 ```bash
-SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./scripts/smoke_phase2_ws_lifecycle.sh
+SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./tests/smoke_phase2_ws_lifecycle.sh
 ```
 
 What the script verifies:
 - health is reachable for already running CTS-Core stack (or starts stack if `SMOKE_SKIP_UP=0`)
 - `/health` is reachable from host (auto-detects `http/https` + `8080/8081`)
 - CTS-Core process is present in compose status
-- deterministic WS lifecycle via helper client (`scripts/smoke_ws_lifecycle_client.go`)
+- deterministic WS lifecycle via helper client (`tests/smoke_ws_lifecycle_client.go`)
 - WS lifecycle logs are present (`ws_register`, `ws_heartbeat`, `ws_disconnect|ws_timeout`)
 - optional restart/shutdown checks if `SMOKE_NO_RESTART=0`
 
@@ -78,7 +78,7 @@ Expected events in normal flow:
 4. Optional direct WS smoke client run (without full script):
 
 ```bash
-CTS_WS_URL=wss://localhost:8080/ws go run ./scripts/smoke_ws_lifecycle_client.go
+CTS_WS_URL=wss://localhost:8080/ws go run ./tests/smoke_ws_lifecycle_client.go
 ```
 
 ## 5. Restart Behavior Check

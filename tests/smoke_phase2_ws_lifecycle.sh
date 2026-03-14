@@ -125,7 +125,7 @@ docker compose -f "$COMPOSE_FILE" exec -T mysql \
    ON DUPLICATE KEY UPDATE DATE_MODIFY = CURRENT_TIMESTAMP;"
 
 echo "[smoke] running ws lifecycle client (connect/register/heartbeat/disconnect)"
-CTS_WS_URL="$CTS_WS_URL" CTS_SMOKE_TRADER_ID="$CTS_SMOKE_TRADER_ID" go run ./scripts/smoke_ws_lifecycle_client.go
+CTS_WS_URL="$CTS_WS_URL" CTS_SMOKE_TRADER_ID="$CTS_SMOKE_TRADER_ID" go run ./tests/smoke_ws_lifecycle_client.go
 
 echo "[smoke] checking ws lifecycle logs (last 5m)"
 LOGS="$(docker compose -f "$COMPOSE_FILE" logs --since 5m cts-core 2>/dev/null || true)"

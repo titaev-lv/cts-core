@@ -50,7 +50,7 @@ mysql -h 127.0.0.1 -u root -proot -e "USE ct_system; SHOW TABLES;"
 Быстрый smoke запуск (Phase 2):
 
 ```bash
-./scripts/smoke_phase2_ws_lifecycle.sh
+./tests/smoke_phase2_ws_lifecycle.sh
 ```
 
 По умолчанию smoke-скрипт невмешивающийся:
@@ -60,7 +60,7 @@ mysql -h 127.0.0.1 -u root -proot -e "USE ct_system; SHOW TABLES;"
 Полный инвазивный режим:
 
 ```bash
-SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./scripts/smoke_phase2_ws_lifecycle.sh
+SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./tests/smoke_phase2_ws_lifecycle.sh
 ```
 
 ## Roadmap (операционный)
