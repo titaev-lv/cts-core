@@ -153,6 +153,21 @@ func (c *Config) Validate() error {
 	if c.Session.CleanupInterval == 0 {
 		c.Session.CleanupInterval = 5 * time.Minute
 	}
+	if c.Session.ProtocolVersion == "" {
+		c.Session.ProtocolVersion = "2"
+	}
+	if c.Session.MaxPayloadBytes == 0 {
+		c.Session.MaxPayloadBytes = 64 * 1024
+	}
+	if c.Session.MaxUnknownActions == 0 {
+		c.Session.MaxUnknownActions = 5
+	}
+	if c.Session.UnknownActionWindow == 0 {
+		c.Session.UnknownActionWindow = 10 * time.Second
+	}
+	if c.Session.RequestDedupWindow == 0 {
+		c.Session.RequestDedupWindow = 1 * time.Minute
+	}
 
 	if c.Session.HeartbeatInterval <= 0 || c.Session.HeartbeatInterval > 24*time.Hour {
 		return fmt.Errorf("invalid session.heartbeat_interval: %s", c.Session.HeartbeatInterval)
@@ -168,6 +183,21 @@ func (c *Config) Validate() error {
 	}
 	if c.Session.CleanupInterval <= 0 || c.Session.CleanupInterval > 24*time.Hour {
 		return fmt.Errorf("invalid session.cleanup_interval: %s", c.Session.CleanupInterval)
+	}
+	if c.Session.ProtocolVersion == "" {
+		return fmt.Errorf("invalid session.protocol_version: cannot be empty")
+	}
+	if c.Session.MaxPayloadBytes < 1024 || c.Session.MaxPayloadBytes > 10*1024*1024 {
+		return fmt.Errorf("invalid session.max_payload_bytes: %d", c.Session.MaxPayloadBytes)
+	}
+	if c.Session.MaxUnknownActions <= 0 || c.Session.MaxUnknownActions > 1000 {
+		return fmt.Errorf("invalid session.max_unknown_actions: %d", c.Session.MaxUnknownActions)
+	}
+	if c.Session.UnknownActionWindow <= 0 || c.Session.UnknownActionWindow > 24*time.Hour {
+		return fmt.Errorf("invalid session.unknown_action_window: %s", c.Session.UnknownActionWindow)
+	}
+	if c.Session.RequestDedupWindow <= 0 || c.Session.RequestDedupWindow > 24*time.Hour {
+		return fmt.Errorf("invalid session.request_dedup_window: %s", c.Session.RequestDedupWindow)
 	}
 
 	if c.Scheduler.TaskAssignmentInterval == 0 {

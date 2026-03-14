@@ -124,6 +124,11 @@ session:
   heartbeat_timeout: 15s         # 3 missed heartbeats
   grace_period: 60s
   cleanup_interval: 300s         # 5 minutes
+  protocol_version: "2"
+  max_payload_bytes: 65536       # 64 KiB
+  max_unknown_actions: 5
+  unknown_action_window: 10s
+  request_dedup_window: 60s
 
 # Task scheduler (Phase 1.4)
 scheduler:

@@ -497,6 +497,64 @@ func TestInboundRateLimit(t *testing.T) {
 	assertErrorCode(t, limitedResp, errRateLimited)
 }
 
+func TestMessageTooLarge(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{MaxPayloadBytes: 64})
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	big := strings.Repeat("x", 512)
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "too-large-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": big,
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	assertErrorCode(t, resp, errMessageTooLarge)
+}
+
+func TestUnknownActionFloodClosesConnection(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{
+		MaxUnknownActions:   2,
+		UnknownActionWindow: 10 * time.Second,
+		MaxMessagesPerSec:   100,
+	})
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    "unknown.action",
+		RequestID: "flood-1",
+		Payload:   mustJSON(t, map[string]interface{}{}),
+	}
+	writeJSON(t, conn, req)
+	resp1 := readEnvelope(t, conn)
+	assertErrorCode(t, resp1, errUnknownAction)
+
+	req.RequestID = "flood-2"
+	writeJSON(t, conn, req)
+	resp2 := readEnvelope(t, conn)
+	assertErrorCode(t, resp2, errUnknownAction)
+
+	resp3 := readEnvelope(t, conn)
+	assertErrorCode(t, resp3, errActionFlood)
+
+	if _, _, err := readMessageWithTimeout(conn, 200*time.Millisecond); err == nil {
+		t.Fatalf("expected connection to be closed after action flood")
+	}
+}
+
 func dialTestWS(t *testing.T) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)

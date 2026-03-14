@@ -97,25 +97,23 @@ REST API (stateless):
 
 ```json
 {
-  "id": "uuid-v4",
   "type": "request|response|event",
   "action": "string",
+  "protocol_version": "2",
+  "request_id": "req-123",
   "payload": {},
-  "timestamp": 1737823200000,
-  "correlation_id": "uuid",
-  "version": "1.0"
+  "ts": 1737823200000
 }
 ```
 
 | Поле | Тип | Обязательное | Описание |
 |------|-----|-------------|----------|
-| `id` | string (UUID) | ✅ | Уникальный ID сообщения |
 | `type` | enum | ✅ | request, response, event |
 | `action` | string | ✅ | Действие (см. 2.3) |
+| `protocol_version` | string | ❌ | Версия WS-протокола; при несовместимости возвращается `UNSUPPORTED_VERSION` |
+| `request_id` | string | ❌ | Корреляция request/response; если отсутствует, сервер генерирует `srv-<msg_id>` |
 | `payload` | object | ✅ | Данные (может быть {}) |
-| `timestamp` | number | ✅ | Unix milliseconds |
-| `correlation_id` | string (UUID) | ❌ | Для response/event в ответ на request |
-| `version` | string | ❌ | Default: "1.0" |
+| `ts` | number | ❌ | Unix milliseconds, выставляется сервером в ответах |
 
 ### 2.3 Message Types
 
@@ -123,17 +121,17 @@ REST API (stateless):
 request:
   - Отправитель ожидает response
   - Timeout: 30 сек
-  - Требует correlation_id в ответе
+  - Корреляция по request_id
 
 response:
   - Ответ на request
-  - Содержит correlation_id из request
+  - Содержит request_id из request (или server-generated id)
   - Payload включает результат или error
 
 event:
   - Односторонняя коммуникация
   - Отправитель НЕ ожидает ответ
-  - Может содержать correlation_id (для контекста)
+  - request_id может отсутствовать
 ```
 
 ---
@@ -212,6 +210,11 @@ event:
 - `INVALID_PAYLOAD` - payload validation error (missing `trader_id`, `version`, or bad JSON)
 - `UNKNOWN_ACTION` - unsupported WS action
 - `DUPLICATE_CONNECTION` - duplicate `trader.register` in same WS session
+- `UNSUPPORTED_VERSION` - unsupported `protocol_version`
+- `RATE_LIMITED` - per-connection inbound message rate exceeded
+- `DUPLICATE_REQUEST` - duplicate `request_id` within dedup window
+- `MESSAGE_TOO_LARGE` - payload exceeds configured max size
+- `ACTION_FLOOD` - too many unknown actions in configured time window
 
 ---
 
@@ -1611,7 +1614,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 {
   "type": "response",
   "action": "error",
-  "correlation_id": "...",
+  "request_id": "req-123",
+  "ts": 1737823200001,
   "payload": {
     "code": "ERROR_CODE",
     "message": "Human-readable error message",
@@ -1625,6 +1629,13 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | Code | HTTP | Описание |
 |------|------|----------|
 | `INVALID_MESSAGE` | 400 | Некорректный формат сообщения |
+| `INVALID_PAYLOAD` | 400 | Ошибка структуры/содержимого payload |
+| `UNKNOWN_ACTION` | 400 | Неизвестное WS-действие |
+| `UNSUPPORTED_VERSION` | 400 | Неподдерживаемая версия WS-протокола |
+| `DUPLICATE_REQUEST` | 409 | Повторный `request_id` в окне дедупликации |
+| `MESSAGE_TOO_LARGE` | 413 | Превышен размер WS payload |
+| `ACTION_FLOOD` | 429 | Слишком много неизвестных `action` |
+| `RATE_LIMITED` | 429 | Превышен лимит входящих WS-сообщений на соединение |
 | `VALIDATION_ERROR` | 400 | Ошибка валидации данных |
 | `UNAUTHORIZED` | 401 | Нет или невалидный token |
 | `INVALID_CERTIFICATE` | 401 | Невалидный mTLS certificate |
@@ -1707,7 +1718,10 @@ Headers:
 ```yaml
 Max connections per IP: 5
 Max traders per IP: unlimited (pre-authorized via mTLS)
-Message rate limit: 1000 messages/min per connection
+Message rate limit (per connection): configurable, default 100 msg/sec
+Max payload size: configurable, default 64 KiB
+Unknown action flood guard: configurable, default 5 unknown actions / 10 sec
+Request dedup window: configurable, default 60 sec
 ```
 
 ---
@@ -1730,17 +1744,16 @@ Accept: application/vnd.cts.v1+json
 
 ```json
 {
-  "version": "1.0"  // in every message
+  "protocol_version": "2"
 }
 ```
 
 **Supported versions:**
-- `1.0` - Current (2026-01-27)
+- `2` - Current (2026-03-14)
 
 **Version compatibility:**
-- Server поддерживает last 2 major versions
-- Client должен указывать version в каждом сообщении
-- Server отвечает в той же version
+- Если `protocol_version` указан и не поддерживается, сервер возвращает `UNSUPPORTED_VERSION`
+- Если `protocol_version` не указан, применяется текущее поведение по умолчанию
 
 ---
 

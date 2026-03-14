@@ -356,6 +356,12 @@ func TestValidateSessionDefaults(t *testing.T) {
 	if cfg.Session.HeartbeatInterval == 0 || cfg.Session.HeartbeatTimeout == 0 || cfg.Session.GracePeriod == 0 || cfg.Session.CleanupInterval == 0 {
 		t.Fatalf("expected session defaults to be populated, got %+v", cfg.Session)
 	}
+	if cfg.Session.ProtocolVersion == "" {
+		t.Fatalf("expected session.protocol_version default to be populated")
+	}
+	if cfg.Session.MaxPayloadBytes == 0 || cfg.Session.MaxUnknownActions == 0 || cfg.Session.UnknownActionWindow == 0 || cfg.Session.RequestDedupWindow == 0 {
+		t.Fatalf("expected session hardening defaults to be populated, got %+v", cfg.Session)
+	}
 }
 
 func TestValidateSessionTimeoutLessThanInterval(t *testing.T) {
@@ -374,6 +380,27 @@ func TestValidateSessionTimeoutLessThanInterval(t *testing.T) {
 
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected Validate() to fail when heartbeat_timeout < heartbeat_interval")
+	}
+}
+
+func TestValidateSessionMaxPayloadBytesInvalid(t *testing.T) {
+	cfg := Config{
+		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
+		Session: SessionConfig{
+			HeartbeatInterval: 5 * time.Second,
+			HeartbeatTimeout:  15 * time.Second,
+			GracePeriod:       10 * time.Second,
+			CleanupInterval:   30 * time.Second,
+			ProtocolVersion:   "2",
+			MaxPayloadBytes:   1,
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected Validate() to fail for too small session.max_payload_bytes")
 	}
 }
 

@@ -20,6 +20,11 @@ type Options struct {
 	WSHandler             *ws.Handler
 	WSHeartbeatInterval   time.Duration
 	WSHeartbeatTimeout    time.Duration
+	WSMaxPayloadBytes     int
+	WSMaxMessagesPerSec   int
+	WSMaxUnknownActions   int
+	WSUnknownActionWindow time.Duration
+	WSRequestDedupWindow  time.Duration
 	HSMTrading            *hsm.Client
 	HSMTwoFA              *hsm.Client
 	StateManager          *state.Manager
@@ -43,10 +48,15 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) (*gin.Engine, *ws.Handler
 	wsHandler := opts.WSHandler
 	if wsHandler == nil {
 		wsHandler = ws.NewHandlerWithOptions(ws.HandlerOptions{
-			HeartbeatInterval: opts.WSHeartbeatInterval,
-			HeartbeatTimeout:  opts.WSHeartbeatTimeout,
-			Persistence:       newWSSessionPersistence(dbClient),
-			StateManager:      opts.StateManager,
+			HeartbeatInterval:   opts.WSHeartbeatInterval,
+			HeartbeatTimeout:    opts.WSHeartbeatTimeout,
+			MaxPayloadBytes:     opts.WSMaxPayloadBytes,
+			MaxMessagesPerSec:   opts.WSMaxMessagesPerSec,
+			MaxUnknownActions:   opts.WSMaxUnknownActions,
+			UnknownActionWindow: opts.WSUnknownActionWindow,
+			RequestDedupWindow:  opts.WSRequestDedupWindow,
+			Persistence:         newWSSessionPersistence(dbClient),
+			StateManager:        opts.StateManager,
 		})
 	}
 	healthHandler := NewHealthHandler(dbClient, HealthHandlerOptions{

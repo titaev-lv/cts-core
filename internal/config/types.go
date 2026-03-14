@@ -153,10 +153,15 @@ type LoggingConfig struct {
 
 // SessionConfig contains session management settings
 type SessionConfig struct {
-	HeartbeatInterval time.Duration `yaml:"heartbeat_interval"`
-	HeartbeatTimeout  time.Duration `yaml:"heartbeat_timeout"`
-	GracePeriod       time.Duration `yaml:"grace_period"`
-	CleanupInterval   time.Duration `yaml:"cleanup_interval"`
+	HeartbeatInterval   time.Duration `yaml:"heartbeat_interval"`
+	HeartbeatTimeout    time.Duration `yaml:"heartbeat_timeout"`
+	GracePeriod         time.Duration `yaml:"grace_period"`
+	CleanupInterval     time.Duration `yaml:"cleanup_interval"`
+	ProtocolVersion     string        `yaml:"protocol_version"`
+	MaxPayloadBytes     int           `yaml:"max_payload_bytes"`
+	MaxUnknownActions   int           `yaml:"max_unknown_actions"`
+	UnknownActionWindow time.Duration `yaml:"unknown_action_window"`
+	RequestDedupWindow  time.Duration `yaml:"request_dedup_window"`
 }
 
 // SchedulerConfig contains task scheduler settings
