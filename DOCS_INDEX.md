@@ -5,6 +5,7 @@
 ## Текущий срез
 
 - Кодовая реализация: Phase 2 завершен (WS runtime lifecycle, session persistence, scheduler skeleton).
+- Кодовая реализация: Phase 1.5 baseline завершен (`/metrics` + Prometheus wiring + integration coverage).
 - В проекте есть operational smoke tooling для compose проверки (`guides/PHASE2_SMOKE_RUNBOOK.md`).
 - Часть старых документов содержит статусы "Phase 0" и старые пути. Используйте этот индекс как точку входа.
 

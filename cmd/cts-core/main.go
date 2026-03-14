@@ -242,6 +242,8 @@ func main() {
 		StateManager:          stateManager,
 		StartedAt:             startedAt,
 		ServiceVersion:        version,
+		MetricsEnabled:        cfg.Metrics.Enabled,
+		MetricsPath:           cfg.Metrics.Path,
 	})
 
 	schedulerEngine := scheduler.NewEngine(

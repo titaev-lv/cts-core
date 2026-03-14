@@ -40,6 +40,7 @@ SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./tests/smoke_phase2_ws_lifecycle.sh
 What the script verifies:
 - health is reachable for already running CTS-Core stack (or starts stack if `SMOKE_SKIP_UP=0`)
 - `/health` is reachable from host (auto-detects `http/https` + `8080/8081`)
+- `/metrics` is reachable and exposes Prometheus series (`go_goroutines` and `cts_core_ws_active_connections`)
 - CTS-Core process is present in compose status
 - deterministic WS lifecycle via helper client (`tests/smoke_ws_lifecycle_client.go`)
 - WS lifecycle logs are present (`ws_register`, `ws_heartbeat`, `ws_disconnect|ws_timeout`)
@@ -75,7 +76,17 @@ Expected events in normal flow:
 - `ws_heartbeat`
 - `ws_disconnect` (graceful) OR `ws_timeout`
 
-4. Optional direct WS smoke client run (without full script):
+4. Verify metrics endpoint:
+
+```bash
+curl -k -sS https://localhost:8080/metrics || curl -sS http://localhost:8081/metrics
+```
+
+Expected series include:
+- `go_goroutines`
+- `cts_core_ws_active_connections`
+
+5. Optional direct WS smoke client run (without full script):
 
 ```bash
 CTS_WS_URL=wss://localhost:8080/ws go run ./tests/smoke_ws_lifecycle_client.go

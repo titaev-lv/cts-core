@@ -11,7 +11,16 @@
   - Базовый scheduler cycle на активных WS-сессиях
   - WS hardening: protocol version check, rate limiting, dedup, payload bounds, unknown-action flood guard
   - Phase 2 smoke tooling: runbook + lifecycle smoke script + deterministic WS smoke client
-- Текущий приоритет: Phase 1.5 finalization (`/metrics`, Prometheus wiring, integration tests).
+- Завершена Phase 1.5 finalization:
+  - `/metrics` endpoint
+  - Prometheus wiring c runtime series (`cts_core_*`) + Go/process collectors
+  - integration coverage: health + metrics + ws lifecycle path
+
+Быстрый check `/metrics`:
+
+```bash
+curl -k -sS https://localhost:8080/metrics || curl -sS http://localhost:8081/metrics
+```
 
 ## Быстрый старт
 
@@ -65,12 +74,8 @@ SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./tests/smoke_phase2_ws_lifecycle.sh
 
 ## Roadmap (операционный)
 
-1. Закрыть Phase 1.5 finalization:
-  - `/metrics`
-  - базовые runtime-метрики
-  - Prometheus wiring
-  - integration tests
-2. Расширять Phase 3 business logic (assignment/scoring/resource-aware scheduling).
+1. Расширять Phase 3 business logic (assignment/scoring/resource-aware scheduling).
+2. Развивать runtime metrics/reporting для scheduler quality signals.
 3. Поддерживать docs parity с кодом в каждом PR.
 
 ## Связанные сервисы

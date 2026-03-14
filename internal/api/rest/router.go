@@ -30,6 +30,8 @@ type Options struct {
 	StateManager          *state.Manager
 	StartedAt             time.Time
 	ServiceVersion        string
+	MetricsEnabled        bool
+	MetricsPath           string
 }
 
 // NewRouter configures REST routes and middleware.
@@ -73,6 +75,12 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) (*gin.Engine, *ws.Handler
 	rest.GET("/health", healthHandler.Health)
 	rest.GET("/ready", healthHandler.Ready)
 	rest.GET("/live", healthHandler.Live)
+	if opts.MetricsEnabled {
+		rest.GET(normalizeMetricsPath(opts.MetricsPath), newMetricsHandler(MetricsHandlerOptions{
+			WSHandler:    wsHandler,
+			StateManager: opts.StateManager,
+		}))
+	}
 
 	router.GET("/ws", middleware.PerIPRateLimit(opts.WSRequestsPerSecond, opts.WSBurst), wsHandler.Serve)
 

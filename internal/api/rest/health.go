@@ -46,8 +46,13 @@ func NewHealthHandler(dbClient *db.MySQLClient, opts HealthHandlerOptions) *Heal
 		startedAt = time.Now().UTC()
 	}
 
+	var pinger dbPinger
+	if dbClient != nil {
+		pinger = dbClient
+	}
+
 	return &HealthHandler{
-		dbClient:       dbClient,
+		dbClient:       pinger,
 		hsmTrading:     opts.HSMTrading,
 		hsmTwoFA:       opts.HSMTwoFA,
 		stateManager:   opts.StateManager,

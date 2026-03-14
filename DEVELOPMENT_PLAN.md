@@ -1,8 +1,8 @@
 # CTS-Core & Trader Development Plan
 
-> Версия: 2.1.0
+> Версия: 2.2.0
 > Обновлено: 2026-03-14
-> Статус: Phase 2 Complete | Phase 1.5 Finalization Priority
+> Статус: Phase 2 Complete | Phase 1.5 Complete | Phase 3 Priority
 > Связанные документы: `ARCHITECTURE.md`, `API_SPECIFICATION.md`, `DOCS_INDEX.md`, `CROSS_PROJECT_WWW_GO.md`
 
 ## 1. Цель
@@ -20,8 +20,7 @@
   - Phase 1.3: HSM client (Trading + 2FA)
   - Phase 1.4: state manager (`state/daemon.state`, backup, background sync)
   - Phase 2: WS runtime protocol + session lifecycle + scheduler skeleton + Sprint 6 smoke tooling
-- В работе (текущий приоритет):
-  - Phase 1.5 finalization: `/metrics`, Prometheus wiring, integration tests
+  - Phase 1.5 finalization: `/metrics`, Prometheus wiring, integration coverage
 
 ### База данных (локальный контур)
 
@@ -47,11 +46,20 @@
   - `tests/smoke_phase2_ws_lifecycle.sh`
   - `tests/smoke_ws_lifecycle_client.go`
 
-### Phase 1.5 Finalization (current priority)
+### Phase 1.5 Finalization (completed)
 
-- Реализовать `/metrics`.
-- Добавить базовые runtime/db/hsm/ws метрики.
-- Добавить интеграционные тесты для REST/WS health-path.
+Результат:
+- Реализован `/metrics` endpoint на REST роутере (конфигурируемый путь).
+- Добавлены Prometheus collectors:
+  - Go runtime/process
+  - `cts_core_ws_active_connections`
+  - `cts_core_ws_total_connections`
+  - `cts_core_runtime_scheduler_cycle_count`
+  - `cts_core_runtime_scheduler_last_candidate_count`
+  - `cts_core_runtime_ws_timeout_count`
+- Добавлены тесты:
+  - unit coverage для metrics endpoint/path normalization
+  - integration test `health + metrics + ws lifecycle`
 
 Code touchpoints:
 
@@ -77,10 +85,10 @@ Code touchpoints:
 
 ## 4. Приоритетный backlog (ближайшие задачи)
 
-1. Реализовать `/metrics` endpoint и связать с текущим runtime state/health.
-2. Добавить Prometheus wiring и базовые runtime/db/hsm/ws метрики.
-3. Добавить integration tests для health/ws smoke path.
-4. Зафиксировать post-Phase-2 backlog для scheduler business logic (Phase 3).
+1. Развивать scheduler business logic и scoring (Phase 3).
+2. Расширить модель runtime metrics под assignment quality/latency.
+3. Добавить integration/e2e сценарии task dispatch/results.
+4. Зафиксировать post-Phase-2 backlog в разрезе trader orchestration.
 
 ## 5. Риски
 

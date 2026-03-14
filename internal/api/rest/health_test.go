@@ -138,3 +138,41 @@ func TestHealthDatabaseErrorStillReturnsTelemetry(t *testing.T) {
 		t.Fatalf("unexpected websocket.last_heartbeat_unix: %v", websocketComp["last_heartbeat_unix"])
 	}
 }
+
+func TestNewHealthHandler_NilDBClientDoesNotPanic(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := NewHealthHandler(nil, HealthHandlerOptions{
+		StartedAt:      time.Now().Add(-time.Second),
+		ServiceName:    "cts-core",
+		ServiceVersion: "test",
+	})
+
+	r := gin.New()
+	r.GET("/health", h.Health)
+
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status 503, got %d", rr.Code)
+	}
+
+	var body map[string]interface{}
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	components, ok := body["components"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected components map in response")
+	}
+	databaseComp, ok := components["database"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected database component map")
+	}
+	if databaseComp["status"] != "not_configured" {
+		t.Fatalf("expected database status not_configured, got %v", databaseComp["status"])
+	}
+}

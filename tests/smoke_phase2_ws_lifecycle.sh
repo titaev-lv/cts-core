@@ -19,6 +19,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_DIR="${COMPOSE_DIR:-$(cd "$SCRIPT_DIR/../../.." && pwd)}"
 COMPOSE_FILE="${COMPOSE_FILE:-$COMPOSE_DIR/docker-compose.yml}"
 CTS_HEALTH_URL="${CTS_HEALTH_URL:-}"
+CTS_METRICS_URL="${CTS_METRICS_URL:-}"
 CTS_WS_URL="${CTS_WS_URL:-}"
 CTS_SMOKE_TRADER_ID="${CTS_SMOKE_TRADER_ID:-smoke-trader-e2e}"
 CTS_SMOKE_TRADER_NAME="${CTS_SMOKE_TRADER_NAME:-Smoke Trader E2E}"
@@ -116,6 +117,17 @@ if [ -z "$CTS_WS_URL" ]; then
   esac
 fi
 echo "[smoke] ws url: $CTS_WS_URL"
+
+if [ -z "$CTS_METRICS_URL" ]; then
+  CTS_METRICS_URL="${CTS_HEALTH_URL%/health}/metrics"
+fi
+echo "[smoke] metrics url: $CTS_METRICS_URL"
+
+echo "[smoke] checking metrics endpoint"
+if ! curl -k -fsS "$CTS_METRICS_URL" | grep -Eq "go_goroutines|cts_core_ws_active_connections"; then
+  echo "[smoke] ERROR: metrics endpoint missing expected prometheus series: $CTS_METRICS_URL" >&2
+  exit 1
+fi
 
 echo "[smoke] seeding smoke trader in MySQL"
 docker compose -f "$COMPOSE_FILE" exec -T mysql \

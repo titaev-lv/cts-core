@@ -1,8 +1,8 @@
 # CTS-Core Complete API Specification
 
-> **Версия документа**: 1.2.0  
+> **Версия документа**: 1.3.0  
 > **Обновлено**: 2026-03-14  
-> **Статус**: Целевая спецификация + Phase 2 runtime baseline реализован  
+> **Статус**: Целевая спецификация + Phase 2 runtime baseline + Phase 1.5 metrics baseline реализованы  
 > **Связь с**: ARCHITECTURE.md, TRADER_MODES.md, DEVELOPMENT_PLAN.md
 
 ---
@@ -27,8 +27,8 @@
 - Реализовано: REST `/health`, `/ready`, `/live`; WS `trader.register` + `trader.heartbeat` (request/event), lifecycle timeout handling.
 - Реализовано: runtime session persistence (`TRADER_SESSION`) и scheduler cycle по active/healthy snapshots.
 - Реализовано: WS hardening (`UNSUPPORTED_VERSION`, `RATE_LIMITED`, `DUPLICATE_REQUEST`, `MESSAGE_TOO_LARGE`, `ACTION_FLOOD`, typed `INVALID_PAYLOAD.details`).
+- Реализовано: REST `/metrics` c Prometheus wiring и runtime metrics сериями (`cts_core_*`).
 - Операционная smoke-проверка Phase 2: `guides/PHASE2_SMOKE_RUNBOOK.md` + `tests/smoke_phase2_ws_lifecycle.sh` + `tests/smoke_ws_lifecycle_client.go`.
-- Не завершено: `/metrics` endpoint и Prometheus wiring.
 - Не завершено: полный runtime WS protocol (task dispatch/results, admin WS actions).
 
 Ниже описан целевой API-контракт. Для текущего runtime-поведения приоритет у кода.
