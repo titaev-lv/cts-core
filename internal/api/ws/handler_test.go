@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -329,6 +330,95 @@ func TestRuntimeLifecycleTelemetrySync(t *testing.T) {
 	})
 }
 
+func TestSessionPersistenceLifecycle(t *testing.T) {
+	persistence := &testSessionPersistence{resolvedTraderID: 101}
+	h := NewHandlerWithOptions(HandlerOptions{
+		HeartbeatTimeout: 3 * time.Second,
+		Persistence:      persistence,
+	})
+
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	registerReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "persist-reg-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-eu-1",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, registerReq)
+
+	regResp := readEnvelope(t, conn)
+	if regResp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, regResp.Action)
+	}
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "persist-hb-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-eu-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+
+	hbResp := readEnvelope(t, conn)
+	if hbResp.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q, got %q", actionHeartbeatAck, hbResp.Action)
+	}
+
+	_ = conn.Close()
+
+	waitForCondition(t, 300*time.Millisecond, func() bool {
+		return persistence.finalizeCalls() > 0
+	})
+
+	if persistence.resolveCalls() == 0 {
+		t.Fatalf("expected ResolveTraderID to be called")
+	}
+	if persistence.createCalls() == 0 {
+		t.Fatalf("expected CreateSession to be called")
+	}
+	if persistence.heartbeatCalls() == 0 {
+		t.Fatalf("expected UpdateHeartbeat to be called")
+	}
+}
+
+func TestRegisterFailsWhenTraderResolveFails(t *testing.T) {
+	persistence := &testSessionPersistence{resolveErr: context.DeadlineExceeded}
+	h := NewHandlerWithOptions(HandlerOptions{
+		Persistence: persistence,
+	})
+
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "resolve-fail-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-unknown",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	assertErrorCode(t, resp, errInternalError)
+}
+
 func dialTestWS(t *testing.T) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -455,6 +545,74 @@ type testRuntimeStateSink struct {
 	lastHeartbeatUnix int64
 	lastTimeoutUnix   int64
 	timeoutCount      int64
+}
+
+type testSessionPersistence struct {
+	mu               sync.Mutex
+	resolvedTraderID int
+	resolveErr       error
+	createErr        error
+	heartbeatErr     error
+	finalizeErr      error
+	resolveCount     int
+	createCount      int
+	heartbeatCount   int
+	finalizeCount    int
+}
+
+func (p *testSessionPersistence) ResolveTraderID(_ context.Context, _ string) (int, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.resolveCount++
+	if p.resolveErr != nil {
+		return 0, p.resolveErr
+	}
+	return p.resolvedTraderID, nil
+}
+
+func (p *testSessionPersistence) CreateSession(_ context.Context, _ SessionCreateInput) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.createCount++
+	return p.createErr
+}
+
+func (p *testSessionPersistence) UpdateHeartbeat(_ context.Context, _ string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.heartbeatCount++
+	return p.heartbeatErr
+}
+
+func (p *testSessionPersistence) FinalizeSession(_ context.Context, _ string, _ string, _ *string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.finalizeCount++
+	return p.finalizeErr
+}
+
+func (p *testSessionPersistence) resolveCalls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.resolveCount
+}
+
+func (p *testSessionPersistence) createCalls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.createCount
+}
+
+func (p *testSessionPersistence) heartbeatCalls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.heartbeatCount
+}
+
+func (p *testSessionPersistence) finalizeCalls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.finalizeCount
 }
 
 func (s *testRuntimeStateSink) SetRuntimeWS(active int64, lastConnectUnix int64) {

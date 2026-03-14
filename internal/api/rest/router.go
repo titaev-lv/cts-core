@@ -42,6 +42,7 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) *gin.Engine {
 	wsHandler := ws.NewHandlerWithOptions(ws.HandlerOptions{
 		HeartbeatInterval: opts.WSHeartbeatInterval,
 		HeartbeatTimeout:  opts.WSHeartbeatTimeout,
+		Persistence:       newWSSessionPersistence(dbClient),
 		StateManager:      opts.StateManager,
 	})
 	healthHandler := NewHealthHandler(dbClient, HealthHandlerOptions{

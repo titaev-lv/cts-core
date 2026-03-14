@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -22,10 +23,34 @@ type Handler struct {
 	outLog            *slog.Logger
 	heartbeatInterval time.Duration
 	heartbeatTimeout  time.Duration
+	persistence       SessionPersistence
+	dbRetry           DBRetryConfig
 	stateManager      runtimeStateSink
 	active            atomic.Int64
 	total             atomic.Int64
 	lastSeen          atomic.Int64
+}
+
+type SessionCreateInput struct {
+	TraderID       int
+	SessionID      string
+	WSConnectionID string
+	IPAddress      string
+	ConnectedAt    time.Time
+	LastHeartbeat  time.Time
+}
+
+type SessionPersistence interface {
+	ResolveTraderID(ctx context.Context, traderRef string) (int, error)
+	CreateSession(ctx context.Context, input SessionCreateInput) error
+	UpdateHeartbeat(ctx context.Context, sessionID string) error
+	FinalizeSession(ctx context.Context, sessionID string, reason string, errorMsg *string) error
+}
+
+type DBRetryConfig struct {
+	MaxAttempts  int
+	InitialDelay time.Duration
+	MaxDelay     time.Duration
 }
 
 type runtimeStateSink interface {
@@ -43,6 +68,8 @@ type runtimeTimeoutSink interface {
 type HandlerOptions struct {
 	HeartbeatInterval time.Duration
 	HeartbeatTimeout  time.Duration
+	Persistence       SessionPersistence
+	DBRetry           DBRetryConfig
 	StateManager      runtimeStateSink
 }
 
@@ -79,6 +106,8 @@ func NewHandlerWithOptions(opts HandlerOptions) *Handler {
 		outLog:            logger.GetWSOut("ws"),
 		heartbeatInterval: heartbeatInterval,
 		heartbeatTimeout:  heartbeatTimeout,
+		persistence:       opts.Persistence,
+		dbRetry:           normalizeDBRetryConfig(opts.DBRetry),
 		stateManager:      opts.StateManager,
 	}
 }
@@ -110,6 +139,7 @@ func (h *Handler) Serve(c *gin.Context) {
 
 	sessionID := generateConnID()
 	session := newSessionRuntime(sessionID)
+	persistedSession := false
 
 	msgID := int64(0)
 	if err := conn.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"connected\"}")); err == nil {
@@ -122,9 +152,18 @@ func (h *Handler) Serve(c *gin.Context) {
 		if err != nil {
 			nowMs := time.Now().UnixMilli()
 			reason := classifyDisconnectReason(err)
+			errMsg := err.Error()
 			if reason == disconnectReasonTimeout && session.markTimedOut(nowMs) {
 				h.syncRuntimeTimeout(nowMs / 1000)
 				h.accessLog.Warn("ws_timeout", "conn_id", connID, "request_id", requestID, "trader_id", session.traderID, "session_id", session.sessionID, "session_state", session.state, "timed_out_at_ms", session.timedOutAtMs, "last_heartbeat_ms", session.lastHeartbeatMs)
+			}
+
+			if h.persistence != nil && persistedSession {
+				if persistErr := h.withDBWriteRetry("finalize_session", func(ctx context.Context) error {
+					return h.persistence.FinalizeSession(ctx, session.sessionID, string(reason), &errMsg)
+				}); persistErr != nil {
+					h.accessLog.Error("ws_persist_finalize_failed", "conn_id", connID, "session_id", session.sessionID, "reason", reason, "error", persistErr)
+				}
 			}
 
 			stateBeforeDisconnect := session.state
@@ -185,6 +224,33 @@ func (h *Handler) Serve(c *gin.Context) {
 			}
 
 			nowMs := time.Now().UnixMilli()
+			if h.persistence != nil {
+				var resolvedTraderID int
+				if err := h.withDBWriteRetry("resolve_trader", func(ctx context.Context) error {
+					var resolveErr error
+					resolvedTraderID, resolveErr = h.persistence.ResolveTraderID(ctx, req.TraderID)
+					return resolveErr
+				}); err != nil {
+					h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInternalError, "Failed to resolve trader registration", nil))
+					continue
+				}
+
+				if err := h.withDBWriteRetry("create_session", func(ctx context.Context) error {
+					return h.persistence.CreateSession(ctx, SessionCreateInput{
+						TraderID:       resolvedTraderID,
+						SessionID:      session.sessionID,
+						WSConnectionID: connID,
+						IPAddress:      clientIP,
+						ConnectedAt:    time.UnixMilli(nowMs).UTC(),
+						LastHeartbeat:  time.UnixMilli(nowMs).UTC(),
+					})
+				}); err != nil {
+					h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInternalError, "Failed to create trader session", nil))
+					continue
+				}
+				persistedSession = true
+			}
+
 			session.markRegistered(req.TraderID, nowMs)
 			if h.heartbeatTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
@@ -226,6 +292,15 @@ func (h *Handler) Serve(c *gin.Context) {
 			}
 
 			nowMs := time.Now().UnixMilli()
+			if h.persistence != nil && persistedSession {
+				if err := h.withDBWriteRetry("update_heartbeat", func(ctx context.Context) error {
+					return h.persistence.UpdateHeartbeat(ctx, session.sessionID)
+				}); err != nil {
+					h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInternalError, "Failed to persist heartbeat", nil))
+					continue
+				}
+			}
+
 			session.markHeartbeat(nowMs)
 			h.syncRuntimeHeartbeat(nowMs / 1000)
 			if h.heartbeatTimeout > 0 {
@@ -299,6 +374,38 @@ func (h *Handler) syncRuntimeTimeout(lastTimeoutUnix int64) {
 	sink.IncrementRuntimeWSTimeout(lastTimeoutUnix)
 }
 
+func (h *Handler) withDBWriteRetry(op string, fn func(ctx context.Context) error) error {
+	if h.persistence == nil {
+		return nil
+	}
+
+	var lastErr error
+	delay := h.dbRetry.InitialDelay
+
+	for attempt := 1; attempt <= h.dbRetry.MaxAttempts; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err := fn(ctx)
+		cancel()
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+		if attempt == h.dbRetry.MaxAttempts {
+			break
+		}
+
+		h.accessLog.Warn("ws_db_retry", "operation", op, "attempt", attempt, "max_attempts", h.dbRetry.MaxAttempts, "retry_in", delay.String(), "error", err)
+		time.Sleep(delay)
+		delay = delay * 2
+		if delay > h.dbRetry.MaxDelay {
+			delay = h.dbRetry.MaxDelay
+		}
+	}
+
+	return fmt.Errorf("%s failed after %d attempts: %w", op, h.dbRetry.MaxAttempts, lastErr)
+}
+
 func generateConnID() string {
 	buf := make([]byte, 12)
 	if _, err := rand.Read(buf); err != nil {
@@ -323,4 +430,20 @@ func durationSecondsCeil(d time.Duration) int {
 		return 1
 	}
 	return secs
+}
+
+func normalizeDBRetryConfig(cfg DBRetryConfig) DBRetryConfig {
+	if cfg.MaxAttempts <= 0 {
+		cfg.MaxAttempts = 3
+	}
+	if cfg.InitialDelay <= 0 {
+		cfg.InitialDelay = 100 * time.Millisecond
+	}
+	if cfg.MaxDelay <= 0 {
+		cfg.MaxDelay = 1 * time.Second
+	}
+	if cfg.MaxDelay < cfg.InitialDelay {
+		cfg.MaxDelay = cfg.InitialDelay
+	}
+	return cfg
 }

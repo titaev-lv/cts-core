@@ -14,7 +14,32 @@ import (
 )
 
 func TestTraderSessionRepository_Create(t *testing.T) {
-	t.Skip("Requires integration test with real MySQL (NamedExecContext)")
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	repo := NewTraderSessionRepository(sqlxDB)
+
+	now := time.Now().UTC()
+	session := &models.TraderSession{
+		TraderID:       1,
+		SessionID:      "session-uuid",
+		WSConnectionID: sql.NullString{String: "ws-123", Valid: true},
+		IPAddress:      sql.NullString{String: "192.168.1.100", Valid: true},
+		ConnectedAt:    now,
+		LastHeartbeat:  now,
+	}
+
+	mock.ExpectExec("INSERT INTO TRADER_SESSION").
+		WithArgs(1, "session-uuid", sql.NullString{String: "ws-123", Valid: true}, sql.NullString{String: "192.168.1.100", Valid: true}, now, now).
+		WillReturnResult(sqlmock.NewResult(42, 1))
+
+	err = repo.Create(context.Background(), session)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(42), session.ID)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestTraderSessionRepository_GetByID_Success(t *testing.T) {
@@ -170,6 +195,35 @@ func TestTraderSessionRepository_EndSession(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	err = repo.EndSession(context.Background(), "session-uuid", models.DisconnectGraceful, &errorMsg)
+
+	assert.NoError(t, err)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestTraderSessionRepository_EndSession_IdempotentWhenAlreadyEnded(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	repo := NewTraderSessionRepository(sqlxDB)
+
+	errorMsg := "connection lost"
+	mock.ExpectExec("UPDATE TRADER_SESSION SET ENDED_AT").
+		WithArgs(sqlmock.AnyArg(), models.DisconnectError, &errorMsg, "session-uuid").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	now := time.Now()
+	rows := sqlmock.NewRows([]string{
+		"ID", "TRADER_ID", "SESSION_ID", "WS_CONNECTION_ID", "IP_ADDRESS",
+		"CONNECTED_AT", "LAST_HEARTBEAT", "ENDED_AT", "DISCONNECT_REASON", "ERROR_MESSAGE",
+	}).AddRow(1, 1, "session-uuid", "ws-123", "192.168.1.100", now, now, now, "error", "connection lost")
+
+	mock.ExpectQuery("SELECT .* FROM TRADER_SESSION WHERE SESSION_ID").
+		WithArgs("session-uuid").
+		WillReturnRows(rows)
+
+	err = repo.EndSession(context.Background(), "session-uuid", models.DisconnectError, &errorMsg)
 
 	assert.NoError(t, err)
 	assert.NoError(t, mock.ExpectationsWereMet())

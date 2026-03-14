@@ -37,7 +37,16 @@ func (r *traderSessionRepository) Create(ctx context.Context, session *models.Tr
 		)
 	`
 
-	result, err := sqlx.NamedExecContext(ctx, r.db, query, session)
+	params := map[string]interface{}{
+		"trader_id":        session.TraderID,
+		"session_id":       session.SessionID,
+		"ws_connection_id": session.WSConnectionID,
+		"ip_address":       session.IPAddress,
+		"connected_at":     session.ConnectedAt,
+		"last_heartbeat":   session.LastHeartbeat,
+	}
+
+	result, err := sqlx.NamedExecContext(ctx, r.db, query, params)
 	if err != nil {
 		return fmt.Errorf("failed to create trader session: %w", err)
 	}
@@ -181,7 +190,17 @@ func (r *traderSessionRepository) EndSession(ctx context.Context, sessionID stri
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("session not found or already ended: %s", sessionID)
+		session, lookupErr := r.GetBySessionID(ctx, sessionID)
+		if lookupErr != nil {
+			return fmt.Errorf("failed to verify session end state: %w", lookupErr)
+		}
+		if session == nil {
+			return fmt.Errorf("session not found: %s", sessionID)
+		}
+		if session.EndedAt.Valid {
+			return nil
+		}
+		return fmt.Errorf("session not ended and no rows affected: %s", sessionID)
 	}
 
 	return nil

@@ -22,6 +22,7 @@ const (
 	errInvalidPayload      = "INVALID_PAYLOAD"
 	errUnknownAction       = "UNKNOWN_ACTION"
 	errDuplicateConnection = "DUPLICATE_CONNECTION"
+	errInternalError       = "INTERNAL_ERROR"
 )
 
 type envelope struct {
