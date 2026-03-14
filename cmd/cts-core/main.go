@@ -243,6 +243,7 @@ func main() {
 		scheduler.Config{
 			Interval:      cfg.Scheduler.TaskAssignmentInterval,
 			HealthyWindow: cfg.Session.HeartbeatTimeout,
+			MetricsSink:   stateManager,
 		},
 		wsHandler,
 		nil,

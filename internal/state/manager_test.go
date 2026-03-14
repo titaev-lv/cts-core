@@ -133,4 +133,22 @@ func TestUpdatedAtChangesOnMutations(t *testing.T) {
 	if state.Runtime.WSTimeoutCount != 1 {
 		t.Fatalf("expected WSTimeoutCount=1, got %d", state.Runtime.WSTimeoutCount)
 	}
+
+	time.Sleep(10 * time.Millisecond)
+	schedulerRunUnix := time.Now().Unix()
+	mgr.SetRuntimeScheduler(7, 3, schedulerRunUnix)
+	afterScheduler := mgr.GetState().UpdatedAt
+	if !afterScheduler.After(afterTimeout) {
+		t.Fatalf("expected UpdatedAt to move forward after SetRuntimeScheduler")
+	}
+	state = mgr.GetState()
+	if state.Runtime.SchedulerCycleCount != 7 {
+		t.Fatalf("expected SchedulerCycleCount=7, got %d", state.Runtime.SchedulerCycleCount)
+	}
+	if state.Runtime.SchedulerLastCandidateCount != 3 {
+		t.Fatalf("expected SchedulerLastCandidateCount=3, got %d", state.Runtime.SchedulerLastCandidateCount)
+	}
+	if state.Runtime.SchedulerLastRunUnix != schedulerRunUnix {
+		t.Fatalf("expected SchedulerLastRunUnix=%d, got %d", schedulerRunUnix, state.Runtime.SchedulerLastRunUnix)
+	}
 }

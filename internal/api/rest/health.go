@@ -120,6 +120,13 @@ func (h *HealthHandler) Health(c *gin.Context) {
 			"database":    dbComponent,
 			"hsm_trading": hsmTradingComponent,
 			"hsm_2fa":     hsmTwoFAComponent,
+			"scheduler": gin.H{
+				"status":               "ok",
+				"cycle_count":          runtimeSnapshot.SchedulerCycleCount,
+				"last_candidate_count": runtimeSnapshot.SchedulerLastCandidateCount,
+				"last_run_unix":        runtimeSnapshot.SchedulerLastRunUnix,
+				"assignment_mode":      "placeholder_noop",
+			},
 			"websocket": gin.H{
 				"status":              "ok",
 				"active_connections":  wsStats.ActiveConnections,

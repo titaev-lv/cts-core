@@ -33,6 +33,7 @@ func TestHealthIncludesWSTelemetryFields(t *testing.T) {
 
 	mgr.SetRuntimeWSHeartbeat(1700000001)
 	mgr.IncrementRuntimeWSTimeout(1700000002)
+	mgr.SetRuntimeScheduler(11, 4, 1700000003)
 
 	h := &HealthHandler{
 		dbClient:       testDBPinger{},
@@ -61,6 +62,7 @@ func TestHealthIncludesWSTelemetryFields(t *testing.T) {
 	components := body["components"].(map[string]interface{})
 	websocketComp := components["websocket"].(map[string]interface{})
 	tradersComp := components["traders"].(map[string]interface{})
+	schedulerComp := components["scheduler"].(map[string]interface{})
 
 	if websocketComp["last_heartbeat_unix"].(float64) != 1700000001 {
 		t.Fatalf("unexpected websocket.last_heartbeat_unix: %v", websocketComp["last_heartbeat_unix"])
@@ -80,6 +82,16 @@ func TestHealthIncludesWSTelemetryFields(t *testing.T) {
 	}
 	if tradersComp["timeout_count"].(float64) != 1 {
 		t.Fatalf("unexpected traders.timeout_count: %v", tradersComp["timeout_count"])
+	}
+
+	if schedulerComp["cycle_count"].(float64) != 11 {
+		t.Fatalf("unexpected scheduler.cycle_count: %v", schedulerComp["cycle_count"])
+	}
+	if schedulerComp["last_candidate_count"].(float64) != 4 {
+		t.Fatalf("unexpected scheduler.last_candidate_count: %v", schedulerComp["last_candidate_count"])
+	}
+	if schedulerComp["last_run_unix"].(float64) != 1700000003 {
+		t.Fatalf("unexpected scheduler.last_run_unix: %v", schedulerComp["last_run_unix"])
 	}
 }
 

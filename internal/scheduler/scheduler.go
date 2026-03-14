@@ -22,6 +22,11 @@ type AssignmentRunner interface {
 	Assign(ctx context.Context, candidate Candidate) error
 }
 
+// MetricsSink receives runtime scheduler telemetry for health/state surfaces.
+type MetricsSink interface {
+	SetRuntimeScheduler(cycleCount int64, lastCandidateCount int64, lastRunUnix int64)
+}
+
 // Candidate is an eligible trader for assignment cycle.
 type Candidate struct {
 	TraderID          string
@@ -39,6 +44,7 @@ type EngineStats struct {
 type Config struct {
 	Interval      time.Duration
 	HealthyWindow time.Duration
+	MetricsSink   MetricsSink
 }
 
 // Engine runs periodic assignment cycles from runtime session snapshots.
@@ -53,6 +59,7 @@ type Engine struct {
 	wg            sync.WaitGroup
 	cycles        atomic.Int64
 	lastCandidate atomic.Int64
+	metricsSink   MetricsSink
 }
 
 // NoopAssignment is a placeholder assignment implementation.
@@ -86,6 +93,7 @@ func NewEngine(cfg Config, provider SnapshotProvider, assignment AssignmentRunne
 		assignment:    assignment,
 		interval:      interval,
 		healthyWindow: healthyWindow,
+		metricsSink:   cfg.MetricsSink,
 		stopCh:        make(chan struct{}),
 	}
 }
@@ -142,6 +150,7 @@ func (e *Engine) runCycle(now time.Time) {
 	candidates := SelectCandidates(snapshots, now, e.healthyWindow)
 	e.lastCandidate.Store(int64(len(candidates)))
 	cycle := e.cycles.Add(1)
+	e.syncMetrics(cycle, int64(len(candidates)), now.Unix())
 
 	if len(candidates) == 0 {
 		e.logger.Debug("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", 0, "assigned", false)
@@ -156,6 +165,13 @@ func (e *Engine) runCycle(now time.Time) {
 	}
 
 	e.logger.Info("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", len(candidates), "assigned", true, "trader_id", selected.TraderID, "session_id", selected.SessionID)
+}
+
+func (e *Engine) syncMetrics(cycleCount int64, candidateCount int64, lastRunUnix int64) {
+	if e.metricsSink == nil {
+		return
+	}
+	e.metricsSink.SetRuntimeScheduler(cycleCount, candidateCount, lastRunUnix)
 }
 
 // SelectCandidates keeps only active and healthy WS sessions.

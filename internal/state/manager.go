@@ -181,6 +181,15 @@ func (m *Manager) IncrementRuntimeWSTimeout(lastTimeoutUnix int64) {
 	m.state.UpdatedAt = time.Now().UTC()
 }
 
+func (m *Manager) SetRuntimeScheduler(cycleCount int64, lastCandidateCount int64, lastRunUnix int64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Runtime.SchedulerCycleCount = cycleCount
+	m.state.Runtime.SchedulerLastCandidateCount = lastCandidateCount
+	m.state.Runtime.SchedulerLastRunUnix = lastRunUnix
+	m.state.UpdatedAt = time.Now().UTC()
+}
+
 func (m *Manager) GetState() DaemonState {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

@@ -42,6 +42,18 @@ type countingAssignment struct {
 	count atomic.Int64
 }
 
+type recordingMetricsSink struct {
+	cycleCount     atomic.Int64
+	candidateCount atomic.Int64
+	lastRunUnix    atomic.Int64
+}
+
+func (s *recordingMetricsSink) SetRuntimeScheduler(cycleCount int64, lastCandidateCount int64, lastRunUnix int64) {
+	s.cycleCount.Store(cycleCount)
+	s.candidateCount.Store(lastCandidateCount)
+	s.lastRunUnix.Store(lastRunUnix)
+}
+
 func (a *countingAssignment) Assign(_ context.Context, _ Candidate) error {
 	a.count.Add(1)
 	return nil
@@ -105,5 +117,28 @@ func TestSchedulerLoop_StableUnderRapidChanges(t *testing.T) {
 	stats := engine.Stats()
 	if stats.Cycles == 0 {
 		t.Fatal("expected scheduler to execute at least one cycle")
+	}
+}
+
+func TestRunCycle_PublishesMetricsToSink(t *testing.T) {
+	metrics := &recordingMetricsSink{}
+	engine := NewEngine(
+		Config{Interval: time.Second, HealthyWindow: 5 * time.Second, MetricsSink: metrics},
+		staticProvider{snapshots: []ws.TraderSnapshot{{TraderID: "t-1", SessionID: "s-1", State: "active", LastHeartbeatUnix: time.Now().UTC().Unix()}}},
+		&countingAssignment{},
+		slog.Default(),
+	)
+
+	now := time.Now().UTC()
+	engine.RunCycleForTest(now)
+
+	if metrics.cycleCount.Load() != 1 {
+		t.Fatalf("expected metrics cycle count 1, got %d", metrics.cycleCount.Load())
+	}
+	if metrics.candidateCount.Load() != 1 {
+		t.Fatalf("expected metrics candidate count 1, got %d", metrics.candidateCount.Load())
+	}
+	if metrics.lastRunUnix.Load() != now.Unix() {
+		t.Fatalf("expected metrics last run unix %d, got %d", now.Unix(), metrics.lastRunUnix.Load())
 	}
 }
