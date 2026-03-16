@@ -57,6 +57,15 @@ func TestMetricsEndpointEnabled(t *testing.T) {
 	if !strings.Contains(body, "cts_core_runtime_scheduler_cycle_count") {
 		t.Fatalf("expected cts_core_runtime_scheduler_cycle_count metric")
 	}
+	if !strings.Contains(body, "cts_core_scheduler_assign_attempts_total") {
+		t.Fatalf("expected cts_core_scheduler_assign_attempts_total metric")
+	}
+	if !strings.Contains(body, "cts_core_scheduler_assign_latency_ms") {
+		t.Fatalf("expected cts_core_scheduler_assign_latency_ms metric")
+	}
+	if !strings.Contains(body, "cts_core_scheduler_resource_rejections_total") {
+		t.Fatalf("expected cts_core_scheduler_resource_rejections_total metric")
+	}
 }
 
 func TestMetricsEndpointDisabled(t *testing.T) {

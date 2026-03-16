@@ -2,6 +2,8 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"sort"
@@ -19,6 +21,12 @@ const (
 	taskTypeTrade   = "trade"
 	taskTypeMonitor = "monitor"
 
+	assignResultSuccess              = "success"
+	assignResultNoCandidates         = "no_candidates"
+	assignResultDedup                = "dedup"
+	assignResultFailedRetryExhausted = "failed_retry_exhausted"
+	assignResultFailedNonRetryable   = "failed_non_retryable"
+
 	loadWeight                   = 1000.0
 	monitorCapacityPenaltyWeight = 200.0
 	missingLatencyProfilePenalty = 5000.0
@@ -27,6 +35,12 @@ const (
 	defaultResourceHardLimit     = 0.98
 	defaultResourceSoftLimit     = 0.75
 	defaultResourceSoftPenaltyMs = 600.0
+
+	defaultAssignmentMaxRetries          = 2
+	defaultAssignmentRetryInitialBackoff = 100 * time.Millisecond
+	defaultAssignmentRetryMaxBackoff     = 2 * time.Second
+	defaultAssignmentRetryMultiplier     = 2.0
+	defaultDeadLetterMaxSize             = 256
 )
 
 // SnapshotProvider returns current runtime WS trader snapshots.
@@ -39,9 +53,27 @@ type AssignmentRunner interface {
 	Assign(ctx context.Context, candidate Candidate) error
 }
 
+// TaskIdentityProvider returns current assignment task identity for idempotency keying.
+type TaskIdentityProvider interface {
+	CurrentTaskID(ctx context.Context, taskType string) (taskID string, ok bool, err error)
+}
+
+// RetryClassifier classifies assignment errors for retry policy.
+type RetryClassifier interface {
+	IsRetryable(err error) bool
+}
+
 // MetricsSink receives runtime scheduler telemetry for health/state surfaces.
 type MetricsSink interface {
 	SetRuntimeScheduler(cycleCount int64, lastCandidateCount int64, lastRunUnix int64)
+}
+
+type schedulerQualityMetricsSink interface {
+	RecordSchedulerAssignAttempt(result string)
+	SetSchedulerAssignLatencyMs(latencyMs float64)
+	SetSchedulerScoreDistribution(p50 float64, p95 float64)
+	SetSchedulerLastAssignStatus(status string)
+	RecordSchedulerResourceRejection(reason string)
 }
 
 // LatencyTestDispatcher pushes server-initiated latency tests to active trader sessions.
@@ -74,6 +106,20 @@ type Candidate struct {
 	Score             float64
 }
 
+// DeadLetterEntry captures a failed assignment after retry policy decision.
+type DeadLetterEntry struct {
+	TaskID           string
+	TraderID         string
+	SessionID        string
+	TaskType         string
+	Epoch            int64
+	Attempts         int
+	Retryable        bool
+	Error            string
+	LastAttemptUnix  int64
+	FirstFailureUnix int64
+}
+
 // EngineStats contains basic cycle telemetry.
 type EngineStats struct {
 	Cycles            int64
@@ -93,6 +139,15 @@ type Config struct {
 	ResourceHardLimit         float64
 	ResourceSoftLimit         float64
 	ResourceSoftPenaltyMs     float64
+	TaskIdentityProvider      TaskIdentityProvider
+	AssignmentDedupWindow     time.Duration
+	AssignmentEpoch           time.Duration
+	AssignmentMaxRetries      int
+	AssignmentRetryInitial    time.Duration
+	AssignmentRetryMax        time.Duration
+	AssignmentRetryMultiplier float64
+	RetryClassifier           RetryClassifier
+	DeadLetterMaxSize         int
 }
 
 // Engine runs periodic assignment cycles from runtime session snapshots.
@@ -116,6 +171,20 @@ type Engine struct {
 	resourceHard  float64
 	resourceSoft  float64
 	resourceW     float64
+	taskIdentity  TaskIdentityProvider
+	dedupWindow   time.Duration
+	dedupEpoch    time.Duration
+	dedupMu       sync.Mutex
+	dedupAssigned map[string]int64
+	retryMax      int
+	retryInitial  time.Duration
+	retryMaxDelay time.Duration
+	retryMult     float64
+	retryClassify RetryClassifier
+	sleepFn       func(time.Duration)
+	dlqMax        int
+	dlqMu         sync.Mutex
+	dlq           []DeadLetterEntry
 }
 
 // NoopAssignment is a placeholder assignment implementation.
@@ -149,6 +218,45 @@ func NewEngine(cfg Config, provider SnapshotProvider, assignment AssignmentRunne
 		resourceSoft = resourceHard * 0.8
 	}
 
+	dedupWindow := cfg.AssignmentDedupWindow
+	if dedupWindow <= 0 {
+		dedupWindow = 2 * interval
+	}
+	dedupEpoch := cfg.AssignmentEpoch
+	if dedupEpoch <= 0 {
+		dedupEpoch = interval
+	}
+
+	retryMax := cfg.AssignmentMaxRetries
+	if retryMax < 0 {
+		retryMax = 0
+	}
+	if retryMax == 0 {
+		retryMax = defaultAssignmentMaxRetries
+	}
+
+	retryInitial := cfg.AssignmentRetryInitial
+	if retryInitial <= 0 {
+		retryInitial = defaultAssignmentRetryInitialBackoff
+	}
+	retryMaxDelay := cfg.AssignmentRetryMax
+	if retryMaxDelay <= 0 {
+		retryMaxDelay = defaultAssignmentRetryMaxBackoff
+	}
+	if retryMaxDelay < retryInitial {
+		retryMaxDelay = retryInitial
+	}
+
+	retryMult := cfg.AssignmentRetryMultiplier
+	if retryMult <= 1 {
+		retryMult = defaultAssignmentRetryMultiplier
+	}
+
+	dlqMax := cfg.DeadLetterMaxSize
+	if dlqMax <= 0 {
+		dlqMax = defaultDeadLetterMaxSize
+	}
+
 	return &Engine{
 		logger:        logger,
 		provider:      provider,
@@ -164,6 +272,18 @@ func NewEngine(cfg Config, provider SnapshotProvider, assignment AssignmentRunne
 		resourceHard:  resourceHard,
 		resourceSoft:  resourceSoft,
 		resourceW:     normalizeResourceSoftPenalty(cfg.ResourceSoftPenaltyMs),
+		taskIdentity:  cfg.TaskIdentityProvider,
+		dedupWindow:   dedupWindow,
+		dedupEpoch:    dedupEpoch,
+		dedupAssigned: make(map[string]int64),
+		retryMax:      retryMax,
+		retryInitial:  retryInitial,
+		retryMaxDelay: retryMaxDelay,
+		retryMult:     retryMult,
+		retryClassify: cfg.RetryClassifier,
+		sleepFn:       time.Sleep,
+		dlqMax:        dlqMax,
+		dlq:           make([]DeadLetterEntry, 0, minInt(dlqMax, 16)),
 		stopCh:        make(chan struct{}),
 	}
 }
@@ -237,23 +357,258 @@ func (e *Engine) runCycle(now time.Time) {
 	requiredExchanges := namesFromExchangeRefs(requiredExchangeRefs)
 	candidates := SelectCandidatesForTask(snapshots, now, e.healthyWindow, e.taskType, requiredExchanges)
 	candidates = e.applyResourceConstraints(context.Background(), candidates, snapshots, requiredExchangeRefs)
+	e.publishScoreDistribution(candidates)
 	e.lastCandidate.Store(int64(len(candidates)))
 	cycle := e.cycles.Add(1)
 	e.syncMetrics(cycle, int64(len(candidates)), now.Unix())
+	assignStart := time.Now()
 
 	if len(candidates) == 0 {
+		e.publishAssignOutcome(assignResultNoCandidates, 0)
 		e.logger.Debug("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", 0, "assigned", false)
 		return
 	}
 
 	selected := candidates[0]
-	err := e.assignment.Assign(context.Background(), selected)
-	if err != nil {
-		e.logger.Warn("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", len(candidates), "assigned", false, "trader_id", selected.TraderID, "session_id", selected.SessionID, "error", err)
+	taskID := e.resolveTaskID(context.Background())
+	epoch := e.assignmentEpoch(now)
+	if e.seenAssignment(taskID, selected.TraderID, epoch, now.Unix()) {
+		e.publishAssignOutcome(assignResultDedup, time.Since(assignStart))
+		e.logger.Info("scheduler_assignment_dedup", "task_id", taskID, "trader_id", selected.TraderID, "epoch", epoch, "reason", "duplicate_assignment")
 		return
 	}
 
+	result, err := e.assignWithRetry(context.Background(), selected, taskID, epoch, now.Unix())
+	if err != nil {
+		e.publishAssignOutcome(result, time.Since(assignStart))
+		e.logger.Warn("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", len(candidates), "assigned", false, "trader_id", selected.TraderID, "session_id", selected.SessionID, "error", err)
+		return
+	}
+	e.markAssignment(taskID, selected.TraderID, epoch, now.Unix())
+	e.publishAssignOutcome(assignResultSuccess, time.Since(assignStart))
+
 	e.logger.Info("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", len(candidates), "assigned", true, "trader_id", selected.TraderID, "session_id", selected.SessionID)
+}
+
+func (e *Engine) resolveTaskID(ctx context.Context) string {
+	if e.taskIdentity != nil {
+		taskID, ok, err := e.taskIdentity.CurrentTaskID(ctx, e.taskType)
+		if err != nil {
+			e.logger.Warn("scheduler_task_identity", "task_type", e.taskType, "error", err)
+		} else if ok && strings.TrimSpace(taskID) != "" {
+			return strings.TrimSpace(taskID)
+		}
+	}
+	return "scheduler." + e.taskType
+}
+
+func (e *Engine) assignmentEpoch(now time.Time) int64 {
+	window := e.dedupEpoch
+	if window <= 0 {
+		window = time.Second
+	}
+	return now.UnixNano() / window.Nanoseconds()
+}
+
+func assignmentIdempotencyKey(taskID string, traderID string, epoch int64) string {
+	return fmt.Sprintf("%s|%s|%d", taskID, traderID, epoch)
+}
+
+func (e *Engine) seenAssignment(taskID string, traderID string, epoch int64, nowUnix int64) bool {
+	key := assignmentIdempotencyKey(taskID, traderID, epoch)
+	e.dedupMu.Lock()
+	defer e.dedupMu.Unlock()
+	e.evictOldAssignments(nowUnix)
+	_, exists := e.dedupAssigned[key]
+	return exists
+}
+
+func (e *Engine) markAssignment(taskID string, traderID string, epoch int64, nowUnix int64) {
+	key := assignmentIdempotencyKey(taskID, traderID, epoch)
+	e.dedupMu.Lock()
+	e.evictOldAssignments(nowUnix)
+	e.dedupAssigned[key] = nowUnix
+	e.dedupMu.Unlock()
+}
+
+func (e *Engine) evictOldAssignments(nowUnix int64) {
+	if len(e.dedupAssigned) == 0 {
+		return
+	}
+	cutoff := nowUnix - int64(e.dedupWindow.Seconds())
+	for key, ts := range e.dedupAssigned {
+		if ts <= cutoff {
+			delete(e.dedupAssigned, key)
+		}
+	}
+}
+
+// DeadLetters returns a snapshot of in-memory dead-letter queue entries.
+func (e *Engine) DeadLetters() []DeadLetterEntry {
+	e.dlqMu.Lock()
+	defer e.dlqMu.Unlock()
+	out := make([]DeadLetterEntry, len(e.dlq))
+	copy(out, e.dlq)
+	return out
+}
+
+func (e *Engine) assignWithRetry(ctx context.Context, candidate Candidate, taskID string, epoch int64, nowUnix int64) (string, error) {
+	firstFailureUnix := int64(0)
+	maxAttempts := e.retryMax + 1
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		err := e.assignment.Assign(ctx, candidate)
+		if err == nil {
+			return assignResultSuccess, nil
+		}
+
+		retryable := e.isRetryable(err)
+		if firstFailureUnix == 0 {
+			firstFailureUnix = nowUnix
+		}
+
+		if !retryable || attempt == maxAttempts {
+			result := assignResultFailedRetryExhausted
+			if !retryable {
+				result = assignResultFailedNonRetryable
+			}
+			e.pushDeadLetter(DeadLetterEntry{
+				TaskID:           taskID,
+				TraderID:         candidate.TraderID,
+				SessionID:        candidate.SessionID,
+				TaskType:         e.taskType,
+				Epoch:            epoch,
+				Attempts:         attempt,
+				Retryable:        retryable,
+				Error:            err.Error(),
+				LastAttemptUnix:  nowUnix,
+				FirstFailureUnix: firstFailureUnix,
+			})
+			return result, err
+		}
+
+		backoff := e.retryBackoff(attempt)
+		e.logger.Warn("scheduler_assignment_retry", "task_id", taskID, "trader_id", candidate.TraderID, "attempt", attempt, "max_attempts", maxAttempts, "retry_in", backoff, "error", err)
+		e.sleepFn(backoff)
+	}
+
+	return assignResultFailedRetryExhausted, nil
+}
+
+func (e *Engine) retryBackoff(attempt int) time.Duration {
+	if attempt <= 0 {
+		attempt = 1
+	}
+	delay := float64(e.retryInitial)
+	for i := 1; i < attempt; i++ {
+		delay *= e.retryMult
+		if delay >= float64(e.retryMaxDelay) {
+			return e.retryMaxDelay
+		}
+	}
+	out := time.Duration(delay)
+	if out > e.retryMaxDelay {
+		return e.retryMaxDelay
+	}
+	if out < 0 {
+		return e.retryInitial
+	}
+	return out
+}
+
+func (e *Engine) isRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if e.retryClassify != nil {
+		return e.retryClassify.IsRetryable(err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	type temporary interface {
+		Temporary() bool
+	}
+	var te temporary
+	if errors.As(err, &te) && te.Temporary() {
+		return true
+	}
+	return false
+}
+
+func (e *Engine) pushDeadLetter(entry DeadLetterEntry) {
+	e.dlqMu.Lock()
+	defer e.dlqMu.Unlock()
+	if e.dlqMax <= 0 {
+		return
+	}
+	if len(e.dlq) >= e.dlqMax {
+		copy(e.dlq[0:], e.dlq[1:])
+		e.dlq[len(e.dlq)-1] = entry
+		return
+	}
+	e.dlq = append(e.dlq, entry)
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func (e *Engine) publishAssignOutcome(result string, latency time.Duration) {
+	if e.metricsSink == nil {
+		return
+	}
+	sink, ok := e.metricsSink.(schedulerQualityMetricsSink)
+	if !ok {
+		return
+	}
+	sink.RecordSchedulerAssignAttempt(result)
+	sink.SetSchedulerLastAssignStatus(result)
+	if latency > 0 {
+		sink.SetSchedulerAssignLatencyMs(float64(latency.Microseconds()) / 1000.0)
+	} else {
+		sink.SetSchedulerAssignLatencyMs(0)
+	}
+}
+
+func (e *Engine) publishScoreDistribution(candidates []Candidate) {
+	if e.metricsSink == nil || len(candidates) == 0 {
+		return
+	}
+	sink, ok := e.metricsSink.(schedulerQualityMetricsSink)
+	if !ok {
+		return
+	}
+	scores := make([]float64, 0, len(candidates))
+	for _, c := range candidates {
+		scores = append(scores, c.Score)
+	}
+	sort.Float64s(scores)
+	p50 := percentile(scores, 0.50)
+	p95 := percentile(scores, 0.95)
+	sink.SetSchedulerScoreDistribution(p50, p95)
+}
+
+func percentile(sorted []float64, q float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	if q <= 0 {
+		return sorted[0]
+	}
+	if q >= 1 {
+		return sorted[len(sorted)-1]
+	}
+	idx := int(math.Ceil(q*float64(len(sorted)))) - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
 }
 
 func (e *Engine) resolveRequiredExchangeRefs(ctx context.Context) []ExchangeRef {
@@ -304,6 +659,7 @@ func (e *Engine) applyResourceConstraints(ctx context.Context, candidates []Cand
 		}
 		if snap.TraderDBID <= 0 {
 			e.logger.Warn("scheduler_resource_reject", "trader_id", candidate.TraderID, "session_id", candidate.SessionID, "reason", "missing_trader_db_id")
+			e.recordResourceRejection("missing_trader_db_id")
 			continue
 		}
 
@@ -317,11 +673,13 @@ func (e *Engine) applyResourceConstraints(ctx context.Context, candidates []Cand
 			util, found, err := e.resources.GetTraderExchangeUtilization(ctx, snap.TraderDBID, ref.ExchangeID)
 			if err != nil {
 				e.logger.Warn("scheduler_resource_reject", "trader_id", candidate.TraderID, "session_id", candidate.SessionID, "exchange_id", ref.ExchangeID, "reason", "resource_lookup_error", "error", err)
+				e.recordResourceRejection("resource_lookup_error")
 				hardRejected = true
 				break
 			}
 			if !found {
 				e.logger.Warn("scheduler_resource_reject", "trader_id", candidate.TraderID, "session_id", candidate.SessionID, "exchange_id", ref.ExchangeID, "reason", "missing_resource")
+				e.recordResourceRejection("missing_resource")
 				hardRejected = true
 				break
 			}
@@ -329,6 +687,7 @@ func (e *Engine) applyResourceConstraints(ctx context.Context, candidates []Cand
 			util = clampUnit(util)
 			if util >= e.resourceHard {
 				e.logger.Info("scheduler_resource_reject", "trader_id", candidate.TraderID, "session_id", candidate.SessionID, "exchange_id", ref.ExchangeID, "reason", "hard_limit", "utilization", util)
+				e.recordResourceRejection("hard_limit")
 				hardRejected = true
 				break
 			}
@@ -361,6 +720,16 @@ func (e *Engine) applyResourceConstraints(ctx context.Context, candidates []Cand
 	return result
 }
 
+func (e *Engine) recordResourceRejection(reason string) {
+	if e.metricsSink == nil {
+		return
+	}
+	sink, ok := e.metricsSink.(schedulerQualityMetricsSink)
+	if !ok {
+		return
+	}
+	sink.RecordSchedulerResourceRejection(reason)
+}
 func (e *Engine) runLatencySweep(now time.Time) {
 	if e.provider == nil || e.dispatcher == nil {
 		return

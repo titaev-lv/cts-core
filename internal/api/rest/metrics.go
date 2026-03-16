@@ -11,6 +11,21 @@ import (
 	"github.com/titaev-lv/cts-core/internal/state"
 )
 
+var defaultSchedulerAssignResults = []string{
+	"success",
+	"no_candidates",
+	"dedup",
+	"failed_retry_exhausted",
+	"failed_non_retryable",
+}
+
+var defaultSchedulerResourceRejectionReasons = []string{
+	"missing_trader_db_id",
+	"resource_lookup_error",
+	"missing_resource",
+	"hard_limit",
+}
+
 // MetricsHandlerOptions configures Prometheus handler data sources.
 type MetricsHandlerOptions struct {
 	WSHandler    *ws.Handler
@@ -85,6 +100,69 @@ func newMetricsHandler(opts MetricsHandlerOptions) gin.HandlerFunc {
 		},
 	))
 
+	assignAttempts := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "scheduler_assign_attempts_total", Help: "Scheduler assignment attempts by result"},
+		[]string{"result"},
+	)
+	registry.MustRegister(assignAttempts)
+
+	resourceRejections := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "scheduler_resource_rejections_total", Help: "Scheduler resource rejections by reason"},
+		[]string{"reason"},
+	)
+	registry.MustRegister(resourceRejections)
+
+	scoreDistribution := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "scheduler_score_distribution", Help: "Scheduler score distribution snapshot"},
+		[]string{"quantile"},
+	)
+	registry.MustRegister(scoreDistribution)
+
+	registry.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "scheduler_assign_latency_ms", Help: "Last scheduler assignment latency in milliseconds"},
+		func() float64 {
+			if opts.StateManager == nil {
+				return 0
+			}
+			return opts.StateManager.GetState().Runtime.SchedulerAssignLatencyMs
+		},
+	))
+
+	registry.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "scheduler_candidate_pool_size", Help: "Last candidate pool size from scheduler cycle"},
+		func() float64 {
+			if opts.StateManager == nil {
+				return 0
+			}
+			return float64(opts.StateManager.GetState().Runtime.SchedulerLastCandidateCount)
+		},
+	))
+
 	handler := promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
-	return gin.WrapH(handler)
+	return func(c *gin.Context) {
+		assignAttempts.Reset()
+		for _, result := range defaultSchedulerAssignResults {
+			assignAttempts.WithLabelValues(result).Set(0)
+		}
+
+		resourceRejections.Reset()
+		for _, reason := range defaultSchedulerResourceRejectionReasons {
+			resourceRejections.WithLabelValues(reason).Set(0)
+		}
+
+		if opts.StateManager != nil {
+			runtimeState := opts.StateManager.GetState().Runtime
+			for result, count := range runtimeState.SchedulerAssignAttempts {
+				assignAttempts.WithLabelValues(result).Set(float64(count))
+			}
+
+			for reason, count := range runtimeState.SchedulerResourceRejections {
+				resourceRejections.WithLabelValues(reason).Set(float64(count))
+			}
+
+			scoreDistribution.WithLabelValues("p50").Set(runtimeState.SchedulerScoreP50)
+			scoreDistribution.WithLabelValues("p95").Set(runtimeState.SchedulerScoreP95)
+		}
+		handler.ServeHTTP(c.Writer, c.Request)
+	}
 }

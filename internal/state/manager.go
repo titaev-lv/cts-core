@@ -89,6 +89,12 @@ func (m *Manager) Load() error {
 	if loaded.Version == "" {
 		loaded.Version = "1.0"
 	}
+	if loaded.Runtime.SchedulerAssignAttempts == nil {
+		loaded.Runtime.SchedulerAssignAttempts = map[string]int64{}
+	}
+	if loaded.Runtime.SchedulerResourceRejections == nil {
+		loaded.Runtime.SchedulerResourceRejections = map[string]int64{}
+	}
 	m.state = &loaded
 	m.logger.Info("state loaded", "path", m.stateFile, "version", loaded.Version)
 	return nil
@@ -187,6 +193,63 @@ func (m *Manager) SetRuntimeScheduler(cycleCount int64, lastCandidateCount int64
 	m.state.Runtime.SchedulerCycleCount = cycleCount
 	m.state.Runtime.SchedulerLastCandidateCount = lastCandidateCount
 	m.state.Runtime.SchedulerLastRunUnix = lastRunUnix
+	m.state.UpdatedAt = time.Now().UTC()
+}
+
+func (m *Manager) RecordSchedulerAssignAttempt(result string) {
+	if result == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.state.Runtime.SchedulerAssignAttempts == nil {
+		m.state.Runtime.SchedulerAssignAttempts = map[string]int64{}
+	}
+	m.state.Runtime.SchedulerAssignAttempts[result]++
+	m.state.UpdatedAt = time.Now().UTC()
+}
+
+func (m *Manager) SetSchedulerAssignLatencyMs(latencyMs float64) {
+	if latencyMs < 0 {
+		latencyMs = 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Runtime.SchedulerAssignLatencyMs = latencyMs
+	m.state.UpdatedAt = time.Now().UTC()
+}
+
+func (m *Manager) SetSchedulerScoreDistribution(p50 float64, p95 float64) {
+	if p50 < 0 {
+		p50 = 0
+	}
+	if p95 < 0 {
+		p95 = 0
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Runtime.SchedulerScoreP50 = p50
+	m.state.Runtime.SchedulerScoreP95 = p95
+	m.state.UpdatedAt = time.Now().UTC()
+}
+
+func (m *Manager) SetSchedulerLastAssignStatus(status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.state.Runtime.SchedulerLastAssignStatus = status
+	m.state.UpdatedAt = time.Now().UTC()
+}
+
+func (m *Manager) RecordSchedulerResourceRejection(reason string) {
+	if reason == "" {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.state.Runtime.SchedulerResourceRejections == nil {
+		m.state.Runtime.SchedulerResourceRejections = map[string]int64{}
+	}
+	m.state.Runtime.SchedulerResourceRejections[reason]++
 	m.state.UpdatedAt = time.Now().UTC()
 }
 

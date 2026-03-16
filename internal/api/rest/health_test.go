@@ -34,6 +34,11 @@ func TestHealthIncludesWSTelemetryFields(t *testing.T) {
 	mgr.SetRuntimeWSHeartbeat(1700000001)
 	mgr.IncrementRuntimeWSTimeout(1700000002)
 	mgr.SetRuntimeScheduler(11, 4, 1700000003)
+	mgr.SetSchedulerLastAssignStatus("success")
+	mgr.SetSchedulerAssignLatencyMs(12.5)
+	mgr.SetSchedulerScoreDistribution(100, 200)
+	mgr.RecordSchedulerAssignAttempt("success")
+	mgr.RecordSchedulerResourceRejection("hard_limit")
 
 	h := &HealthHandler{
 		dbClient:       testDBPinger{},
@@ -92,6 +97,12 @@ func TestHealthIncludesWSTelemetryFields(t *testing.T) {
 	}
 	if schedulerComp["last_run_unix"].(float64) != 1700000003 {
 		t.Fatalf("unexpected scheduler.last_run_unix: %v", schedulerComp["last_run_unix"])
+	}
+	if schedulerComp["last_assign_status"].(string) != "success" {
+		t.Fatalf("unexpected scheduler.last_assign_status: %v", schedulerComp["last_assign_status"])
+	}
+	if schedulerComp["assign_latency_ms"].(float64) != 12.5 {
+		t.Fatalf("unexpected scheduler.assign_latency_ms: %v", schedulerComp["assign_latency_ms"])
 	}
 }
 

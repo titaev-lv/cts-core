@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -40,6 +41,33 @@ func (p *mutableProvider) setSnapshots(s []ws.TraderSnapshot) {
 
 type countingAssignment struct {
 	count atomic.Int64
+}
+
+type failingAssignment struct {
+	count atomic.Int64
+}
+
+type flakyAssignment struct {
+	mu        sync.Mutex
+	failTimes int
+	count     atomic.Int64
+}
+
+type nonRetryableError struct {
+	msg string
+}
+
+func (e nonRetryableError) Error() string {
+	return e.msg
+}
+
+type staticRetryClassifier struct {
+	retryable bool
+}
+
+type staticTaskIdentityProvider struct {
+	taskID string
+	err    error
 }
 
 type recordingMetricsSink struct {
@@ -119,6 +147,36 @@ func (s *recordingMetricsSink) SetRuntimeScheduler(cycleCount int64, lastCandida
 func (a *countingAssignment) Assign(_ context.Context, _ Candidate) error {
 	a.count.Add(1)
 	return nil
+}
+
+func (a *failingAssignment) Assign(_ context.Context, _ Candidate) error {
+	a.count.Add(1)
+	return errors.New("assign failed")
+}
+
+func (a *flakyAssignment) Assign(_ context.Context, _ Candidate) error {
+	a.count.Add(1)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.failTimes > 0 {
+		a.failTimes--
+		return context.DeadlineExceeded
+	}
+	return nil
+}
+
+func (p staticTaskIdentityProvider) CurrentTaskID(_ context.Context, _ string) (string, bool, error) {
+	if p.err != nil {
+		return "", false, p.err
+	}
+	if p.taskID == "" {
+		return "", false, nil
+	}
+	return p.taskID, true, nil
+}
+
+func (c staticRetryClassifier) IsRetryable(_ error) bool {
+	return c.retryable
 }
 
 func TestSelectCandidates_ActiveAndHealthyOnly(t *testing.T) {
@@ -522,5 +580,183 @@ func TestRunCycle_ResourceSoftPenaltyAffectsOrder(t *testing.T) {
 	}
 	if items[0].Score >= items[1].Score {
 		t.Fatalf("expected first score lower than second after soft penalty: %f >= %f", items[0].Score, items[1].Score)
+	}
+}
+
+func TestRunCycle_AssignmentIdempotencySkipsDuplicateInSameEpoch(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	assignment := &countingAssignment{}
+	engine := NewEngine(
+		Config{
+			Interval:              time.Second,
+			HealthyWindow:         5 * time.Minute,
+			TaskIdentityProvider:  staticTaskIdentityProvider{taskID: "task-42"},
+			AssignmentDedupWindow: 2 * time.Minute,
+			AssignmentEpoch:       1 * time.Minute,
+		},
+		staticProvider{snapshots: []ws.TraderSnapshot{
+			{TraderID: "t-dup", SessionID: "s-dup", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.1, EffectiveExchanges: []string{"binance"}},
+		}},
+		assignment,
+		slog.Default(),
+	)
+
+	engine.RunCycleForTest(now)
+	engine.RunCycleForTest(now.Add(10 * time.Second)) // same epoch, same trader, same taskID
+
+	if assignment.count.Load() != 1 {
+		t.Fatalf("expected assignment to run once due to dedup, got %d", assignment.count.Load())
+	}
+}
+
+func TestRunCycle_AssignmentIdempotencyAllowsNextEpoch(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	assignment := &countingAssignment{}
+	engine := NewEngine(
+		Config{
+			Interval:              time.Second,
+			HealthyWindow:         5 * time.Minute,
+			TaskIdentityProvider:  staticTaskIdentityProvider{taskID: "task-42"},
+			AssignmentDedupWindow: 3 * time.Minute,
+			AssignmentEpoch:       1 * time.Minute,
+		},
+		staticProvider{snapshots: []ws.TraderSnapshot{
+			{TraderID: "t-dup", SessionID: "s-dup", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.1, EffectiveExchanges: []string{"binance"}},
+		}},
+		assignment,
+		slog.Default(),
+	)
+
+	engine.RunCycleForTest(now)
+	engine.RunCycleForTest(now.Add(65 * time.Second)) // next epoch
+
+	if assignment.count.Load() != 2 {
+		t.Fatalf("expected assignment to run again in new epoch, got %d", assignment.count.Load())
+	}
+}
+
+func TestRunCycle_AssignmentFailureIsNotMarkedAsDuplicate(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	assignment := &failingAssignment{}
+	engine := NewEngine(
+		Config{
+			Interval:              time.Second,
+			HealthyWindow:         5 * time.Minute,
+			TaskIdentityProvider:  staticTaskIdentityProvider{taskID: "task-42"},
+			AssignmentDedupWindow: 2 * time.Minute,
+			AssignmentEpoch:       1 * time.Minute,
+		},
+		staticProvider{snapshots: []ws.TraderSnapshot{
+			{TraderID: "t-dup", SessionID: "s-dup", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.1, EffectiveExchanges: []string{"binance"}},
+		}},
+		assignment,
+		slog.Default(),
+	)
+
+	engine.RunCycleForTest(now)
+	engine.RunCycleForTest(now.Add(10 * time.Second))
+
+	if assignment.count.Load() != 2 {
+		t.Fatalf("expected failed assignment attempts to retry, got %d", assignment.count.Load())
+	}
+}
+
+func TestRunCycle_AssignmentRetryableEventuallySucceeds(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	assignment := &flakyAssignment{failTimes: 2}
+	engine := NewEngine(
+		Config{
+			Interval:                  time.Second,
+			HealthyWindow:             5 * time.Minute,
+			TaskIdentityProvider:      staticTaskIdentityProvider{taskID: "task-retry-success"},
+			AssignmentMaxRetries:      3,
+			AssignmentRetryInitial:    0,
+			AssignmentRetryMax:        0,
+			AssignmentRetryMultiplier: 2,
+		},
+		staticProvider{snapshots: []ws.TraderSnapshot{
+			{TraderID: "t-retry", SessionID: "s-retry", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.1, EffectiveExchanges: []string{"binance"}},
+		}},
+		assignment,
+		slog.Default(),
+	)
+	engine.sleepFn = func(_ time.Duration) {}
+
+	engine.RunCycleForTest(now)
+
+	if assignment.count.Load() != 3 {
+		t.Fatalf("expected 3 assignment attempts (2 fail + 1 success), got %d", assignment.count.Load())
+	}
+	if len(engine.DeadLetters()) != 0 {
+		t.Fatalf("expected no dead-letter entry on eventual success")
+	}
+}
+
+func TestRunCycle_AssignmentNonRetryableNoRetryAndDeadLetter(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	assignment := &failingAssignment{}
+	engine := NewEngine(
+		Config{
+			Interval:             time.Second,
+			HealthyWindow:        5 * time.Minute,
+			TaskIdentityProvider: staticTaskIdentityProvider{taskID: "task-non-retry"},
+			AssignmentMaxRetries: 5,
+			RetryClassifier:      staticRetryClassifier{retryable: false},
+		},
+		staticProvider{snapshots: []ws.TraderSnapshot{
+			{TraderID: "t-non-retry", SessionID: "s-non-retry", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.1, EffectiveExchanges: []string{"binance"}},
+		}},
+		assignment,
+		slog.Default(),
+	)
+	engine.sleepFn = func(_ time.Duration) {}
+
+	engine.RunCycleForTest(now)
+
+	if assignment.count.Load() != 1 {
+		t.Fatalf("expected no retries for non-retryable error, got %d attempts", assignment.count.Load())
+	}
+	dlq := engine.DeadLetters()
+	if len(dlq) != 1 {
+		t.Fatalf("expected one dead-letter entry, got %d", len(dlq))
+	}
+	if dlq[0].Retryable {
+		t.Fatalf("expected dead-letter entry to be marked non-retryable")
+	}
+}
+
+func TestRunCycle_AssignmentRetryableExhaustedGoesDeadLetter(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	assignment := &failingAssignment{}
+	engine := NewEngine(
+		Config{
+			Interval:             time.Second,
+			HealthyWindow:        5 * time.Minute,
+			TaskIdentityProvider: staticTaskIdentityProvider{taskID: "task-retry-exhausted"},
+			AssignmentMaxRetries: 2,
+			RetryClassifier:      staticRetryClassifier{retryable: true},
+		},
+		staticProvider{snapshots: []ws.TraderSnapshot{
+			{TraderID: "t-retry-exhausted", SessionID: "s-retry-exhausted", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.1, EffectiveExchanges: []string{"binance"}},
+		}},
+		assignment,
+		slog.Default(),
+	)
+	engine.sleepFn = func(_ time.Duration) {}
+
+	engine.RunCycleForTest(now)
+
+	if assignment.count.Load() != 3 {
+		t.Fatalf("expected 3 attempts for max_retries=2, got %d", assignment.count.Load())
+	}
+	dlq := engine.DeadLetters()
+	if len(dlq) != 1 {
+		t.Fatalf("expected one dead-letter entry, got %d", len(dlq))
+	}
+	if !dlq[0].Retryable {
+		t.Fatalf("expected retryable=true for exhausted retry path")
+	}
+	if dlq[0].Attempts != 3 {
+		t.Fatalf("expected dead-letter attempts=3, got %d", dlq[0].Attempts)
 	}
 }

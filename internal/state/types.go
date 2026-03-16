@@ -15,14 +15,20 @@ type ServerState struct {
 }
 
 type RuntimeState struct {
-	ActiveWSConnections         int64 `json:"active_ws_connections"`
-	LastWSConnectUnix           int64 `json:"last_ws_connect_unix"`
-	LastWSHeartbeatUnix         int64 `json:"last_ws_heartbeat_unix"`
-	LastWSTimeoutUnix           int64 `json:"last_ws_timeout_unix"`
-	WSTimeoutCount              int64 `json:"ws_timeout_count"`
-	SchedulerCycleCount         int64 `json:"scheduler_cycle_count"`
-	SchedulerLastCandidateCount int64 `json:"scheduler_last_candidate_count"`
-	SchedulerLastRunUnix        int64 `json:"scheduler_last_run_unix"`
+	ActiveWSConnections         int64            `json:"active_ws_connections"`
+	LastWSConnectUnix           int64            `json:"last_ws_connect_unix"`
+	LastWSHeartbeatUnix         int64            `json:"last_ws_heartbeat_unix"`
+	LastWSTimeoutUnix           int64            `json:"last_ws_timeout_unix"`
+	WSTimeoutCount              int64            `json:"ws_timeout_count"`
+	SchedulerCycleCount         int64            `json:"scheduler_cycle_count"`
+	SchedulerLastCandidateCount int64            `json:"scheduler_last_candidate_count"`
+	SchedulerLastRunUnix        int64            `json:"scheduler_last_run_unix"`
+	SchedulerLastAssignStatus   string           `json:"scheduler_last_assign_status"`
+	SchedulerAssignLatencyMs    float64          `json:"scheduler_assign_latency_ms"`
+	SchedulerScoreP50           float64          `json:"scheduler_score_p50"`
+	SchedulerScoreP95           float64          `json:"scheduler_score_p95"`
+	SchedulerAssignAttempts     map[string]int64 `json:"scheduler_assign_attempts"`
+	SchedulerResourceRejections map[string]int64 `json:"scheduler_resource_rejections"`
 }
 
 func NewDaemonState() *DaemonState {
@@ -34,6 +40,9 @@ func NewDaemonState() *DaemonState {
 			StartedAt: now,
 			Status:    "starting",
 		},
-		Runtime: RuntimeState{},
+		Runtime: RuntimeState{
+			SchedulerAssignAttempts:     map[string]int64{},
+			SchedulerResourceRejections: map[string]int64{},
+		},
 	}
 }

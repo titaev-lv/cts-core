@@ -151,4 +151,27 @@ func TestUpdatedAtChangesOnMutations(t *testing.T) {
 	if state.Runtime.SchedulerLastRunUnix != schedulerRunUnix {
 		t.Fatalf("expected SchedulerLastRunUnix=%d, got %d", schedulerRunUnix, state.Runtime.SchedulerLastRunUnix)
 	}
+
+	time.Sleep(10 * time.Millisecond)
+	mgr.RecordSchedulerAssignAttempt("success")
+	mgr.SetSchedulerAssignLatencyMs(12.5)
+	mgr.SetSchedulerScoreDistribution(110.0, 240.0)
+	mgr.SetSchedulerLastAssignStatus("success")
+	mgr.RecordSchedulerResourceRejection("hard_limit")
+	state = mgr.GetState()
+	if state.Runtime.SchedulerAssignAttempts["success"] != 1 {
+		t.Fatalf("expected SchedulerAssignAttempts[success]=1, got %d", state.Runtime.SchedulerAssignAttempts["success"])
+	}
+	if state.Runtime.SchedulerAssignLatencyMs != 12.5 {
+		t.Fatalf("expected SchedulerAssignLatencyMs=12.5, got %f", state.Runtime.SchedulerAssignLatencyMs)
+	}
+	if state.Runtime.SchedulerScoreP50 != 110.0 || state.Runtime.SchedulerScoreP95 != 240.0 {
+		t.Fatalf("unexpected scheduler score distribution p50=%f p95=%f", state.Runtime.SchedulerScoreP50, state.Runtime.SchedulerScoreP95)
+	}
+	if state.Runtime.SchedulerLastAssignStatus != "success" {
+		t.Fatalf("expected SchedulerLastAssignStatus=success, got %s", state.Runtime.SchedulerLastAssignStatus)
+	}
+	if state.Runtime.SchedulerResourceRejections["hard_limit"] != 1 {
+		t.Fatalf("expected SchedulerResourceRejections[hard_limit]=1, got %d", state.Runtime.SchedulerResourceRejections["hard_limit"])
+	}
 }
