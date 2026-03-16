@@ -59,6 +59,22 @@ type recordingLatencyDispatcher struct {
 	calls []latencyDispatchCall
 }
 
+type staticResourceProvider struct {
+	items map[int]map[int]float64
+}
+
+func (p staticResourceProvider) GetTraderExchangeUtilization(_ context.Context, traderDBID int, exchangeID int) (float64, bool, error) {
+	exchanges, ok := p.items[traderDBID]
+	if !ok {
+		return 0, false, nil
+	}
+	util, ok := exchanges[exchangeID]
+	if !ok {
+		return 0, false, nil
+	}
+	return util, true, nil
+}
+
 func (d *recordingLatencyDispatcher) DispatchLatencyTest(_ context.Context, sessionID string, traderID string, exchanges []string) error {
 	d.mu.Lock()
 	d.calls = append(d.calls, latencyDispatchCall{sessionID: sessionID, traderID: traderID, exchanges: append([]string(nil), exchanges...)})
@@ -360,7 +376,7 @@ func TestRunCycle_UsesRequiredExchangesProviderForTrade(t *testing.T) {
 		slog.Default(),
 	)
 
-	candidates := SelectCandidatesForTask(engine.provider.GetTraderSnapshots(), now, 5*time.Second, taskTypeTrade, engine.resolveRequiredExchanges(context.Background()))
+	candidates := SelectCandidatesForTask(engine.provider.GetTraderSnapshots(), now, 5*time.Second, taskTypeTrade, namesFromExchangeRefs(engine.resolveRequiredExchangeRefs(context.Background())))
 	if len(candidates) != 2 {
 		t.Fatalf("expected 2 candidates, got %d", len(candidates))
 	}
@@ -385,7 +401,7 @@ func TestRunCycle_UsesMonitorSetForMonitorTask(t *testing.T) {
 		slog.Default(),
 	)
 
-	items := engine.resolveRequiredExchanges(context.Background())
+	items := namesFromExchangeRefs(engine.resolveRequiredExchangeRefs(context.Background()))
 	if len(items) != 1 || items[0] != "kucoin" {
 		t.Fatalf("expected monitor required exchanges from provider, got %v", items)
 	}
@@ -440,5 +456,71 @@ func TestRunLatencySweep_DispatchesToHealthyTargets(t *testing.T) {
 	}
 	if len(calls[0].exchanges) != 2 {
 		t.Fatalf("expected 2 exchanges in dispatch, got %v", calls[0].exchanges)
+	}
+}
+
+func TestRunCycle_ResourceHardLimitRejectsCandidate(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	assignment := &countingAssignment{}
+	engine := NewEngine(
+		Config{
+			Interval:      time.Second,
+			HealthyWindow: 5 * time.Second,
+			RequiredExchangesProvider: staticRequirementsProvider{trade: []ExchangeRef{
+				{ExchangeID: 1, ExchangeName: "binance"},
+			}},
+			ResourceProvider: staticResourceProvider{items: map[int]map[int]float64{
+				101: {1: 0.99},
+				102: {1: 0.40},
+			}},
+		},
+		staticProvider{snapshots: []ws.TraderSnapshot{
+			{TraderID: "t-a", TraderDBID: 101, SessionID: "s-a", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.1, ExchangeLatencies: map[string]float64{"binance": 25}},
+			{TraderID: "t-b", TraderDBID: 102, SessionID: "s-b", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.2, ExchangeLatencies: map[string]float64{"binance": 30}},
+		}},
+		assignment,
+		slog.Default(),
+	)
+
+	engine.RunCycleForTest(now)
+	if assignment.count.Load() != 1 {
+		t.Fatalf("expected one assignment, got %d", assignment.count.Load())
+	}
+}
+
+func TestRunCycle_ResourceSoftPenaltyAffectsOrder(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	engine := NewEngine(
+		Config{
+			Interval:      time.Second,
+			HealthyWindow: 5 * time.Second,
+			RequiredExchangesProvider: staticRequirementsProvider{trade: []ExchangeRef{
+				{ExchangeID: 1, ExchangeName: "binance"},
+			}},
+			ResourceProvider: staticResourceProvider{items: map[int]map[int]float64{
+				201: {1: 0.90},
+				202: {1: 0.40},
+			}},
+		},
+		staticProvider{snapshots: []ws.TraderSnapshot{
+			{TraderID: "t-soft", TraderDBID: 201, SessionID: "s-soft", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.1, ExchangeLatencies: map[string]float64{"binance": 25}},
+			{TraderID: "t-clean", TraderDBID: 202, SessionID: "s-clean", State: "active", LastHeartbeatUnix: now.Unix() - 1, Role: "trade", LoadIndex: 0.1, ExchangeLatencies: map[string]float64{"binance": 25}},
+		}},
+		&countingAssignment{},
+		slog.Default(),
+	)
+
+	refs := engine.resolveRequiredExchangeRefs(context.Background())
+	items := SelectCandidatesForTask(engine.provider.GetTraderSnapshots(), now, 5*time.Second, taskTypeTrade, namesFromExchangeRefs(refs))
+	items = engine.applyResourceConstraints(context.Background(), items, engine.provider.GetTraderSnapshots(), refs)
+
+	if len(items) != 2 {
+		t.Fatalf("expected 2 candidates, got %d", len(items))
+	}
+	if items[0].TraderID != "t-clean" {
+		t.Fatalf("expected candidate without soft penalty first, got %s", items[0].TraderID)
+	}
+	if items[0].Score >= items[1].Score {
+		t.Fatalf("expected first score lower than second after soft penalty: %f >= %f", items[0].Score, items[1].Score)
 	}
 }

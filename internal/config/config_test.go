@@ -437,6 +437,44 @@ func TestValidateSchedulerIntervalInvalid(t *testing.T) {
 	}
 }
 
+func TestValidateSchedulerResourcePolicyDefaults(t *testing.T) {
+	cfg := Config{
+		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+
+	if cfg.Scheduler.ResourceHardLimit == 0 || cfg.Scheduler.ResourceSoftLimit == 0 || cfg.Scheduler.ResourceSoftPenaltyMs == 0 {
+		t.Fatalf("expected scheduler resource defaults to be populated, got %+v", cfg.Scheduler)
+	}
+}
+
+func TestValidateSchedulerResourcePolicyInvalid(t *testing.T) {
+	cfg := Config{
+		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
+		Scheduler: SchedulerConfig{
+			TaskAssignmentInterval: 1 * time.Second,
+			LatencyCheckInterval:   20 * time.Minute,
+			ResourceCheckInterval:  30 * time.Second,
+			ResourceHardLimit:      0.7,
+			ResourceSoftLimit:      0.8,
+			ResourceSoftPenaltyMs:  600,
+		},
+	}
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected Validate() to fail when resource_soft_limit >= resource_hard_limit")
+	}
+}
+
 func TestHSMDualContext(t *testing.T) {
 	// Load config with HSM dual-context configuration
 	cfg, err := Load("../../conf/config.example.yaml")

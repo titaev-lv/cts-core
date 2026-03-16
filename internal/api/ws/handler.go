@@ -108,6 +108,7 @@ type Stats struct {
 // TraderSnapshot is a runtime view of a single trader WS session.
 type TraderSnapshot struct {
 	TraderID           string             `json:"trader_id"`
+	TraderDBID         int                `json:"trader_db_id,omitempty"`
 	SessionID          string             `json:"session_id"`
 	State              string             `json:"state"`
 	RegisteredAtUnix   int64              `json:"registered_at_unix"`
@@ -555,8 +556,8 @@ func (h *Handler) Serve(c *gin.Context) {
 			availableExchanges := defaultAvailableExchanges()
 			effectiveExchanges := buildEffectiveExchanges(capabilities, availableExchanges)
 			loadIndex, tradeLoadIndex := extractCurrentLoadIndices(req.CurrentLoad)
+			resolvedTraderID := 0
 			if h.persistence != nil {
-				var resolvedTraderID int
 				if err := h.withDBWriteRetry("resolve_trader", func(ctx context.Context) error {
 					var resolveErr error
 					resolvedTraderID, resolveErr = h.persistence.ResolveTraderID(ctx, req.TraderID)
@@ -583,7 +584,7 @@ func (h *Handler) Serve(c *gin.Context) {
 			}
 
 			session.markRegistered(req.TraderID, nowMs)
-			session.setRegistrationInfo(role, capabilities, effectiveExchanges)
+			session.setRegistrationInfo(role, capabilities, effectiveExchanges, resolvedTraderID)
 			h.bindConnectionTrader(session.sessionID, req.TraderID)
 			session.setTelemetry(loadIndex, tradeLoadIndex)
 			h.upsertSessionSnapshot(session)
@@ -885,6 +886,7 @@ func (h *Handler) upsertSessionSnapshot(session *sessionRuntime) {
 	h.sessionsMu.Lock()
 	h.sessions[session.sessionID] = TraderSnapshot{
 		TraderID:           session.traderID,
+		TraderDBID:         session.traderDBID,
 		SessionID:          session.sessionID,
 		State:              string(session.state),
 		RegisteredAtUnix:   session.registeredAtMs / 1000,

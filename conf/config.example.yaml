@@ -135,6 +135,9 @@ scheduler:
   task_assignment_interval: 5s
   latency_check_interval: 20m
   resource_check_interval: 30s
+  resource_hard_limit: 0.98       # hard reject when utilization >= this value
+  resource_soft_limit: 0.75       # apply score penalty above this value
+  resource_soft_penalty_ms: 600   # max soft penalty contribution in score units
 
 # Rate limiting (Phase 1.5)
 rate_limit:

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -28,6 +29,10 @@ const version = "0.0.1"
 
 type schedulerRequirementsProvider struct {
 	repo repository.ExchangeRequirementsRepository
+}
+
+type schedulerResourceProvider struct {
+	repo repository.TraderResourceRepository
 }
 
 func (p schedulerRequirementsProvider) GetTradeRequiredExchanges(ctx context.Context) ([]scheduler.ExchangeRef, error) {
@@ -52,6 +57,54 @@ func (p schedulerRequirementsProvider) GetMonitorRequiredExchanges(ctx context.C
 		out = append(out, scheduler.ExchangeRef{ExchangeID: item.ExchangeID, ExchangeName: item.ExchangeName})
 	}
 	return out, nil
+}
+
+func (p schedulerResourceProvider) GetTraderExchangeUtilization(ctx context.Context, traderDBID int, exchangeID int) (float64, bool, error) {
+	items, err := p.repo.GetByTraderAndExchange(ctx, traderDBID, exchangeID, nil)
+	if err != nil {
+		return 0, false, err
+	}
+	if len(items) == 0 {
+		return 0, false, nil
+	}
+
+	now := time.Now().UTC()
+	maxUtil := 0.0
+	found := false
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		if !item.ResetAt.IsZero() && now.After(item.ResetAt) {
+			// Window reset - resource is currently fully available.
+			found = true
+			continue
+		}
+		used, err := strconv.ParseFloat(item.UsedValue, 64)
+		if err != nil {
+			continue
+		}
+		max, err := strconv.ParseFloat(item.MaxValue, 64)
+		if err != nil || max <= 0 {
+			continue
+		}
+		util := used / max
+		if util < 0 {
+			util = 0
+		}
+		if util > 1 {
+			util = 1
+		}
+		if util > maxUtil {
+			maxUtil = util
+		}
+		found = true
+	}
+
+	if !found {
+		return 0, false, nil
+	}
+	return maxUtil, true, nil
 }
 
 func main() {
@@ -282,6 +335,10 @@ func main() {
 			MetricsSink:               stateManager,
 			RequiredExchangesProvider: schedulerRequirementsProvider{repo: repo.ExchangeRequirements()},
 			LatencyDispatcher:         wsHandler,
+			ResourceProvider:          schedulerResourceProvider{repo: repo.TraderResource()},
+			ResourceHardLimit:         cfg.Scheduler.ResourceHardLimit,
+			ResourceSoftLimit:         cfg.Scheduler.ResourceSoftLimit,
+			ResourceSoftPenaltyMs:     cfg.Scheduler.ResourceSoftPenaltyMs,
 		},
 		wsHandler,
 		nil,

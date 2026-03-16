@@ -209,6 +209,15 @@ func (c *Config) Validate() error {
 	if c.Scheduler.ResourceCheckInterval == 0 {
 		c.Scheduler.ResourceCheckInterval = 30 * time.Second
 	}
+	if c.Scheduler.ResourceHardLimit == 0 {
+		c.Scheduler.ResourceHardLimit = 0.98
+	}
+	if c.Scheduler.ResourceSoftLimit == 0 {
+		c.Scheduler.ResourceSoftLimit = 0.75
+	}
+	if c.Scheduler.ResourceSoftPenaltyMs == 0 {
+		c.Scheduler.ResourceSoftPenaltyMs = 600
+	}
 
 	if c.Scheduler.TaskAssignmentInterval <= 0 || c.Scheduler.TaskAssignmentInterval > 24*time.Hour {
 		return fmt.Errorf("invalid scheduler.task_assignment_interval: %s", c.Scheduler.TaskAssignmentInterval)
@@ -218,6 +227,18 @@ func (c *Config) Validate() error {
 	}
 	if c.Scheduler.ResourceCheckInterval <= 0 || c.Scheduler.ResourceCheckInterval > 24*time.Hour {
 		return fmt.Errorf("invalid scheduler.resource_check_interval: %s", c.Scheduler.ResourceCheckInterval)
+	}
+	if c.Scheduler.ResourceHardLimit <= 0 || c.Scheduler.ResourceHardLimit >= 1 {
+		return fmt.Errorf("invalid scheduler.resource_hard_limit: %f", c.Scheduler.ResourceHardLimit)
+	}
+	if c.Scheduler.ResourceSoftLimit <= 0 || c.Scheduler.ResourceSoftLimit >= 1 {
+		return fmt.Errorf("invalid scheduler.resource_soft_limit: %f", c.Scheduler.ResourceSoftLimit)
+	}
+	if c.Scheduler.ResourceSoftLimit >= c.Scheduler.ResourceHardLimit {
+		return fmt.Errorf("invalid scheduler resource limits: resource_soft_limit (%f) must be < resource_hard_limit (%f)", c.Scheduler.ResourceSoftLimit, c.Scheduler.ResourceHardLimit)
+	}
+	if c.Scheduler.ResourceSoftPenaltyMs <= 0 || c.Scheduler.ResourceSoftPenaltyMs > 1_000_000 {
+		return fmt.Errorf("invalid scheduler.resource_soft_penalty_ms: %f", c.Scheduler.ResourceSoftPenaltyMs)
 	}
 
 	// Validate state file path

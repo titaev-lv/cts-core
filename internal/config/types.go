@@ -169,6 +169,9 @@ type SchedulerConfig struct {
 	TaskAssignmentInterval time.Duration `yaml:"task_assignment_interval"`
 	LatencyCheckInterval   time.Duration `yaml:"latency_check_interval"`
 	ResourceCheckInterval  time.Duration `yaml:"resource_check_interval"`
+	ResourceHardLimit      float64       `yaml:"resource_hard_limit"`
+	ResourceSoftLimit      float64       `yaml:"resource_soft_limit"`
+	ResourceSoftPenaltyMs  float64       `yaml:"resource_soft_penalty_ms"`
 }
 
 // RateLimitConfig contains rate limiting settings

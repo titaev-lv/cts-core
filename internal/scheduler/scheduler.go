@@ -23,6 +23,10 @@ const (
 	monitorCapacityPenaltyWeight = 200.0
 	missingLatencyProfilePenalty = 5000.0
 	missingExchangePenalty       = 300.0
+
+	defaultResourceHardLimit     = 0.98
+	defaultResourceSoftLimit     = 0.75
+	defaultResourceSoftPenaltyMs = 600.0
 )
 
 // SnapshotProvider returns current runtime WS trader snapshots.
@@ -57,6 +61,11 @@ type RequiredExchangesProvider interface {
 	GetMonitorRequiredExchanges(ctx context.Context) ([]ExchangeRef, error)
 }
 
+// TraderResourceProvider reports utilization ratio [0..1] for trader/exchange pair.
+type TraderResourceProvider interface {
+	GetTraderExchangeUtilization(ctx context.Context, traderDBID int, exchangeID int) (utilization float64, found bool, err error)
+}
+
 // Candidate is an eligible trader for assignment cycle.
 type Candidate struct {
 	TraderID          string
@@ -80,6 +89,10 @@ type Config struct {
 	TaskType                  string
 	RequiredExchangesProvider RequiredExchangesProvider
 	LatencyDispatcher         LatencyTestDispatcher
+	ResourceProvider          TraderResourceProvider
+	ResourceHardLimit         float64
+	ResourceSoftLimit         float64
+	ResourceSoftPenaltyMs     float64
 }
 
 // Engine runs periodic assignment cycles from runtime session snapshots.
@@ -99,6 +112,10 @@ type Engine struct {
 	taskType      string
 	requirements  RequiredExchangesProvider
 	dispatcher    LatencyTestDispatcher
+	resources     TraderResourceProvider
+	resourceHard  float64
+	resourceSoft  float64
+	resourceW     float64
 }
 
 // NoopAssignment is a placeholder assignment implementation.
@@ -126,6 +143,12 @@ func NewEngine(cfg Config, provider SnapshotProvider, assignment AssignmentRunne
 		assignment = NoopAssignment{}
 	}
 
+	resourceHard := normalizeResourceHardLimit(cfg.ResourceHardLimit)
+	resourceSoft := normalizeResourceSoftLimit(cfg.ResourceSoftLimit)
+	if resourceSoft >= resourceHard {
+		resourceSoft = resourceHard * 0.8
+	}
+
 	return &Engine{
 		logger:        logger,
 		provider:      provider,
@@ -137,6 +160,10 @@ func NewEngine(cfg Config, provider SnapshotProvider, assignment AssignmentRunne
 		taskType:      normalizeTaskType(cfg.TaskType),
 		requirements:  cfg.RequiredExchangesProvider,
 		dispatcher:    cfg.LatencyDispatcher,
+		resources:     cfg.ResourceProvider,
+		resourceHard:  resourceHard,
+		resourceSoft:  resourceSoft,
+		resourceW:     normalizeResourceSoftPenalty(cfg.ResourceSoftPenaltyMs),
 		stopCh:        make(chan struct{}),
 	}
 }
@@ -206,8 +233,10 @@ func (e *Engine) runCycle(now time.Time) {
 	}
 
 	snapshots := e.provider.GetTraderSnapshots()
-	requiredExchanges := e.resolveRequiredExchanges(context.Background())
+	requiredExchangeRefs := e.resolveRequiredExchangeRefs(context.Background())
+	requiredExchanges := namesFromExchangeRefs(requiredExchangeRefs)
 	candidates := SelectCandidatesForTask(snapshots, now, e.healthyWindow, e.taskType, requiredExchanges)
+	candidates = e.applyResourceConstraints(context.Background(), candidates, snapshots, requiredExchangeRefs)
 	e.lastCandidate.Store(int64(len(candidates)))
 	cycle := e.cycles.Add(1)
 	e.syncMetrics(cycle, int64(len(candidates)), now.Unix())
@@ -227,7 +256,7 @@ func (e *Engine) runCycle(now time.Time) {
 	e.logger.Info("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", len(candidates), "assigned", true, "trader_id", selected.TraderID, "session_id", selected.SessionID)
 }
 
-func (e *Engine) resolveRequiredExchanges(ctx context.Context) []string {
+func (e *Engine) resolveRequiredExchangeRefs(ctx context.Context) []ExchangeRef {
 	if e.requirements == nil {
 		return nil
 	}
@@ -246,12 +275,90 @@ func (e *Engine) resolveRequiredExchanges(ctx context.Context) []string {
 		e.logger.Warn("scheduler_required_exchanges", "task_type", e.taskType, "error", err)
 		return nil
 	}
+	return refs
+}
 
+func namesFromExchangeRefs(refs []ExchangeRef) []string {
 	names := make([]string, 0, len(refs))
 	for _, ref := range refs {
 		names = append(names, ref.ExchangeName)
 	}
 	return normalizeExchangeList(names)
+}
+
+func (e *Engine) applyResourceConstraints(ctx context.Context, candidates []Candidate, snapshots []ws.TraderSnapshot, required []ExchangeRef) []Candidate {
+	if len(candidates) == 0 || e.resources == nil || len(required) == 0 {
+		return candidates
+	}
+
+	bySession := make(map[string]ws.TraderSnapshot, len(snapshots))
+	for _, snap := range snapshots {
+		bySession[snap.SessionID] = snap
+	}
+
+	result := make([]Candidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		snap, ok := bySession[candidate.SessionID]
+		if !ok {
+			continue
+		}
+		if snap.TraderDBID <= 0 {
+			e.logger.Warn("scheduler_resource_reject", "trader_id", candidate.TraderID, "session_id", candidate.SessionID, "reason", "missing_trader_db_id")
+			continue
+		}
+
+		softPenalty := 0.0
+		hardRejected := false
+		for _, ref := range required {
+			if ref.ExchangeID <= 0 {
+				continue
+			}
+
+			util, found, err := e.resources.GetTraderExchangeUtilization(ctx, snap.TraderDBID, ref.ExchangeID)
+			if err != nil {
+				e.logger.Warn("scheduler_resource_reject", "trader_id", candidate.TraderID, "session_id", candidate.SessionID, "exchange_id", ref.ExchangeID, "reason", "resource_lookup_error", "error", err)
+				hardRejected = true
+				break
+			}
+			if !found {
+				e.logger.Warn("scheduler_resource_reject", "trader_id", candidate.TraderID, "session_id", candidate.SessionID, "exchange_id", ref.ExchangeID, "reason", "missing_resource")
+				hardRejected = true
+				break
+			}
+
+			util = clampUnit(util)
+			if util >= e.resourceHard {
+				e.logger.Info("scheduler_resource_reject", "trader_id", candidate.TraderID, "session_id", candidate.SessionID, "exchange_id", ref.ExchangeID, "reason", "hard_limit", "utilization", util)
+				hardRejected = true
+				break
+			}
+
+			if util > e.resourceSoft {
+				norm := (util - e.resourceSoft) / (1.0 - e.resourceSoft)
+				softPenalty += e.resourceW * norm * norm
+			}
+		}
+
+		if hardRejected {
+			continue
+		}
+
+		if softPenalty > 0 {
+			candidate.Score += softPenalty
+		}
+		result = append(result, candidate)
+	}
+
+	sort.SliceStable(result, func(i, j int) bool {
+		if result[i].Score != result[j].Score {
+			return result[i].Score < result[j].Score
+		}
+		if result[i].LastHeartbeatUnix != result[j].LastHeartbeatUnix {
+			return result[i].LastHeartbeatUnix > result[j].LastHeartbeatUnix
+		}
+		return result[i].TraderID < result[j].TraderID
+	})
+	return result
 }
 
 func (e *Engine) runLatencySweep(now time.Time) {
@@ -485,6 +592,27 @@ func normalizeExchangeList(exchanges []string) []string {
 		items = append(items, norm)
 	}
 	return items
+}
+
+func normalizeResourceHardLimit(v float64) float64 {
+	if v <= 0 || v >= 1 {
+		return defaultResourceHardLimit
+	}
+	return v
+}
+
+func normalizeResourceSoftLimit(v float64) float64 {
+	if v <= 0 || v >= 1 {
+		return defaultResourceSoftLimit
+	}
+	return v
+}
+
+func normalizeResourceSoftPenalty(v float64) float64 {
+	if v <= 0 {
+		return defaultResourceSoftPenaltyMs
+	}
+	return v
 }
 
 func scoreTrade(latencyProfileMs float64, loadIndex float64) float64 {
