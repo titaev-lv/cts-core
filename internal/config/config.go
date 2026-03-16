@@ -204,7 +204,7 @@ func (c *Config) Validate() error {
 		c.Scheduler.TaskAssignmentInterval = 1 * time.Second
 	}
 	if c.Scheduler.LatencyCheckInterval == 0 {
-		c.Scheduler.LatencyCheckInterval = 60 * time.Second
+		c.Scheduler.LatencyCheckInterval = 20 * time.Minute
 	}
 	if c.Scheduler.ResourceCheckInterval == 0 {
 		c.Scheduler.ResourceCheckInterval = 30 * time.Second

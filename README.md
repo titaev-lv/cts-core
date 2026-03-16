@@ -74,7 +74,26 @@ SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./tests/smoke_phase2_ws_lifecycle.sh
 
 ## Roadmap (операционный)
 
-1. Расширять Phase 3 business logic (assignment/scoring/resource-aware scheduling).
+1. Расширять Phase 3 business logic (assignment/resource-aware scheduling) по фиксированному правилу:
+  - CTS-Core выбирает trader для массива `exchange_ids`, но не принимает решение `buy/sell`.
+  - `buy/sell` и локальная стратегия исполнения определяются внутри trader.
+  - Для `task_type=trade` используется latency-aware ранг:
+    - Eligibility: к выбору допускаются только trader в режимах `trade` и `both`.
+    - Trader в режиме `monitor` исключается из кандидатов для `trade`.
+    - `score_trade = latency_profile_ms + 1000 * (load_index^2)` (меньше = лучше).
+    - `latency_profile_ms` = робастный профиль задержек по всем `exchange_ids` (worst/p95 + разброс).
+    - `load_index` (`0..1`) формируется на стороне trader (CPU + RAM + network + очередь задач).
+  - Для `task_type=monitor` используется отдельный ранг без latency:
+    - `score_monitor = 1000 * (trade_load_index^2) + monitor_capacity_penalty + monitor_role_penalty` (меньше = лучше).
+    - `trade_load_index` (`0..1`) отражает загрузку trader именно торговыми задачами.
+    - Приоритет по режиму: `monitor` > `both` > `trader`.
+    - Пример `monitor_role_penalty`: `monitor=0`, `both=100`, `trader=300`.
+    - latency подключения к биржам для monitor-выбора не учитывается.
+    - `primary` выбирается по минимальному `score_monitor`, `backup` - второй в ранге.
+  - Trader после подключения регулярно отправляет телеметрию (`trader.heartbeat` + `metrics.report`), CTS-Core агрегирует ее для scheduler.
+  - После `trader.register_ack` CTS-Core отдает trader каталог доступных бирж (`exchange_id`, `code`, `name`, endpoints, market types, limits); trader выполняет connectivity test и присылает стартовые метрики.
+  - Для `task_type=trade` латентность проверяется по всем биржам из `capabilities`; выбор по одной бирже недостаточен.
+  - Для `task_type=monitor` latency в ранжировании не участвует.
 2. Развивать runtime metrics/reporting для scheduler quality signals.
 3. Поддерживать docs parity с кодом в каждом PR.
 

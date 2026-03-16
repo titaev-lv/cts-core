@@ -26,6 +26,34 @@ import (
 
 const version = "0.0.1"
 
+type schedulerRequirementsProvider struct {
+	repo repository.ExchangeRequirementsRepository
+}
+
+func (p schedulerRequirementsProvider) GetTradeRequiredExchanges(ctx context.Context) ([]scheduler.ExchangeRef, error) {
+	items, err := p.repo.ListTradeExchanges(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]scheduler.ExchangeRef, 0, len(items))
+	for _, item := range items {
+		out = append(out, scheduler.ExchangeRef{ExchangeID: item.ExchangeID, ExchangeName: item.ExchangeName})
+	}
+	return out, nil
+}
+
+func (p schedulerRequirementsProvider) GetMonitorRequiredExchanges(ctx context.Context) ([]scheduler.ExchangeRef, error) {
+	items, err := p.repo.ListMonitorExchanges(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]scheduler.ExchangeRef, 0, len(items))
+	for _, item := range items {
+		out = append(out, scheduler.ExchangeRef{ExchangeID: item.ExchangeID, ExchangeName: item.ExchangeName})
+	}
+	return out, nil
+}
+
 func main() {
 	// Parse command line flags
 	configPath := flag.String("config", "conf/config.yaml", "Path to configuration file")
@@ -248,9 +276,12 @@ func main() {
 
 	schedulerEngine := scheduler.NewEngine(
 		scheduler.Config{
-			Interval:      cfg.Scheduler.TaskAssignmentInterval,
-			HealthyWindow: cfg.Session.HeartbeatTimeout,
-			MetricsSink:   stateManager,
+			Interval:                  cfg.Scheduler.TaskAssignmentInterval,
+			LatencyCheckInterval:      cfg.Scheduler.LatencyCheckInterval,
+			HealthyWindow:             cfg.Session.HeartbeatTimeout,
+			MetricsSink:               stateManager,
+			RequiredExchangesProvider: schedulerRequirementsProvider{repo: repo.ExchangeRequirements()},
+			LatencyDispatcher:         wsHandler,
 		},
 		wsHandler,
 		nil,

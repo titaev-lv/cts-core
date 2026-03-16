@@ -16,6 +16,9 @@ const (
 	actionRegisterAck     = "trader.register_ack"
 	actionTraderHeartbeat = "trader.heartbeat"
 	actionHeartbeatAck    = "trader.heartbeat_ack"
+	actionLatencyTest     = "latency.test"
+	actionLatencyTestResp = "latency.test_result"
+	actionLatencyTestAck  = "latency.test_result_ack"
 	actionError           = "error"
 )
 
@@ -63,26 +66,81 @@ type registerRequest struct {
 	TraderID     string                 `json:"trader_id"`
 	Version      string                 `json:"version"`
 	Region       string                 `json:"region"`
+	Role         string                 `json:"role,omitempty"`
 	Capabilities []string               `json:"capabilities,omitempty"`
 	Resources    map[string]interface{} `json:"resources,omitempty"`
 	CurrentLoad  map[string]interface{} `json:"current_load,omitempty"`
 }
 
+type exchangeCatalogEntry struct {
+	ExchangeID        int            `json:"exchange_id"`
+	Code              string         `json:"code"`
+	Name              string         `json:"name"`
+	Enabled           bool           `json:"enabled"`
+	MarketTypes       []string       `json:"market_types,omitempty"`
+	WSPublicEndpoint  string         `json:"ws_public_endpoint,omitempty"`
+	WSPrivateEndpoint string         `json:"ws_private_endpoint,omitempty"`
+	RESTEndpoint      string         `json:"rest_endpoint,omitempty"`
+	RateLimits        map[string]int `json:"rate_limits,omitempty"`
+}
+
 type registerAck struct {
-	Status            string `json:"status"`
-	TraderID          string `json:"trader_id"`
-	SessionID         string `json:"session_id"`
-	SessionTimeoutSec int    `json:"session_timeout_sec"`
-	ServerTime        int64  `json:"server_time"`
+	Status                 string                 `json:"status"`
+	TraderID               string                 `json:"trader_id"`
+	SessionID              string                 `json:"session_id"`
+	SessionTimeoutSec      int                    `json:"session_timeout_sec"`
+	ServerTime             int64                  `json:"server_time"`
+	ExchangeCatalogVersion string                 `json:"exchange_catalog_version,omitempty"`
+	AvailableExchanges     []exchangeCatalogEntry `json:"available_exchanges,omitempty"`
+	EffectiveExchanges     []string               `json:"effective_exchanges,omitempty"`
 }
 
 type heartbeatRequest struct {
-	TraderID  string `json:"trader_id"`
-	SessionID string `json:"session_id"`
-	Status    string `json:"status,omitempty"`
+	TraderID       string                            `json:"trader_id"`
+	SessionID      string                            `json:"session_id"`
+	Status         string                            `json:"status,omitempty"`
+	LoadIndex      *float64                          `json:"load_index,omitempty"`
+	TradeLoadIndex *float64                          `json:"trade_load_index,omitempty"`
+	ExchangeStats  map[string]heartbeatExchangeStats `json:"exchange_stats,omitempty"`
+}
+
+type heartbeatExchangeStats struct {
+	LatencyMS *float64 `json:"latency_ms,omitempty"`
 }
 
 type heartbeatAck struct {
+	Status     string `json:"status"`
+	TraderID   string `json:"trader_id"`
+	SessionID  string `json:"session_id"`
+	ServerTime int64  `json:"server_time"`
+}
+
+type latencyTestRequest struct {
+	Exchanges   []string `json:"exchanges"`
+	Reason      string   `json:"reason,omitempty"`
+	RequestedAt int64    `json:"requested_at"`
+}
+
+type latencyTestResultRequest struct {
+	TraderID       string                            `json:"trader_id"`
+	SessionID      string                            `json:"session_id,omitempty"`
+	ExchangeStats  map[string]heartbeatExchangeStats `json:"exchange_stats,omitempty"`
+	Results        []latencyTestExchangeResult       `json:"results,omitempty"`
+	Exchange       string                            `json:"exchange,omitempty"`
+	PingMS         *float64                          `json:"ping_ms,omitempty"`
+	WSLatencyMS    *float64                          `json:"ws_latency_ms,omitempty"`
+	OrderLatencyMS *float64                          `json:"order_latency_ms,omitempty"`
+	Timestamp      int64                             `json:"timestamp,omitempty"`
+}
+
+type latencyTestExchangeResult struct {
+	Exchange       string   `json:"exchange"`
+	PingMS         *float64 `json:"ping_ms,omitempty"`
+	WSLatencyMS    *float64 `json:"ws_latency_ms,omitempty"`
+	OrderLatencyMS *float64 `json:"order_latency_ms,omitempty"`
+}
+
+type latencyTestResultAck struct {
 	Status     string `json:"status"`
 	TraderID   string `json:"trader_id"`
 	SessionID  string `json:"session_id"`
@@ -127,6 +185,28 @@ func newHeartbeatAckEnvelope(requestID string, ack heartbeatAck) envelope {
 	return envelope{
 		Type:      msgTypeResponse,
 		Action:    actionHeartbeatAck,
+		RequestID: requestID,
+		Payload:   payload,
+		TS:        time.Now().UnixMilli(),
+	}
+}
+
+func newLatencyTestEnvelope(requestID string, req latencyTestRequest) envelope {
+	payload, _ := json.Marshal(req)
+	return envelope{
+		Type:      msgTypeRequest,
+		Action:    actionLatencyTest,
+		RequestID: requestID,
+		Payload:   payload,
+		TS:        time.Now().UnixMilli(),
+	}
+}
+
+func newLatencyTestResultAckEnvelope(requestID string, ack latencyTestResultAck) envelope {
+	payload, _ := json.Marshal(ack)
+	return envelope{
+		Type:      msgTypeResponse,
+		Action:    actionLatencyTestAck,
 		RequestID: requestID,
 		Payload:   payload,
 		TS:        time.Now().UnixMilli(),

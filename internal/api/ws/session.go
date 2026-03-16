@@ -29,12 +29,19 @@ const (
 )
 
 type sessionRuntime struct {
-	state           sessionState
-	sessionID       string
-	traderID        string
-	registeredAtMs  int64
-	lastHeartbeatMs int64
-	timedOutAtMs    int64
+	state             sessionState
+	sessionID         string
+	traderID          string
+	registeredAtMs    int64
+	lastHeartbeatMs   int64
+	timedOutAtMs      int64
+	role              string
+	capabilities      []string
+	effectiveExchs    []string
+	loadIndex         float64
+	tradeLoadIndex    float64
+	latencyProfileMs  float64
+	exchangeLatencies map[string]float64
 }
 
 func newSessionRuntime(sessionID string) *sessionRuntime {
@@ -50,9 +57,42 @@ func (s *sessionRuntime) markRegistered(traderID string, nowMs int64) {
 	s.state = sessionStateRegistered
 }
 
+func (s *sessionRuntime) setRegistrationInfo(role string, capabilities []string, effectiveExchanges []string) {
+	s.role = role
+	s.capabilities = append([]string(nil), capabilities...)
+	s.effectiveExchs = append([]string(nil), effectiveExchanges...)
+}
+
 func (s *sessionRuntime) markHeartbeat(nowMs int64) {
 	s.lastHeartbeatMs = nowMs
 	s.state = sessionStateActive
+}
+
+func (s *sessionRuntime) setTelemetry(loadIndex float64, tradeLoadIndex float64) {
+	s.loadIndex = normalizeUnitRange(loadIndex)
+	s.tradeLoadIndex = normalizeUnitRange(tradeLoadIndex)
+}
+
+func (s *sessionRuntime) setLatencyProfile(latencyProfileMs float64) {
+	if latencyProfileMs < 0 {
+		latencyProfileMs = 0
+	}
+	s.latencyProfileMs = latencyProfileMs
+}
+
+func (s *sessionRuntime) setExchangeLatencies(latencies map[string]float64) {
+	if len(latencies) == 0 {
+		s.exchangeLatencies = nil
+		return
+	}
+	items := make(map[string]float64, len(latencies))
+	for k, v := range latencies {
+		if v < 0 {
+			continue
+		}
+		items[k] = v
+	}
+	s.exchangeLatencies = items
 }
 
 func (s *sessionRuntime) shouldTimeout(nowMs int64, timeout time.Duration) bool {
@@ -113,4 +153,14 @@ func classifyDisconnectReason(err error) disconnectReason {
 	}
 
 	return disconnectReasonReadError
+}
+
+func normalizeUnitRange(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }

@@ -156,6 +156,20 @@ type SchedulerTaskRepository interface {
 	Delete(ctx context.Context, id int) error
 }
 
+// ExchangeInfo describes a distinct exchange used by active tasks.
+type ExchangeInfo struct {
+	ExchangeID   int    `db:"exchange_id"`
+	ExchangeName string `db:"exchange_name"`
+}
+
+// ExchangeRequirementsRepository defines operations for active exchange sets.
+type ExchangeRequirementsRepository interface {
+	// ListTradeExchanges returns distinct active exchanges used by active TRADE tasks.
+	ListTradeExchanges(ctx context.Context) ([]ExchangeInfo, error)
+	// ListMonitorExchanges returns distinct active exchanges used by active MONITORING tasks.
+	ListMonitorExchanges(ctx context.Context) ([]ExchangeInfo, error)
+}
+
 // Transactor defines transaction support
 type Transactor interface {
 	// BeginTx starts a new transaction
@@ -178,4 +192,5 @@ type Tx interface {
 	ReencryptionJob() ReencryptionJobRepository
 	ReencryptionProgress() ReencryptionProgressRepository
 	SchedulerTask() SchedulerTaskRepository
+	ExchangeRequirements() ExchangeRequirementsRepository
 }

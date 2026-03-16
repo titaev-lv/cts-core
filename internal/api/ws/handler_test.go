@@ -49,6 +49,53 @@ func TestRegisterSuccess(t *testing.T) {
 	}
 }
 
+func TestRegisterAckIncludesExchangeCatalogAndEffectiveExchanges(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "req-reg-catalog-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id":    "trader-eu-1",
+			"version":      "1.0.0",
+			"region":       "eu-frankfurt",
+			"capabilities": []string{"binance", "kucoin", "unknown"},
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	if resp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, resp.Action)
+	}
+
+	var ack registerAck
+	if err := json.Unmarshal(resp.Payload, &ack); err != nil {
+		t.Fatalf("unmarshal ack: %v", err)
+	}
+	if ack.ExchangeCatalogVersion == "" {
+		t.Fatalf("expected exchange_catalog_version in ack")
+	}
+	if len(ack.AvailableExchanges) == 0 {
+		t.Fatalf("expected available_exchanges in ack")
+	}
+	if len(ack.EffectiveExchanges) == 0 {
+		t.Fatalf("expected effective_exchanges in ack")
+	}
+
+	joined := strings.Join(ack.EffectiveExchanges, ",")
+	if !strings.Contains(joined, "binance") || !strings.Contains(joined, "kucoin") {
+		t.Fatalf("expected effective_exchanges to include binance and kucoin, got %v", ack.EffectiveExchanges)
+	}
+	if strings.Contains(joined, "unknown") {
+		t.Fatalf("expected unknown capability to be filtered out, got %v", ack.EffectiveExchanges)
+	}
+}
+
 func TestRegisterMissingTraderID(t *testing.T) {
 	conn := dialTestWS(t)
 	defer conn.Close()
@@ -202,6 +249,225 @@ func TestHeartbeatRequestAfterRegisterReturnsAck(t *testing.T) {
 	}
 	if ack.Status != "ok" || ack.TraderID != "trader-eu-1" || ack.SessionID == "" {
 		t.Fatalf("unexpected heartbeat ack payload: %+v", ack)
+	}
+}
+
+func TestSnapshotStoresRegisterAndHeartbeatTelemetry(t *testing.T) {
+	h := NewHandler()
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	regReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "snapshot-reg-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id":    "trader-snap-1",
+			"version":      "1.0.0",
+			"region":       "eu-frankfurt",
+			"role":         "monitor",
+			"capabilities": []string{"binance", "kucoin"},
+			"current_load": map[string]interface{}{
+				"load_index":       0.21,
+				"trade_load_index": 0.11,
+			},
+		}),
+	}
+	writeJSON(t, conn, regReq)
+
+	regResp := readEnvelope(t, conn)
+	if regResp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, regResp.Action)
+	}
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "snapshot-hb-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id":        "trader-snap-1",
+			"status":           "active",
+			"load_index":       0.62,
+			"trade_load_index": 0.35,
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+	hbResp := readEnvelope(t, conn)
+	if hbResp.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q, got %q", actionHeartbeatAck, hbResp.Action)
+	}
+
+	waitForCondition(t, 200*time.Millisecond, func() bool {
+		snaps := h.GetTraderSnapshots()
+		return len(snaps) == 1 && snaps[0].LastHeartbeatUnix > 0
+	})
+
+	snaps := h.GetTraderSnapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("expected exactly one snapshot, got %d", len(snaps))
+	}
+	s := snaps[0]
+	if s.Role != "monitor" {
+		t.Fatalf("expected role monitor, got %q", s.Role)
+	}
+	if s.LoadIndex != 0.62 {
+		t.Fatalf("expected load_index=0.62, got %v", s.LoadIndex)
+	}
+	if s.TradeLoadIndex != 0.35 {
+		t.Fatalf("expected trade_load_index=0.35, got %v", s.TradeLoadIndex)
+	}
+	if len(s.Capabilities) != 2 {
+		t.Fatalf("expected 2 capabilities, got %v", s.Capabilities)
+	}
+	if len(s.EffectiveExchanges) == 0 {
+		t.Fatalf("expected non-empty effective exchanges")
+	}
+}
+
+func TestDispatchLatencyTestToRegisteredSession(t *testing.T) {
+	h := NewHandler()
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	regReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "lat-dispatch-reg-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id":    "trader-lat-disp-1",
+			"version":      "1.0.0",
+			"region":       "eu-frankfurt",
+			"capabilities": []string{"binance", "kucoin"},
+		}),
+	}
+	writeJSON(t, conn, regReq)
+
+	regResp := readEnvelope(t, conn)
+	if regResp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, regResp.Action)
+	}
+
+	var ack registerAck
+	if err := json.Unmarshal(regResp.Payload, &ack); err != nil {
+		t.Fatalf("unmarshal ack: %v", err)
+	}
+
+	if err := h.DispatchLatencyTest(context.Background(), ack.SessionID, ack.TraderID, []string{"binance", "kucoin"}); err != nil {
+		t.Fatalf("dispatch latency test: %v", err)
+	}
+
+	dispatchResp := readEnvelope(t, conn)
+	if dispatchResp.Action != actionLatencyTest {
+		t.Fatalf("expected action %q, got %q", actionLatencyTest, dispatchResp.Action)
+	}
+
+	var payload latencyTestRequest
+	if err := json.Unmarshal(dispatchResp.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal latency test payload: %v", err)
+	}
+	if len(payload.Exchanges) != 2 {
+		t.Fatalf("expected 2 exchanges, got %v", payload.Exchanges)
+	}
+}
+
+func TestLatencyTestResultUpdatesSnapshotProfile(t *testing.T) {
+	h := NewHandler()
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+	registerTrader(t, conn, "trader-lat-res-1", "lat-res-reg-1")
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionLatencyTestResp,
+		RequestID: "lat-res-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-lat-res-1",
+			"results": []map[string]interface{}{
+				{"exchange": "binance", "ws_latency_ms": 22.0},
+				{"exchange": "kucoin", "ping_ms": 45.0},
+			},
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	if resp.Action != actionLatencyTestAck {
+		t.Fatalf("expected action %q, got %q", actionLatencyTestAck, resp.Action)
+	}
+
+	snaps := h.GetTraderSnapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("expected one snapshot, got %d", len(snaps))
+	}
+	if len(snaps[0].ExchangeLatencies) != 2 {
+		t.Fatalf("expected 2 exchange latencies, got %v", snaps[0].ExchangeLatencies)
+	}
+	if snaps[0].LatencyProfileMs <= 0 {
+		t.Fatalf("expected latency profile to be updated, got %f", snaps[0].LatencyProfileMs)
+	}
+}
+
+func TestHeartbeatExchangeStatsUpdatesLatencyProfileInSnapshot(t *testing.T) {
+	h := NewHandler()
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	regReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "snapshot-lat-reg-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id":    "trader-lat-1",
+			"version":      "1.0.0",
+			"region":       "eu-frankfurt",
+			"capabilities": []string{"binance", "kucoin"},
+		}),
+	}
+	writeJSON(t, conn, regReq)
+	regResp := readEnvelope(t, conn)
+	if regResp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, regResp.Action)
+	}
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		RequestID: "snapshot-lat-hb-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-lat-1",
+			"status":    "active",
+			"exchange_stats": map[string]interface{}{
+				"binance": map[string]interface{}{"latency_ms": 40.0},
+				"kucoin":  map[string]interface{}{"latency_ms": 80.0},
+			},
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+	hbResp := readEnvelope(t, conn)
+	if hbResp.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q, got %q", actionHeartbeatAck, hbResp.Action)
+	}
+
+	snaps := h.GetTraderSnapshots()
+	if len(snaps) != 1 {
+		t.Fatalf("expected exactly one snapshot, got %d", len(snaps))
+	}
+	if snaps[0].LatencyProfileMs <= 0 {
+		t.Fatalf("expected latency_profile_ms to be populated from exchange_stats, got %f", snaps[0].LatencyProfileMs)
+	}
+	if len(snaps[0].ExchangeLatencies) != 2 {
+		t.Fatalf("expected exchange_latencies to contain 2 entries, got %v", snaps[0].ExchangeLatencies)
+	}
+	if snaps[0].ExchangeLatencies["binance"] <= 0 || snaps[0].ExchangeLatencies["kucoin"] <= 0 {
+		t.Fatalf("expected binance/kucoin latencies in snapshot, got %v", snaps[0].ExchangeLatencies)
 	}
 }
 

@@ -20,6 +20,7 @@ type Repository struct {
 	reencryptionJob      ReencryptionJobRepository
 	reencryptionProgress ReencryptionProgressRepository
 	schedulerTask        SchedulerTaskRepository
+	exchangeRequirements ExchangeRequirementsRepository
 }
 
 // New creates a new repository instance
@@ -34,6 +35,7 @@ func New(db *sqlx.DB) *Repository {
 		reencryptionJob:      NewReencryptionJobRepository(db),
 		reencryptionProgress: NewReencryptionProgressRepository(db),
 		schedulerTask:        NewSchedulerTaskRepository(db),
+		exchangeRequirements: NewExchangeRequirementsRepository(db),
 	}
 }
 
@@ -75,6 +77,11 @@ func (r *Repository) ReencryptionProgress() ReencryptionProgressRepository {
 // SchedulerTask returns the scheduler task repository
 func (r *Repository) SchedulerTask() SchedulerTaskRepository {
 	return r.schedulerTask
+}
+
+// ExchangeRequirements returns repository with active exchange sets for tasks.
+func (r *Repository) ExchangeRequirements() ExchangeRequirementsRepository {
+	return r.exchangeRequirements
 }
 
 // BeginTx starts a new transaction
@@ -167,4 +174,9 @@ func (t *transaction) ReencryptionProgress() ReencryptionProgressRepository {
 // SchedulerTask returns scheduler task repository with transaction context
 func (t *transaction) SchedulerTask() SchedulerTaskRepository {
 	return NewSchedulerTaskRepositoryWithTx(t.tx)
+}
+
+// ExchangeRequirements returns requirements repository with transaction context.
+func (t *transaction) ExchangeRequirements() ExchangeRequirementsRepository {
+	return NewExchangeRequirementsRepositoryWithTx(t.tx)
 }

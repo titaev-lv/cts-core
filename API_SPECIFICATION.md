@@ -87,11 +87,12 @@ REST API (stateless):
 2. Client → Server: WebSocket upgrade request
 3. Server → Client: 101 Switching Protocols
 4. Client → Server: trader.register (request)
-5. Server → Client: trader.register_ack (response)
-6. ⟳ Active communication (heartbeat, tasks, results)
-7. Server → Client: trader.shutdown (request) [graceful]
-8. Client → Server: trader.shutdown_ack (response)
-9. Connection closed
+5. Server → Client: trader.register_ack (response + exchange catalog)
+6. Client: connectivity tests по `effective_exchanges` + initial metrics publish
+7. ⟳ Active communication (heartbeat, tasks, results)
+8. Server → Client: trader.shutdown (request) [graceful]
+9. Client → Server: trader.shutdown_ack (response)
+10. Connection closed
 ```
 
 ### 2.2 Base Message Format
@@ -182,7 +183,25 @@ event:
     "trader_id": "trader-eu-1",
     "session_id": "session-uuid",
     "session_timeout_sec": 30,
-    "server_time": 1737823200000
+    "server_time": 1737823200000,
+    "exchange_catalog_version": "2026-03-15T00:00:00Z",
+    "available_exchanges": [
+      {
+        "exchange_id": 1,
+        "code": "binance",
+        "name": "Binance",
+        "enabled": true,
+        "market_types": ["spot", "futures"],
+        "ws_public_endpoint": "wss://stream.binance.com:9443/ws",
+        "ws_private_endpoint": "wss://stream.binance.com:9443/ws",
+        "rest_endpoint": "https://api.binance.com",
+        "rate_limits": {
+          "public_rps": 20,
+          "private_rps": 10
+        }
+      }
+    ],
+    "effective_exchanges": ["binance", "kucoin"]
   }
 }
 ```
@@ -211,6 +230,12 @@ event:
 - If trader sends `request_id`, CTS-Core mirrors it in response.
 - If trader omits `request_id`, CTS-Core generates server id (`srv-<msg_id>`).
 
+Bootstrap rules after `trader.register_ack`:
+- `available_exchanges` - полный каталог доступных бирж с идентификаторами и endpoint-данными для подключения.
+- `effective_exchanges` - пересечение `payload.capabilities` trader и доступных бирж CTS-Core.
+- Trader обязан после register выполнить проверку подключений по `effective_exchanges` и начать отправку telemetry (`trader.heartbeat` + `metrics.report`) с latency/load показателями.
+- CTS-Core сохраняет эту telemetry в runtime memory snapshot и использует ее в scheduler ranking.
+
 **Errors:**
 - `INVALID_MESSAGE` - malformed JSON, non-text frame, or unsupported message type
 - `INVALID_PAYLOAD` - payload validation error (missing `trader_id`, `version`, or bad JSON)
@@ -237,6 +262,7 @@ event:
     "trader_id": "trader-eu-1",
     "session_id": "session-uuid",
     "status": "active",
+    "load_index": 0.42,
     "task_stats": {
       "active_tasks": 3,
       "active_trades": 1,
@@ -249,6 +275,12 @@ event:
         "ws_connections": 2,
         "subscriptions": 25,
         "latency_ms": 45,
+        "status": "connected"
+      },
+      "kucoin": {
+        "ws_connections": 1,
+        "subscriptions": 18,
+        "latency_ms": 63,
         "status": "connected"
       }
     },
@@ -302,6 +334,9 @@ event:
 - `trader.register` must be completed before heartbeat.
 - `payload.trader_id` is required and must match registered trader.
 - if `payload.session_id` is set, it must match active session.
+- Heartbeat payload must include telemetry needed for scheduler profile (`task_stats`, `exchange_stats`, `system_metrics`).
+- Trader reports normalized `load_index` (`0..1`) on each heartbeat (or in paired `metrics.report`), CTS-Core stores and aggregates this value.
+- Exchange latency telemetry must cover all exchanges from trader capabilities (full sweep cycle); stale or missing exchanges are marked degraded in aggregation.
 
 **Errors:**
 - `INVALID_MESSAGE` - heartbeat before register
@@ -571,6 +606,7 @@ CTS-Core при получении trade.result:
   "payload": {
     "trader_id": "trader-eu-1",
     "timestamp": 1737823200000,
+    "load_index": 0.44,
     "system": {
       "cpu_usage_percent": 45.2,
       "memory_usage_bytes": 1073741824,
@@ -607,6 +643,16 @@ CTS-Core при получении trade.result:
 ```
 
 **Frequency:** Каждые 30 сек.
+
+**Aggregation rule:** `metrics.report` и `trader.heartbeat` являются источниками единого telemetry profile в CTS-Core (нагрузка + latency + task stats) для scheduler ranking.
+
+**Coverage rule:** В `exchanges` должны регулярно присутствовать все биржи из `capabilities` trader; отсутствие части бирж учитывается как degraded telemetry profile.
+
+**Ranking formula semantics (Phase 3):**
+- `score = latency_profile_ms + 1000 * (load_index^2)` (меньше = лучше).
+- `latency_profile_ms`: робастный latency-профиль по всем требуемым биржам (с учетом хвоста и разброса).
+- `load_index`: нормированный `0..1` индекс, который вычисляет trader из host/runtime telemetry.
+- `load_index^2`: нелинейный штраф, чтобы near-saturation узлы быстро теряли приоритет.
 
 ---
 
@@ -662,6 +708,11 @@ CTS-Core при получении trade.result:
 }
 ```
 
+**TRADE assignment policy (Phase 3):**
+- Для `task_type=trade` к ранжированию допускаются только trader в режимах `trade` и `both`.
+- Trader в режиме `monitor` исключается из candidate pool для trade-задач.
+- Ранг: `score_trade = latency_profile_ms + 1000 * (load_index^2)` (меньше = лучше).
+
 **Request (MONITOR):**
 ```json
 {
@@ -685,6 +736,15 @@ CTS-Core при получении trade.result:
   }
 }
 ```
+
+**MONITOR assignment policy (Phase 3):**
+- Для `task_type=monitor` применяется отдельное ранжирование без latency-фактора.
+- Цель выбора: минимальная текущая загрузка trader торговыми задачами.
+- Приоритет по режиму: `monitor` > `both` > `trader`.
+- Формула: `score_monitor = 1000 * (trade_load_index^2) + monitor_capacity_penalty + monitor_role_penalty` (меньше = лучше).
+- `trade_load_index` (`0..1`) вычисляется из telemetry trader и отражает нагрузку именно trade workload.
+- `monitor_role_penalty` задает приоритет режима (default: `monitor=0`, `both=100`, `trader=300`).
+- Назначение: `primary` = минимум `score_monitor`, `backup` = второй минимум.
 
 **Response (success):**
 ```json
@@ -833,7 +893,7 @@ Graceful shutdown трейдера.
 
 #### 2.5.5 latency.test (request)
 
-Тест latency к бирже.
+On-demand тест latency к одной бирже.
 
 **Request:**
 ```json
@@ -863,6 +923,11 @@ Graceful shutdown трейдера.
   }
 }
 ```
+
+Operational rule:
+- Для выбора trader в `task_type=trade` используется не одиночный тест, а полный latency sweep по всем биржам из `capabilities`.
+- `latency.test` применяется как точечная диагностика; регулярный профиль формируется из heartbeat/metrics telemetry.
+- Для `task_type=monitor` latency не участвует в ранжировании (приоритет у минимальной торговой загрузки).
 
 ---
 

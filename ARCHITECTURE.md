@@ -1004,90 +1004,31 @@ GET /api/v1/admin/reencryption/jobs/{job_id}
 
 ### 7.1 Load Balancing Algorithm (Phase 1)
 
-**Алгоритм выбора трейдера для задачи** основан на scoring с тремя факторами:
+**Зафиксированное правило выбора trader для массива бирж:**
 
-```go
-type AssignmentScore struct {
-    TraderID string
-    Score    float64
-    Details  ScoreBreakdown
-}
+- CTS-Core выбирает только исполнителя для набора `exchange_ids`.
+- Решение `buy/sell` принимает trader (локальная стратегия исполнения).
+- Приоритет у latency-профиля по требуемым биржам с защитой от выбросов; простое среднее не используется.
+- Нагрузка берется из `load_index` (`0..1`), который сообщает trader в heartbeat.
+- Нелинейный штраф нагрузки: `load_index^2`.
 
-type ScoreBreakdown struct {
-    LatencyScore   float64 // 50% - КРИТИЧНО для арбитража
-    LoadScore      float64 // 30% - баланс нагрузки
-    ResourceScore  float64 // 20% - доступные лимиты бирж
-}
+Короткая формула ранга (меньше = лучше):
 
-func (s *Scheduler) SelectTrader(task Task, candidates []Trader) *Trader {
-    scores := []AssignmentScore{}
-    
-    for _, trader := range candidates {
-        score := s.CalculateScore(trader, task)
-        scores = append(scores, score)
-    }
-    
-    // Sort by score DESC
-    sort.Slice(scores, func(i, j int) bool {
-        return scores[i].Score > scores[j].Score
-    })
-    
-    return scores[0].TraderID
-}
-
-func (s *Scheduler) CalculateScore(trader Trader, task Task) AssignmentScore {
-    breakdown := ScoreBreakdown{}
-    
-    // 1. ЛАТЕНТНОСТЬ К БИРЖАМ (вес: 50%)
-    var avgLatency float64
-    for _, exchangeID := range task.ExchangeIDs {
-        latency := s.GetLatency(trader.ID, exchangeID)
-        avgLatency += latency
-    }
-    avgLatency /= float64(len(task.ExchangeIDs))
-    
-    // Формула: 100 - (latency_ms / 10)
-    latencyScore := 100.0 - (avgLatency / 10.0)
-    if latencyScore < 0 {
-        latencyScore = 0
-    }
-    breakdown.LatencyScore = latencyScore * 0.5
-    
-    // 2. ТЕКУЩАЯ ЗАГРУЗКА (вес: 30%)
-    loadPercent := float64(trader.ActiveTasks) / float64(trader.MaxTasks) * 100
-    loadScore := 100.0 - loadPercent
-    breakdown.LoadScore = loadScore * 0.3
-    
-    // 3. ЛИМИТЫ БИРЖ (вес: 20%)
-    resourceScore := s.CheckResourceAvailability(trader, task)
-    breakdown.ResourceScore = resourceScore * 0.2
-    
-    totalScore := breakdown.LatencyScore + breakdown.LoadScore + breakdown.ResourceScore
-    
-    return AssignmentScore{
-        TraderID: trader.ID,
-        Score:    totalScore,
-        Details:  breakdown,
-    }
-}
+```text
+score = latency_profile_ms + 1000 * (load_index^2)
 ```
 
-**Пример:**
-```yaml
-ЗАДАЧА: Арбитраж BTC/USDT между Binance + Bybit
+Где:
 
-TRADER-EU-1 (Frankfurt):
-  Latency: (15ms + 20ms) / 2 = 17.5ms → Score: (100 - 1.75) * 0.5 = 49.1
-  Load: 30% → Score: 70 * 0.3 = 21.0
-  Resources: 92.5% available → Score: 92.5 * 0.2 = 18.5
-  TOTAL: 88.6
+- `latency_profile_ms`: робастный профиль задержек по всем `exchange_ids` задачи.
+- `load_index`: агрегированный индекс загрузки хоста trader (CPU, память, очередь, сетевые лимиты) на стороне trader.
 
-TRADER-US-1 (New York):
-  Latency: (80ms + 90ms) / 2 = 85ms → Score: (100 - 8.5) * 0.5 = 45.75
-  Load: 10% → Score: 90 * 0.3 = 27.0
-  Resources: 96.5% available → Score: 96.5 * 0.2 = 19.3
-  TOTAL: 92.05 ✅ WINNER (несмотря на худшую латентность, свободнее)
-```
+Практическая интерпретация (v1):
+
+- `latency_profile_ms` учитывает не только среднее, но и "хвост" (worst/p95) и разброс между биржами.
+- `load_index` нормируется в диапазон `0..1` и собирается на стороне trader.
+- `load_index^2` дает мягкий штраф на низкой нагрузке и резкий рост штрафа у насыщенных узлов.
+- Коэффициент `1000` переводит load-компонент в масштаб миллисекунд, чтобы итоговый `score` был сопоставим по шкале.
 
 ### 7.2 Task Assignment Algorithm
 
@@ -1122,11 +1063,13 @@ TRADER-US-1 (New York):
 │     │  }                                                                          │ │
 │     └─────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                     │
-│  3. SCORE TRADERS (scoring algorithm выше)                                          │
+│  3. SCORE TRADERS (latency-profile + nonlinear load penalty)                        │
 │     ┌─────────────────────────────────────────────────────────────────────────────┐ │
-│     │  score = 0.50 * latency_score    // Латентность (50%)                       │ │
-│     │        + 0.30 * load_score        // Текущая нагрузка (30%)                 │ │
-│     │        + 0.20 * resource_score    // Доступные лимиты (20%)                 │ │
+│     │  candidates_trade = traders where role in {trade, both}                    │ │
+│     │  score = latency_profile_ms + 1000 * (load_index^2)                         │ │
+│     │  // latency_profile_ms: по required exchanges, с защитой от выбросов        │ │
+│     │  // load_index: репорт trader (0..1), нелинейный штраф near saturation      │ │
+│     │  // role=monitor is excluded for trade assignments                           │ │
 │     └─────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                     │
 │  4. ASSIGN TASKS                                                                    │
@@ -1140,8 +1083,12 @@ TRADER-US-1 (New York):
 │  5. DUPLICATE MONITORING TASKS                                                      │
 │     ┌─────────────────────────────────────────────────────────────────────────────┐ │
 │     │  for each exchange:                                                         │ │
-│     │    primary_trader = best_trader for exchange                                │ │
-│     │    backup_trader = second_best_trader for exchange                          │ │
+│     │    score_monitor = 1000 * (trade_load_index^2)                              │ │
+│     │                  + monitor_capacity_penalty + monitor_role_penalty           │ │
+│     │    // monitor rank ignores exchange latency                                  │ │
+│     │    // role priority: monitor > both > trader                                 │ │
+│     │    primary_trader = trader with minimum score_monitor                        │ │
+│     │    backup_trader = trader with second minimum score_monitor                  │ │
 │     │    assign_monitoring(exchange, primary_trader, backup_trader)               │ │
 │     └─────────────────────────────────────────────────────────────────────────────┘ │
 │                                                                                     │
@@ -1149,6 +1096,15 @@ TRADER-US-1 (New York):
 ```
 
 ### 7.3 Monitoring Duplication
+
+Для мониторинга применяется отдельная логика выбора:
+
+- Цель: выбирать узлы, которые меньше всего загружены торговлей.
+- Латентность подключения к биржам не является фактором ранжирования для `MONITOR`.
+- Формула ранга мониторинга (меньше = лучше): `score_monitor = 1000 * (trade_load_index^2) + monitor_capacity_penalty + monitor_role_penalty`.
+- `trade_load_index` (`0..1`) берется из telemetry trader и отражает нагрузку именно торговыми задачами.
+- Приоритет по режиму: `monitor` > `both` > `trader` (через `monitor_role_penalty`).
+- `primary` получает минимальный `score_monitor`, `backup` - второй минимум.
 
 **Цель:** Обеспечить непрерывность мониторинга при отказе трейдера
 
@@ -1200,7 +1156,7 @@ flowchart TB
     subgraph ALGO["Assignment Algorithm"]
         LOAD[1. Load Active Trades]
         GROUP[2. Group by Exchange]
-        SCORE[3. Score Traders<br/>score = w1×latency + w2×load + w3×region]
+        SCORE[3. Score Traders<br/>score = latency_profile_ms + 1000×(load_index^2)]
         ASSIGN[4. Assign Tasks<br/>Best combined score]
         DUP[5. Duplicate Monitoring<br/>Primary + Backup]
     end

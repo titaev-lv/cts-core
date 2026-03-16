@@ -73,6 +73,29 @@ Code touchpoints:
 
 ### Phase 3 (Business Logic)
 
+- Зафиксированная модель выбора trader для массива бирж:
+  - CTS-Core выбирает исполнителя только для `exchange_ids`; решение `buy/sell` принимает trader.
+  - Для `task_type=trade`:
+    - eligibility по режиму trader: только `trade` и `both`.
+    - режим `monitor` не участвует в выборе исполнителя для trade-задач.
+    - latency считается как профиль по требуемым биржам с защитой от выбросов (не простое среднее).
+    - нагрузка берется из `load_index` (0..1), который репортит trader в heartbeat.
+    - формула ранга: `score_trade = latency_profile_ms + 1000 * (load_index^2)`.
+  - Для `task_type=monitor`:
+    - приоритет у минимальной торговой загрузки trader; latency не участвует в ранжировании.
+    - приоритет по режиму trader: `monitor` > `both` > `trader`.
+    - формула ранга: `score_monitor = 1000 * (trade_load_index^2) + monitor_capacity_penalty + monitor_role_penalty`.
+    - `primary` = минимум `score_monitor`, `backup` = второй минимум.
+  - Детализация формул (v1):
+    - `latency_profile_ms`: агрегат задержек по всем требуемым биржам с учетом worst/p95 и разброса между биржами (только для `trade`).
+    - `load_index`: нормированный индекс общей загрузки trader (`0..1`) из CPU/RAM/network/queue.
+    - `trade_load_index`: нормированный индекс загрузки торговыми задачами (`0..1`) для monitor-выбора.
+    - `monitor_role_penalty`: штраф за режим (`monitor=0`, `both=100`, `trader=300` в версии по умолчанию).
+    - `*_index^2`: нелинейный штраф near saturation.
+    - `1000`: масштабирование компонента загрузки в единицы, сопоставимые с `latency_ms`.
+  - Trader после подключения обязан слать телеметрию (`trader.heartbeat` + `metrics.report`), CTS-Core агрегирует ее для ранжирования.
+  - Для `task_type=trade` latency sweep выполняется по всем биржам из `capabilities`; данные по одной бирже не формируют корректный профиль.
+  - Для `task_type=monitor` latency в формуле ранга не используется.
 - Load balancing/scoring.
 - Resource tracking на основе `TRADER_EXCHANGE_RESOURCE`.
 - Metrics/reporting для планировщика.
