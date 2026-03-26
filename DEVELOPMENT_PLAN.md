@@ -1,153 +1,164 @@
 # CTS-Core & Trader Development Plan
 
-> Версия: 2.2.0
-> Обновлено: 2026-03-14
-> Статус: Phase 2 Complete | Phase 1.5 Complete | Phase 3 Priority
+> Версия: 3.0.0
+> Обновлено: 2026-03-17
+> Формат: Подробный реестр реализованного + актуальные следующие шаги
 > Связанные документы: `ARCHITECTURE.md`, `API_SPECIFICATION.md`, `DOCS_INDEX.md`, `CROSS_PROJECT_WWW_GO.md`
 
-## 1. Цель
+## 1. Назначение документа
 
-Документ фиксирует актуальный план разработки без исторических пошаговых инструкций.
+Этот файл фиксирует текущее фактическое состояние разработки в формате:
+- что уже реализовано (подробно),
+- какие решения и ограничения приняты,
+- что остается в следующем цикле.
 
-## 2. Текущее состояние
+Фазовые секции, которые уже завершены, из документа убраны.
 
-### CTS-Core
+## 2. Подробно: что уже реализовано
 
-- Завершено:
-  - Phase 0: SQL schema и миграции
-  - Phase 1.1: config/logger/project setup
-  - Phase 1.2: MySQL client + repository layer
-  - Phase 1.3: HSM client (Trading + 2FA)
-  - Phase 1.4: state manager (`state/daemon.state`, backup, background sync)
-  - Phase 2: WS runtime protocol + session lifecycle + scheduler skeleton + Sprint 6 smoke tooling
-  - Phase 1.5 finalization: `/metrics`, Prometheus wiring, integration coverage
+### 2.1 Базовая платформа сервиса
 
-### База данных (локальный контур)
+- Поднят каркас сервиса `cts-core` с загрузкой конфигурации, инициализацией логгера, graceful shutdown.
+- Подключен MySQL-клиент и repository layer.
+- Подключены HSM-клиенты для двух контекстов:
+  - trading (ключи бирж),
+  - 2FA (re-encryption path).
+- Введен state manager с записью runtime-состояния в `state/daemon.state`, ротацией backup и фоновым sync.
 
-- Ключевые таблицы существуют: `TRADER`, `TRADER_SESSION`, `TRADER_EXCHANGE_RESOURCE`, `AUDIT_LOG`, `SCHEDULER_TASKS`.
-- `SCHEDULER_TASKS` инициализирована дефолтными задачами.
+### 2.2 WebSocket runtime для trader
 
-### Trader / Web UI
+- Реализован runtime-протокол регистрации и heartbeat:
+  - `trader.register` -> `trader.register_ack`,
+  - `trader.heartbeat` -> `trader.heartbeat_ack`.
+- Реализованы timeout/disconnect сценарии и телеметрия жизненного цикла сессии.
+- Реализована persistence жизненного цикла сессий в `TRADER_SESSION`.
+- Реализован in-memory registry активных WS-соединений (для server-initiated сообщений).
 
-- Текущее направление для trader в workspace: `services/trader`.
-- По интеграции с UI приоритеты и контракт вынесены в `CROSS_PROJECT_WWW_GO.md`.
+### 2.3 Усиление WS-протокола (hardening)
 
-## 3. План по фазам
+- Проверка версии протокола.
+- Защита от flood по неизвестным action.
+- Ограничения на размер сообщения.
+- Rate limiting inbound WS-потока.
+- Dedup request_id в окне времени.
+- Typed errors (`INVALID_PAYLOAD.details` и др.) для диагностики.
 
-### Phase 2 (Core Features, completed)
+### 2.4 Scheduler: модель выбора исполнителя
 
-Результат:
-- Реализованы `trader.register` и `trader.heartbeat` (request/event, ack/error).
-- Реализован lifecycle сессий с persistence в `TRADER_SESSION`.
-- Реализован scheduler runtime cycle по active/healthy WS snapshots.
-- Добавлен protocol hardening (version checks, rate limit, dedup, payload and action flood guards).
-- Добавлен Sprint 6 operational smoke набор:
-  - `guides/PHASE2_SMOKE_RUNBOOK.md`
-  - `tests/smoke_phase2_ws_lifecycle.sh`
-  - `tests/smoke_ws_lifecycle_client.go`
+- Выбор кандидатов только из active/healthy WS snapshots.
+- Task-type aware отбор:
+  - для `trade`: участвуют `trade` и `both`,
+  - для `monitor`: собственная логика приоритета.
+- Нормализованная scoring-модель:
+  - `trade`: latency profile + нелинейный штраф за load,
+  - `monitor`: упор на минимальную торговую загрузку и role penalty.
+- Введен детерминированный tie-break при равных score.
 
-### Phase 1.5 Finalization (completed)
+### 2.5 Scheduler: требования по биржам и latency profile
 
-Результат:
-- Реализован `/metrics` endpoint на REST роутере (конфигурируемый путь).
-- Добавлены Prometheus collectors:
-  - Go runtime/process
-  - `cts_core_ws_active_connections`
-  - `cts_core_ws_total_connections`
-  - `cts_core_runtime_scheduler_cycle_count`
-  - `cts_core_runtime_scheduler_last_candidate_count`
-  - `cts_core_runtime_ws_timeout_count`
-- Добавлены тесты:
-  - unit coverage для metrics endpoint/path normalization
-  - integration test `health + metrics + ws lifecycle`
+- Убран runtime-зависимый config-список required exchanges.
+- Источник required exchanges переведен на DB-only путь:
+  - `ListTradeExchanges()` / `ListMonitorExchanges()`.
+- Добавлен server-initiated latency sweep:
+  - периодический `latency.test` по полному набору `capabilities`,
+  - прием `latency.test_result`,
+  - обновление `exchange_latencies` и итогового latency profile.
+- Интервал re-test зафиксирован и конфигурируется через scheduler config (`20m` по умолчанию).
 
-Code touchpoints:
+### 2.6 Scheduler: ресурсы и вместимость
 
-- `cmd/cts-core/main.go`
-- `internal/api/`
-- `internal/middleware/`
-- `internal/ws/`
+- Реализованы hard-resource ограничения на уровне выбора кандидатов:
+  - кандидат исключается при нарушении жесткого порога.
+- Реализованы soft-resource штрафы:
+  - кандидат остается в ранжировании,
+  - получает penalty к score в зоне soft-limit.
+- Введена конфигурация ресурсной политики и валидация:
+  - `resource_hard_limit`,
+  - `resource_soft_limit`,
+  - `resource_soft_penalty_ms`.
+- Подключен DB adapter к `TRADER_EXCHANGE_RESOURCE` для расчета utilization `USED/MAX`.
 
-Критерий завершения:
-- `/health`, `/ready`, `/live`, `/metrics` доступны и покрыты тестами.
+### 2.7 Scheduler: устойчивость назначения
 
-### Phase 3 (Business Logic)
+- Добавлена защита от дублей назначения на уровне scheduler:
+  - idempotency key `task_id + trader_id + epoch`,
+  - in-memory окно дедупликации.
+- Добавлен retry policy:
+  - ограниченное число повторов,
+  - backoff,
+  - классификация retryable/non-retryable ошибок.
+- Добавлена минимальная in-memory dead-letter очередь для невыполнимых назначений.
 
-- Зафиксированная модель выбора trader для массива бирж:
-  - CTS-Core выбирает исполнителя только для `exchange_ids`; решение `buy/sell` принимает trader.
-  - Для `task_type=trade`:
-    - eligibility по режиму trader: только `trade` и `both`.
-    - режим `monitor` не участвует в выборе исполнителя для trade-задач.
-    - latency считается как профиль по требуемым биржам с защитой от выбросов (не простое среднее).
-    - нагрузка берется из `load_index` (0..1), который репортит trader в heartbeat.
-    - формула ранга: `score_trade = latency_profile_ms + 1000 * (load_index^2)`.
-  - Для `task_type=monitor`:
-    - приоритет у минимальной торговой загрузки trader; latency не участвует в ранжировании.
-    - приоритет по режиму trader: `monitor` > `both` > `trader`.
-    - формула ранга: `score_monitor = 1000 * (trade_load_index^2) + monitor_capacity_penalty + monitor_role_penalty`.
-    - `primary` = минимум `score_monitor`, `backup` = второй минимум.
-  - Детализация формул (v1):
-    - `latency_profile_ms`: агрегат задержек по всем требуемым биржам с учетом worst/p95 и разброса между биржами (только для `trade`).
-    - `load_index`: нормированный индекс общей загрузки trader (`0..1`) из CPU/RAM/network/queue.
-    - `trade_load_index`: нормированный индекс загрузки торговыми задачами (`0..1`) для monitor-выбора.
-    - `monitor_role_penalty`: штраф за режим (`monitor=0`, `both=100`, `trader=300` в версии по умолчанию).
-    - `*_index^2`: нелинейный штраф near saturation.
-    - `1000`: масштабирование компонента загрузки в единицы, сопоставимые с `latency_ms`.
-  - Trader после подключения обязан слать телеметрию (`trader.heartbeat` + `metrics.report`), CTS-Core агрегирует ее для ранжирования.
-  - Для `task_type=trade` latency sweep выполняется по всем биржам из `capabilities`; данные по одной бирже не формируют корректный профиль.
-  - Для `task_type=monitor` latency в формуле ранга не используется.
-- Load balancing/scoring.
-- Resource tracking на основе `TRADER_EXCHANGE_RESOURCE`.
-- Metrics/reporting для планировщика.
+### 2.8 Наблюдаемость планировщика
 
-### Phase 4 (Integration)
+- Расширен runtime state для scheduler quality:
+  - `last_assign_status`,
+  - `assign_latency_ms`,
+  - score distribution (`p50`, `p95`),
+  - assign attempts по результатам,
+  - resource rejections по причинам.
+- Расширен `/metrics` новыми сериями качества назначения:
+  - `cts_core_scheduler_assign_attempts_total{result=...}`,
+  - `cts_core_scheduler_assign_latency_ms`,
+  - `cts_core_scheduler_candidate_pool_size`,
+  - `cts_core_scheduler_score_distribution{quantile=...}`,
+  - `cts_core_scheduler_resource_rejections_total{reason=...}`.
+- Расширен `/health` блоком `scheduler` с качественными полями и причинами отказов.
 
-- Расширенный REST API для admin/web.
-- Полноценная обработка trade result потока.
-- E2E/integration test suite.
+### 2.9 Тесты и верификация
 
-### Phase 4.1 (Integration): Hybrid Core<->Trader Reconciliation
+- Расширены unit/integration тесты по направлениям:
+  - WS handler/session lifecycle,
+  - scheduler scoring/resources/idempotency/retry,
+  - state manager runtime fields,
+  - REST `/metrics` и `/health`.
+- Регулярная валидация `go test ./...` в `services/cts-core` проходит успешно.
+
+### 2.10 Текущее решение по объему работ
+
+- По внутреннему решению команды задачи безопасного ввода из прежнего Phase 3 backlog исключены из текущего цикла:
+  - `P3-009` (feature toggles + dry-run),
+  - `P3-010` (расширенный smoke assignment path).
+- Реализация hybrid reconciliation `core <-> trader` закреплена как следующий интеграционный блок, а не часть завершенных работ текущего цикла.
+
+## 3. Принятые правила и ограничения
+
+- CTS-Core выбирает исполнителя для массива `exchange_ids`; решение `buy/sell` остается на стороне trader.
+- Telemetry от trader (`heartbeat`, latency данные) считается источником для ранжирования.
+- Для trade-задач используется full-sweep по всем требуемым биржам, а не выборочная latency по одной бирже.
+- Resource-policy и assignment-quality параметры должны быть операционно наблюдаемы через `/metrics` и `/health`.
+
+## 4. Следующий интеграционный блок
+
+### Hybrid Core<->Trader Reconciliation
 
 Цель:
-- не допустить длительного рассинхрона между desired state в `cts-core` и фактическими задачами на `trader`.
+- гарантировать автосходимость desired state (`cts-core`) и фактического набора задач на `trader`.
 
-Подход (гибрид):
-- быстрый контур `10-15s` (настраиваемо):
-  - `cts-core` сканирует БД на новые/остановленные задачи,
-  - пересчитывает desired state,
-  - отправляет push-обновления на `trader`.
-- медленный контур `1-2m` (настраиваемо):
-  - `cts-core` запрашивает у каждого активного `trader` текущий список задач,
-  - `trader` отвечает списком + checksum/version,
-  - `cts-core` сверяет actual vs desired и при расхождении отправляет корректирующий push.
+Подход:
+- быстрый контур `10-15s` (configurable): DB scan + push обновлений,
+- медленный контур `1-2m` (configurable): state request/report + checksum/version + corrective push.
 
-Критерий готовности:
-- push остается основным путем доставки изменений,
-- reconciliation работает как self-healing контроль,
-- при ручной остановке/удалении задачи рассинхрон автоматически устраняется в пределах sync-интервала,
-- причины рассинхрона и количество коррекций видны в логах/метриках.
+Ожидаемый результат:
+- push остается основным путем доставки,
+- reconciliation выполняет self-healing роль,
+- рассинхрон устраняется автоматически в пределах sync-интервала,
+- причины и частота рассинхрона наблюдаемы.
 
-## 4. Приоритетный backlog (ближайшие задачи)
+## 5. Риски и контроль
 
-1. Развивать scheduler business logic и scoring (Phase 3).
-2. Расширить модель runtime metrics под assignment quality/latency.
-3. Добавить integration/e2e сценарии task dispatch/results.
-4. Зафиксировать post-Phase-2 backlog в разрезе trader orchestration.
+- Риск рассинхронизации документации и runtime-поведения.
+- Риск рассинхронизации контрактов `cts-core <-> trader` при активных изменениях.
 
-## 5. Риски
+Контроль:
+- каждый новый WS action или изменение payload фиксируется одновременно в коде и `API_SPECIFICATION.md`,
+- изменения runtime-семантики отражаются в `README.md` и `DOCS_INDEX.md` в том же наборе изменений.
 
-- Риск рассинхронизации между API спецификацией и текущим WS runtime baseline.
-- Риск рассинхронизации между docs и кодом при быстрых изменениях.
+## 6. История изменений
 
-Снижение рисков:
-- Любой новый endpoint/WS action фиксировать одновременно в коде и `API_SPECIFICATION.md`.
-- Обновлять `README.md` и `DOCS_INDEX.md` в том же PR.
+Исторические подробные поэтапные журналы в этот файл не включаются.
 
-## 6. Исторические секции
-
-Исторические пошаговые секции (minute-by-minute, длинные командные блоки, архивные rollout/checklists) намеренно удалены из этого файла.
-
-Если нужна ретроспектива реализации, используйте git history:
+Для ретроспективы использовать git history:
 
 ```bash
 git log -- DEVELOPMENT_PLAN.md
