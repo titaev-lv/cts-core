@@ -1,7 +1,7 @@
 # CTS-Core & Trader Development Plan
 
-> Версия: 3.0.0
-> Обновлено: 2026-03-17
+> Версия: 3.1.0
+> Обновлено: 2026-03-30
 > Формат: Подробный реестр реализованного + актуальные следующие шаги
 > Связанные документы: `ARCHITECTURE.md`, `API_SPECIFICATION.md`, `DOCS_INDEX.md`, `CROSS_PROJECT_WWW_GO.md`
 
@@ -114,7 +114,18 @@
   - REST `/metrics` и `/health`.
 - Регулярная валидация `go test ./...` в `services/cts-core` проходит успешно.
 
-### 2.10 Текущее решение по объему работ
+### 2.10 WS transport alignment (завершено)
+
+- Duplicate `seq` обрабатывается идемпотентно: дубликаты inbound сообщений игнорируются без повторной обработки.
+- Закрытие соединений переведено на graceful close handshake с bounded wait в server shutdown path.
+- На listener уровне включен strict mTLS (client cert required + verified).
+- Runtime defaults синхронизированы с контрактом транспорта:
+  - heartbeat/ping interval: `10s`,
+  - read/pong timeout: `30s`,
+  - write timeout: `5s`.
+- Подтверждено smoke + `go test ./...` в актуальном цикле изменений.
+
+### 2.11 Текущее решение по объему работ
 
 - По внутреннему решению команды задачи безопасного ввода из прежнего Phase 3 backlog исключены из текущего цикла:
   - `P3-009` (feature toggles + dry-run),
