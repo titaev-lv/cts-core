@@ -89,6 +89,7 @@ make smoke-core-ws
 - только `wss://` transport для WS;
 - mTLS handshake с клиентским сертификатом трейдера;
 - auto-create трейдера по CN сертификата;
+- duplicate CN конфликт: второе одновременное подключение с тем же сертификатом получает `DUPLICATE_CONNECTION`;
 - новый трейдер получает `status=pending`;
 - pending-трейдер не получает assignment в `MONITORING` / `TRADE`.
 

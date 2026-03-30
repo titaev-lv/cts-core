@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,6 +80,8 @@ func main() {
 	if expectedTraderID == "" {
 		expectedTraderID = "trader-1-cts-client"
 	}
+	expectedRegisterErrorCode := strings.TrimSpace(os.Getenv("CTS_SMOKE_EXPECT_REGISTER_ERROR_CODE"))
+	holdSec := parseOptionalIntEnv("CTS_SMOKE_HOLD_SEC")
 
 	dialer := *websocket.DefaultDialer
 	dialer.TLSClientConfig = &tls.Config{
@@ -119,10 +122,18 @@ func main() {
 
 	regResp := readEnvelope(conn)
 	if regResp.Action == "error" {
+		if expectedRegisterErrorCode != "" {
+			assertExpectedWSError(regResp, "register", expectedRegisterErrorCode)
+			fmt.Printf("WS smoke expected register error observed (code=%s run_id=%s)\n", expectedRegisterErrorCode, runID)
+			return
+		}
 		printWSErrorAndFail(regResp, "register")
 	}
 	if regResp.Action != "trader.register_ack" {
 		fail("unexpected register response action: %s", regResp.Action)
+	}
+	if expectedRegisterErrorCode != "" {
+		fail("register succeeded but expected error code=%s", expectedRegisterErrorCode)
 	}
 
 	var regAck registerAckPayload
@@ -138,6 +149,7 @@ func main() {
 	if regAck.TraderID != expectedTraderID {
 		fail("register_ack trader_id mismatch: expected=%s got=%s", expectedTraderID, regAck.TraderID)
 	}
+	fmt.Printf("REGISTER_ACK trader_id=%s session_id=%s run_id=%s\n", regAck.TraderID, regAck.SessionID, runID)
 
 	heartbeatReq := envelope{
 		Type:            "request",
@@ -168,6 +180,11 @@ func main() {
 	}
 	if hbAck.SessionID != regAck.SessionID {
 		fail("heartbeat_ack session_id mismatch: expected=%s got=%s", regAck.SessionID, hbAck.SessionID)
+	}
+	fmt.Printf("HEARTBEAT_ACK trader_id=%s session_id=%s run_id=%s\n", hbAck.TraderID, hbAck.SessionID, runID)
+
+	if holdSec > 0 {
+		time.Sleep(time.Duration(holdSec) * time.Second)
 	}
 
 	if err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "smoke-finish")); err != nil {
@@ -224,6 +241,28 @@ func printWSErrorAndFail(resp envelope, stage string) {
 		fail("%s error response has invalid payload: %v", stage, err)
 	}
 	fail("%s failed with WS error code=%s message=%s details=%v", stage, p.Code, p.Message, p.Details)
+}
+
+func assertExpectedWSError(resp envelope, stage string, expectedCode string) {
+	var p errorPayload
+	if err := json.Unmarshal(resp.Payload, &p); err != nil {
+		fail("%s error response has invalid payload: %v", stage, err)
+	}
+	if p.Code != expectedCode {
+		fail("%s failed with unexpected WS error code=%s (expected=%s) message=%s details=%v", stage, p.Code, expectedCode, p.Message, p.Details)
+	}
+}
+
+func parseOptionalIntEnv(name string) int {
+	v := strings.TrimSpace(os.Getenv(name))
+	if v == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		fail("invalid %s value %q: expected non-negative integer", name, v)
+	}
+	return n
 }
 
 func fail(format string, args ...interface{}) {

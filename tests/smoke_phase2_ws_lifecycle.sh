@@ -208,6 +208,83 @@ CTS_WS_SERVER_NAME="$CTS_WS_SERVER_NAME" \
 CTS_SMOKE_CERTIFICATE_CN="$CTS_SMOKE_CERTIFICATE_CN" \
 go run ./tests/smoke_ws_lifecycle_client.go
 
+echo "[smoke] running duplicate CN conflict check"
+DUP_PRIMARY_LOG="$(mktemp)"
+DUP_SECONDARY_LOG="$(mktemp)"
+
+cleanup_dup_logs() {
+  rm -f "$DUP_PRIMARY_LOG" "$DUP_SECONDARY_LOG"
+}
+trap cleanup_dup_logs EXIT
+
+CTS_WS_URL="$CTS_WS_URL" \
+CTS_WS_CLIENT_CA_PATH="$CTS_WS_CLIENT_CA_PATH" \
+CTS_WS_CLIENT_CERT_PATH="$CTS_WS_CLIENT_CERT_PATH" \
+CTS_WS_CLIENT_KEY_PATH="$CTS_WS_CLIENT_KEY_PATH" \
+CTS_WS_SERVER_NAME="$CTS_WS_SERVER_NAME" \
+CTS_SMOKE_CERTIFICATE_CN="$CTS_SMOKE_CERTIFICATE_CN" \
+CTS_SMOKE_HOLD_SEC="8" \
+go run ./tests/smoke_ws_lifecycle_client.go >"$DUP_PRIMARY_LOG" 2>&1 &
+DUP_PRIMARY_PID=$!
+
+PRIMARY_READY=0
+for _ in $(seq 1 60); do
+  PRIMARY_ACTIVE_COUNT="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+    mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+    "SELECT COUNT(*) FROM TRADER_SESSION s JOIN TRADER t ON t.ID = s.TRADER_ID WHERE t.CERTIFICATE_CN = '$CTS_SMOKE_CERTIFICATE_CN' AND s.ENDED_AT IS NULL;" 2>/dev/null || echo "0")"
+  if [ "$PRIMARY_ACTIVE_COUNT" -ge 1 ] 2>/dev/null; then
+    PRIMARY_READY=1
+    break
+  fi
+  if ! kill -0 "$DUP_PRIMARY_PID" 2>/dev/null; then
+    break
+  fi
+  sleep 0.5
+done
+
+if [ "$PRIMARY_READY" != "1" ]; then
+  echo "[smoke] ERROR: primary ws client did not establish active session" >&2
+  if [ -f "$DUP_PRIMARY_LOG" ]; then
+    cat "$DUP_PRIMARY_LOG" >&2
+  fi
+  wait "$DUP_PRIMARY_PID" 2>/dev/null || true
+  exit 1
+fi
+
+if ! CTS_WS_URL="$CTS_WS_URL" \
+  CTS_WS_CLIENT_CA_PATH="$CTS_WS_CLIENT_CA_PATH" \
+  CTS_WS_CLIENT_CERT_PATH="$CTS_WS_CLIENT_CERT_PATH" \
+  CTS_WS_CLIENT_KEY_PATH="$CTS_WS_CLIENT_KEY_PATH" \
+  CTS_WS_SERVER_NAME="$CTS_WS_SERVER_NAME" \
+  CTS_SMOKE_CERTIFICATE_CN="$CTS_SMOKE_CERTIFICATE_CN" \
+  CTS_SMOKE_EXPECT_REGISTER_ERROR_CODE="DUPLICATE_CONNECTION" \
+  go run ./tests/smoke_ws_lifecycle_client.go >"$DUP_SECONDARY_LOG" 2>&1; then
+  echo "[smoke] ERROR: duplicate CN secondary client did not receive expected DUPLICATE_CONNECTION" >&2
+  cat "$DUP_SECONDARY_LOG" >&2
+  wait "$DUP_PRIMARY_PID" 2>/dev/null || true
+  exit 1
+fi
+
+if ! wait "$DUP_PRIMARY_PID"; then
+  echo "[smoke] ERROR: primary ws client failed during duplicate CN scenario" >&2
+  cat "$DUP_PRIMARY_LOG" >&2
+  exit 1
+fi
+
+DUP_VIOLATIONS="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+  mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+  "SELECT COUNT(*) FROM (SELECT TRADER_ID FROM TRADER_SESSION WHERE ENDED_AT IS NULL GROUP BY TRADER_ID HAVING COUNT(*) > 1) x;" 2>/dev/null || echo "-1")"
+
+if [ "$DUP_VIOLATIONS" != "0" ]; then
+  echo "[smoke] ERROR: duplicate CN invariant violated, traders with >1 active session: $DUP_VIOLATIONS" >&2
+  exit 1
+fi
+
+echo "[smoke] duplicate CN conflict check passed"
+
+cleanup_dup_logs
+trap - EXIT
+
 echo "[smoke] validating trader auto-create status"
 TRADER_ROW="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
   mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
