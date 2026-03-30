@@ -28,7 +28,7 @@ import (
 	"golang.org/x/net/http2"
 )
 
-const version = "0.0.1"
+var version = "local-build"
 
 type schedulerRequirementsProvider struct {
 	repo repository.ExchangeRequirementsRepository

@@ -16,9 +16,10 @@ RUN go mod download
 # Скопировать исходный код
 COPY . .
 
-# Собрать бинарник
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w" \
+# Собрать бинарник с версией из VERSION
+RUN CTS_CORE_VERSION="$(cat VERSION)" && \
+    CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build -ldflags="-s -w -X main.version=${CTS_CORE_VERSION}" \
     -o cts-core \
     cmd/cts-core/main.go
 
