@@ -82,13 +82,14 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.Server.TLS.Enabled {
-		if c.Server.TLS.CertPath == "" {
-			return fmt.Errorf("server.tls.cert_path is required when server.tls.enabled=true")
-		}
-		if c.Server.TLS.KeyPath == "" {
-			return fmt.Errorf("server.tls.key_path is required when server.tls.enabled=true")
-		}
+	if c.Server.TLS.CertPath == "" {
+		return fmt.Errorf("server.tls.cert_path is required")
+	}
+	if c.Server.TLS.KeyPath == "" {
+		return fmt.Errorf("server.tls.key_path is required")
+	}
+	if c.Server.TLS.CAPath == "" {
+		return fmt.Errorf("server.tls.ca_path is required")
 	}
 
 	if c.Databases.System.Engine == "" {
@@ -147,6 +148,9 @@ func (c *Config) Validate() error {
 	if c.Session.HeartbeatTimeout == 0 {
 		c.Session.HeartbeatTimeout = 15 * time.Second
 	}
+	if c.Session.WriteTimeout == 0 {
+		c.Session.WriteTimeout = 10 * time.Second
+	}
 	if c.Session.GracePeriod == 0 {
 		c.Session.GracePeriod = 60 * time.Second
 	}
@@ -174,6 +178,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Session.HeartbeatTimeout <= 0 || c.Session.HeartbeatTimeout > 24*time.Hour {
 		return fmt.Errorf("invalid session.heartbeat_timeout: %s", c.Session.HeartbeatTimeout)
+	}
+	if c.Session.WriteTimeout <= 0 || c.Session.WriteTimeout > 24*time.Hour {
+		return fmt.Errorf("invalid session.write_timeout: %s", c.Session.WriteTimeout)
 	}
 	if c.Session.HeartbeatTimeout < c.Session.HeartbeatInterval {
 		return fmt.Errorf("invalid session settings: heartbeat_timeout (%s) must be >= heartbeat_interval (%s)", c.Session.HeartbeatTimeout, c.Session.HeartbeatInterval)

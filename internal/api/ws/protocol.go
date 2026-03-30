@@ -57,6 +57,8 @@ type envelope struct {
 	Type            string          `json:"type"`
 	Action          string          `json:"action"`
 	ProtocolVersion string          `json:"protocol_version,omitempty"`
+	Seq             uint64          `json:"seq,omitempty"`
+	Ack             uint64          `json:"ack,omitempty"`
 	RequestID       string          `json:"request_id,omitempty"`
 	Payload         json.RawMessage `json:"payload,omitempty"`
 	TS              int64           `json:"ts,omitempty"`

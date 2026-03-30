@@ -15,6 +15,9 @@ type TraderRepository interface {
 	GetByID(ctx context.Context, id int) (*models.Trader, error)
 	// GetByCertificateCN retrieves a trader by certificate Common Name (for mTLS auth)
 	GetByCertificateCN(ctx context.Context, cn string) (*models.Trader, error)
+	// GetOrCreateByCertificateCN returns existing trader by certificate CN or creates pending trader atomically.
+	// The created flag is true only when a new trader row was inserted.
+	GetOrCreateByCertificateCN(ctx context.Context, cn string) (*models.Trader, bool, error)
 	// List retrieves all traders with optional status filter
 	List(ctx context.Context, status *models.TraderStatus) ([]*models.Trader, error)
 	// Update updates trader fields

@@ -109,6 +109,17 @@ func TestUpdatedAtChangesOnMutations(t *testing.T) {
 	}
 
 	time.Sleep(10 * time.Millisecond)
+	mgr.SetRuntimeWSPing(101, 202, 15)
+	afterPing := mgr.GetState().UpdatedAt
+	if !afterPing.After(afterWS) {
+		t.Fatalf("expected UpdatedAt to move forward after SetRuntimeWSPing")
+	}
+	statePing := mgr.GetState().Runtime
+	if statePing.LastWSPingUnix != 101 || statePing.LastWSPongUnix != 202 || statePing.LastWSPingRTTMs != 15 {
+		t.Fatalf("unexpected ping state: %+v", statePing)
+	}
+
+	time.Sleep(10 * time.Millisecond)
 	heartbeatUnix := time.Now().Unix()
 	mgr.SetRuntimeWSHeartbeat(heartbeatUnix)
 	afterHB := mgr.GetState().UpdatedAt
@@ -132,6 +143,27 @@ func TestUpdatedAtChangesOnMutations(t *testing.T) {
 	}
 	if state.Runtime.WSTimeoutCount != 1 {
 		t.Fatalf("expected WSTimeoutCount=1, got %d", state.Runtime.WSTimeoutCount)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	disconnectByReason := map[string]uint64{"timeout": 2, "close_4009_sequence_gap": 1}
+	mgr.SetRuntimeWSDisconnect(3, 1, disconnectByReason)
+	afterDisconnect := mgr.GetState().UpdatedAt
+	if !afterDisconnect.After(afterTimeout) {
+		t.Fatalf("expected UpdatedAt to move forward after SetRuntimeWSDisconnect")
+	}
+	state = mgr.GetState()
+	if state.Runtime.WSDisconnectTotal != 3 {
+		t.Fatalf("expected WSDisconnectTotal=3, got %d", state.Runtime.WSDisconnectTotal)
+	}
+	if state.Runtime.WSDisconnectClose4009 != 1 {
+		t.Fatalf("expected WSDisconnectClose4009=1, got %d", state.Runtime.WSDisconnectClose4009)
+	}
+	if state.Runtime.WSDisconnectByReason["timeout"] != 2 {
+		t.Fatalf("expected WSDisconnectByReason[timeout]=2, got %d", state.Runtime.WSDisconnectByReason["timeout"])
+	}
+	if state.Runtime.WSDisconnectByReason["close_4009_sequence_gap"] != 1 {
+		t.Fatalf("expected WSDisconnectByReason[close_4009_sequence_gap]=1, got %d", state.Runtime.WSDisconnectByReason["close_4009_sequence_gap"])
 	}
 
 	time.Sleep(10 * time.Millisecond)
@@ -173,5 +205,42 @@ func TestUpdatedAtChangesOnMutations(t *testing.T) {
 	}
 	if state.Runtime.SchedulerResourceRejections["hard_limit"] != 1 {
 		t.Fatalf("expected SchedulerResourceRejections[hard_limit]=1, got %d", state.Runtime.SchedulerResourceRejections["hard_limit"])
+	}
+}
+
+func TestSetRuntimeWSDisconnectCopiesMap(t *testing.T) {
+	mgr := newTestManager(t)
+
+	input := map[string]uint64{"timeout": 4}
+	mgr.SetRuntimeWSDisconnect(4, 0, input)
+	input["timeout"] = 99
+
+	state := mgr.GetState()
+	if state.Runtime.WSDisconnectByReason["timeout"] != 4 {
+		t.Fatalf("expected copied WS disconnect map value 4, got %d", state.Runtime.WSDisconnectByReason["timeout"])
+	}
+}
+
+func TestGetStateReturnsDeepCopyForRuntimeMaps(t *testing.T) {
+	mgr := newTestManager(t)
+
+	mgr.SetRuntimeWSDisconnect(3, 1, map[string]uint64{"timeout": 2})
+	mgr.RecordSchedulerAssignAttempt("success")
+	mgr.RecordSchedulerResourceRejection("hard_limit")
+
+	snapshot := mgr.GetState()
+	snapshot.Runtime.WSDisconnectByReason["timeout"] = 999
+	snapshot.Runtime.SchedulerAssignAttempts["success"] = 999
+	snapshot.Runtime.SchedulerResourceRejections["hard_limit"] = 999
+
+	fresh := mgr.GetState()
+	if fresh.Runtime.WSDisconnectByReason["timeout"] != 2 {
+		t.Fatalf("expected internal WSDisconnectByReason[timeout]=2, got %d", fresh.Runtime.WSDisconnectByReason["timeout"])
+	}
+	if fresh.Runtime.SchedulerAssignAttempts["success"] != 1 {
+		t.Fatalf("expected internal SchedulerAssignAttempts[success]=1, got %d", fresh.Runtime.SchedulerAssignAttempts["success"])
+	}
+	if fresh.Runtime.SchedulerResourceRejections["hard_limit"] != 1 {
+		t.Fatalf("expected internal SchedulerResourceRejections[hard_limit]=1, got %d", fresh.Runtime.SchedulerResourceRejections["hard_limit"])
 	}
 }

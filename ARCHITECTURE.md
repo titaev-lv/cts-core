@@ -80,7 +80,7 @@
 
 | # | Компонент | Решение | Детали |
 |---|-----------|---------|--------|
-| 10 | **Trader Registration** | Гибридный подход | Admin pre-registration (TRADER table) + trader auto-connect via WebSocket |
+| 10 | **Trader Registration** | Auto-registration + pending | Identity из CN (mTLS), auto-create `TRADER` в `pending`, ручной approve в `active` |
 | 11 | **State Persistence** | Local file + MySQL | `daemon.state` (local) + MySQL sync для Phase 1, Redis для Phase 2 |
 | 12 | **Failover Strategy** | Single instance + trader resilience | Без Active-Passive кластера, быстрый restart, traders переподключаются автоматически |
 | 13 | **Database Schema** | 7 новых таблиц | TRADER, TRADER_SESSION, EXCHANGE_LIMITS, TRADER_EXCHANGE_RESOURCE, ARBITRAGE_ORDER, ORDER_TRANSACTION, MONITORING (ALTER) |
@@ -304,6 +304,10 @@ flowchart TB
 
 ### 5.1 WebSocket Protocol (CTS-Core ↔ Traders)
 
+Правило канала доставки результатов:
+- `trade.result` и `monitor.result` идут по WS как основной runtime-путь.
+- REST для результатов не используется как hot path и рассматривается только как fallback/replay для recovery-сценариев.
+
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────────┐
 │                           WEBSOCKET MESSAGE PROTOCOL                                │
@@ -476,7 +480,7 @@ sequenceDiagram
     Trader->>Core: TCP Connect (mTLS)
     Trader->>Core: WS Upgrade
     Trader->>Core: trader.register
-    Note over Core: Verify cert CN<br/>(extract trader_id)
+    Note over Core: Verify OU=Trading + cert CN<br/>(CN is canonical trader_id)
     Core->>MySQL: Store session
     Core->>Trader: registration.ack
     Core->>MySQL: Get pending tasks
@@ -1267,36 +1271,39 @@ MYSQL SYNC:
 
 ### 8.2 Trader Registration & Lifecycle
 
-**Гибридный подход:**
+**Auto-registration (CN-derived identity):**
 
 ```
-РЕГИСТРАЦИЯ (Admin):
-  1. Admin создает запись в TRADER table:
-     INSERT INTO TRADER (id, name, region, max_tasks, status)
-     VALUES ('trader-eu-1', 'EU Frankfurt Trader', 'eu', 10, 'registered')
-  
-  2. CTS-Core знает о трейдере, но он еще offline
-
 ПОДКЛЮЧЕНИЕ (Trader):
   1. Trader запускается с mTLS сертификатом (OU=Trading)
-  2. Trader connect к ws://cts-core:8443/ws/trader
+  2. Trader connect к wss://cts-core:8443/ws/trader
   3. CTS-Core проверяет:
-     - mTLS certificate (CN=trader-eu-1)
-     - Exists в TRADER table
+      - mTLS certificate (CN=trader-eu-1)
+      - OU=Trading
      - Status != 'suspended'
-  
-  4. CTS-Core создает сессию:
+
+  4. Если CN отсутствует в TRADER, CTS-Core auto-create:
+      INSERT INTO TRADER (TRADER_NAME, CERTIFICATE_CN, REGION, STATUS, MAX_TASKS)
+      VALUES ('trader-eu-1', 'trader-eu-1', 'unknown', 'pending', 0)
+
+  5. CTS-Core создает сессию:
      INSERT INTO TRADER_SESSION (trader_id, connected_at, ip_address)
-  
-  5. CTS-Core отправляет trader.welcome:
+
+  6. CTS-Core отправляет trader.welcome:
      {
        "action": "trader.welcome",
        "trader_id": "trader-eu-1",
        "assigned_tasks": [...],
        "config": {...}
      }
-  
-  6. Trader начинает отправлять heartbeat каждые 5s
+
+  7. Trader начинает отправлять heartbeat каждые 5s
+
+ПРАВИЛА IDENTITY:
+  - trader_id берется только из CN сертификата.
+  - payload.trader_id не участвует в идентификации.
+  - CN уникален в системе.
+  - pending/active/suspended логика привязана к CN-derived identity.
 
 HEARTBEAT:
   Trader -> CTS-Core: {"action": "heartbeat", "load": 0.3, "active_tasks": 3}

@@ -2,10 +2,12 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -26,19 +28,64 @@ type errorPayload struct {
 	Details map[string]interface{} `json:"details,omitempty"`
 }
 
+type registerAckPayload struct {
+	Status    string `json:"status"`
+	TraderID  string `json:"trader_id"`
+	SessionID string `json:"session_id"`
+}
+
+type heartbeatAckPayload struct {
+	Status    string `json:"status"`
+	TraderID  string `json:"trader_id"`
+	SessionID string `json:"session_id"`
+}
+
 func main() {
 	wsURL := os.Getenv("CTS_WS_URL")
 	if wsURL == "" {
-		wsURL = "ws://localhost:8081/ws"
+		wsURL = "wss://localhost:8080/ws"
 	}
-	if _, err := url.Parse(wsURL); err != nil {
+	parsed, err := url.Parse(wsURL)
+	if err != nil {
 		fail("invalid CTS_WS_URL: %v", err)
 	}
-	parsed, _ := url.Parse(wsURL)
+	if !strings.EqualFold(parsed.Scheme, "wss") {
+		fail("CTS_WS_URL must use wss://, got %s", wsURL)
+	}
+
+	caPath := envOrDefault("CTS_WS_CLIENT_CA_PATH", "../../volumes/pki/ca/ca.crt")
+	certPath := envOrDefault("CTS_WS_CLIENT_CERT_PATH", "../../volumes/pki/cts-core/clients/trader-2/trader-2-cts.crt")
+	keyPath := envOrDefault("CTS_WS_CLIENT_KEY_PATH", "../../volumes/pki/cts-core/clients/trader-2/trader-2-cts.key")
+	serverName := os.Getenv("CTS_WS_SERVER_NAME")
+	if serverName == "" {
+		serverName = parsed.Hostname()
+	}
+
+	caPEM, err := os.ReadFile(caPath)
+	if err != nil {
+		fail("read CA cert: %v", err)
+	}
+	rootCAs := x509.NewCertPool()
+	if ok := rootCAs.AppendCertsFromPEM(caPEM); !ok {
+		fail("append CA cert: invalid PEM in %s", caPath)
+	}
+
+	clientCert, err := tls.LoadX509KeyPair(certPath, keyPath)
+	if err != nil {
+		fail("load client cert/key: %v", err)
+	}
+
+	expectedTraderID := os.Getenv("CTS_SMOKE_CERTIFICATE_CN")
+	if expectedTraderID == "" {
+		expectedTraderID = "trader-2-cts-client"
+	}
 
 	dialer := *websocket.DefaultDialer
-	if parsed != nil && parsed.Scheme == "wss" {
-		dialer.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	dialer.TLSClientConfig = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		RootCAs:      rootCAs,
+		Certificates: []tls.Certificate{clientCert},
+		ServerName:   serverName,
 	}
 
 	conn, _, err := dialer.Dial(wsURL, nil)
@@ -54,10 +101,6 @@ func main() {
 	}
 	_ = conn.SetReadDeadline(time.Time{})
 
-	traderID := os.Getenv("CTS_SMOKE_TRADER_ID")
-	if traderID == "" {
-		traderID = fmt.Sprintf("smoke-trader-%d", time.Now().UnixNano())
-	}
 	runID := fmt.Sprintf("%d", time.Now().UnixNano())
 	registerRequestID := "smoke-reg-" + runID
 	heartbeatRequestID := "smoke-hb-" + runID
@@ -68,9 +111,8 @@ func main() {
 		ProtocolVersion: "2",
 		RequestID:       registerRequestID,
 		Payload: mustJSON(map[string]interface{}{
-			"trader_id": traderID,
-			"version":   "1.0.0",
-			"region":    "smoke",
+			"version": "1.0.0",
+			"region":  "smoke",
 		}),
 	}
 	writeEnvelope(conn, registerReq)
@@ -83,14 +125,28 @@ func main() {
 		fail("unexpected register response action: %s", regResp.Action)
 	}
 
+	var regAck registerAckPayload
+	if err := json.Unmarshal(regResp.Payload, &regAck); err != nil {
+		fail("invalid register_ack payload: %v", err)
+	}
+	if regAck.TraderID == "" {
+		fail("register_ack missing trader_id")
+	}
+	if regAck.SessionID == "" {
+		fail("register_ack missing session_id")
+	}
+	if regAck.TraderID != expectedTraderID {
+		fail("register_ack trader_id mismatch: expected=%s got=%s", expectedTraderID, regAck.TraderID)
+	}
+
 	heartbeatReq := envelope{
 		Type:            "request",
 		Action:          "trader.heartbeat",
 		ProtocolVersion: "2",
 		RequestID:       heartbeatRequestID,
 		Payload: mustJSON(map[string]interface{}{
-			"trader_id": traderID,
-			"status":    "active",
+			"session_id": regAck.SessionID,
+			"status":     "active",
 		}),
 	}
 	writeEnvelope(conn, heartbeatReq)
@@ -103,11 +159,30 @@ func main() {
 		fail("unexpected heartbeat response action: %s", hbResp.Action)
 	}
 
+	var hbAck heartbeatAckPayload
+	if err := json.Unmarshal(hbResp.Payload, &hbAck); err != nil {
+		fail("invalid heartbeat_ack payload: %v", err)
+	}
+	if hbAck.TraderID != regAck.TraderID {
+		fail("heartbeat_ack trader_id mismatch: expected=%s got=%s", regAck.TraderID, hbAck.TraderID)
+	}
+	if hbAck.SessionID != regAck.SessionID {
+		fail("heartbeat_ack session_id mismatch: expected=%s got=%s", regAck.SessionID, hbAck.SessionID)
+	}
+
 	if err := conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "smoke-finish")); err != nil {
 		fail("close ws: %v", err)
 	}
 
 	fmt.Printf("WS smoke lifecycle passed (run_id=%s register_request_id=%s heartbeat_request_id=%s)\n", runID, registerRequestID, heartbeatRequestID)
+}
+
+func envOrDefault(key, fallback string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 func mustJSON(v interface{}) json.RawMessage {

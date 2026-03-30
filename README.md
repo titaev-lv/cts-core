@@ -15,6 +15,23 @@
   - `/metrics` endpoint
   - Prometheus wiring c runtime series (`cts_core_*`) + Go/process collectors
   - integration coverage: health + metrics + ws lifecycle path
+- WS observability delta:
+  - Добавлены метрики отключений: `cts_core_ws_disconnect_total`, `cts_core_ws_disconnect_close_4009_total`, `cts_core_ws_disconnect_reason_total{reason="..."}` для отслеживания reconnect/close-4009.
+  - Сервер при shutdown шлет WS Close (1000) с reason `server_shutdown`, write-deadline унифицирована и настраивается через `session.write_timeout` (дефолт 10s, WAN-friendly) для всех send/control кадров.
+
+Настройка WS write timeout:
+
+- YAML: `session.write_timeout` (пример в `conf/config.example.yaml` = `10s`).
+- Рекомендуемый диапазон: `> 0` и `<= 24h`.
+
+## WS Identity Policy (Trader Channel)
+
+- `trader_id` определяется только из CN клиентского сертификата (mTLS).
+- `payload.trader_id` не участвует в идентификации.
+- Для trader WS принимаются только клиентские сертификаты с `OU=Trading`.
+- CN должен быть уникальным в `TRADER.CERTIFICATE_CN`.
+- При ротации сертификата CN должен оставаться неизменным; иначе требуется отдельная миграция identity.
+- Для статусов `pending` / `active` / `suspended` runtime-логика привязана к CN-derived identity.
 
 Быстрый check `/metrics`:
 
@@ -61,6 +78,19 @@ mysql -h 127.0.0.1 -u root -proot -e "USE ct_system; SHOW TABLES;"
 ```bash
 ./tests/smoke_phase2_ws_lifecycle.sh
 ```
+
+Из корня workspace можно запускать через единый entrypoint:
+
+```bash
+make smoke-core-ws
+```
+
+Этот smoke-сценарий проверяет hard-cutover модель:
+- только `wss://` transport для WS;
+- mTLS handshake с клиентским сертификатом трейдера;
+- auto-create трейдера по CN сертификата;
+- новый трейдер получает `status=pending`;
+- pending-трейдер не получает assignment в `MONITORING` / `TRADE`.
 
 По умолчанию smoke-скрипт невмешивающийся:
 - `SMOKE_SKIP_UP=1` (не делает `docker compose up -d`)

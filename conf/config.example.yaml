@@ -6,10 +6,16 @@ server:
   port: 8080
   
   tls:
-    enabled: false
     cert_path: "pki/server/cts-core.crt"
     key_path: "pki/server/cts-core.key"
     ca_path: "pki/ca/ca.crt"
+    allowed_client_common_names:
+      - "trader-1-cts-client"
+      - "trader-2-cts-client"
+      - "trader-3-cts-client"
+    allowed_client_organizational_units:
+      - "Trading"
+    allowed_client_dns_names: []
     
   timeouts:
     read: 30s
@@ -121,7 +127,8 @@ logging:
 # Session management (Phase 1.4)
 session:
   heartbeat_interval: 5s
-  heartbeat_timeout: 15s         # 3 missed heartbeats
+  heartbeat_timeout: 15s         # 3 missed heartbeats; disconnect reason="timeout" when read deadline is exceeded
+  write_timeout: 10s             # WAN-friendly WS write/control timeout
   grace_period: 60s
   cleanup_interval: 300s         # 5 minutes
   protocol_version: "2"
@@ -153,5 +160,5 @@ rate_limit:
 metrics:
   enabled: true
   port: 9090
-  path: "/metrics"
+  path: "/metrics"              # includes cts_core_ws_disconnect_* series (no extra config required)
 

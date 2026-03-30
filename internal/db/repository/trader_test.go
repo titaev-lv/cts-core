@@ -84,6 +84,71 @@ func TestTraderRepository_GetByCertificateCN(t *testing.T) {
 	assert.Equal(t, cn, trader.CertificateCN)
 }
 
+func TestTraderRepository_GetOrCreateByCertificateCN(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	repo := NewTraderRepository(sqlxDB)
+
+	cn := "trader-auto.cts.internal"
+
+	mock.ExpectExec("INSERT INTO TRADER").
+		WithArgs(cn, cn, "unknown", models.TraderStatusPending, 0, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(11, 1))
+
+	rows := sqlmock.NewRows([]string{
+		"ID", "TRADER_NAME", "CERTIFICATE_CN", "REGION", "STATUS",
+		"MAX_TASKS", "DATE_CREATE", "DATE_MODIFY", "USER_CREATED", "USER_MODIFY", "NOTES",
+	}).AddRow(11, cn, cn, sql.NullString{Valid: true, String: "unknown"}, "pending",
+		0, time.Now(), time.Now(), sql.NullInt32{}, sql.NullInt32{}, sql.NullString{})
+
+	mock.ExpectQuery("SELECT .* FROM TRADER WHERE ID").
+		WithArgs(11).
+		WillReturnRows(rows)
+
+	trader, created, err := repo.GetOrCreateByCertificateCN(context.Background(), cn)
+	assert.NoError(t, err)
+	assert.NotNil(t, trader)
+	assert.True(t, created)
+	assert.Equal(t, 11, trader.ID)
+	assert.Equal(t, cn, trader.CertificateCN)
+	assert.Equal(t, models.TraderStatusPending, trader.Status)
+}
+
+func TestTraderRepository_GetOrCreateByCertificateCN_Existing(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	repo := NewTraderRepository(sqlxDB)
+
+	cn := "trader-existing.cts.internal"
+
+	mock.ExpectExec("INSERT INTO TRADER").
+		WithArgs(cn, cn, "unknown", models.TraderStatusPending, 0, sqlmock.AnyArg(), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(15, 0))
+
+	rows := sqlmock.NewRows([]string{
+		"ID", "TRADER_NAME", "CERTIFICATE_CN", "REGION", "STATUS",
+		"MAX_TASKS", "DATE_CREATE", "DATE_MODIFY", "USER_CREATED", "USER_MODIFY", "NOTES",
+	}).AddRow(15, cn, cn, sql.NullString{Valid: true, String: "unknown"}, "pending",
+		0, time.Now(), time.Now(), sql.NullInt32{}, sql.NullInt32{}, sql.NullString{})
+
+	mock.ExpectQuery("SELECT .* FROM TRADER WHERE ID").
+		WithArgs(15).
+		WillReturnRows(rows)
+
+	trader, created, err := repo.GetOrCreateByCertificateCN(context.Background(), cn)
+	assert.NoError(t, err)
+	assert.NotNil(t, trader)
+	assert.False(t, created)
+	assert.Equal(t, 15, trader.ID)
+	assert.Equal(t, cn, trader.CertificateCN)
+}
+
 func TestTraderRepository_List_NoFilter(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)

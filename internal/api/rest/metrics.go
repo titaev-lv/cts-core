@@ -26,6 +26,15 @@ var defaultSchedulerResourceRejectionReasons = []string{
 	"hard_limit",
 }
 
+var defaultWSDisconnectReasons = []string{
+	"close_4009_sequence_gap",
+	"timeout",
+	"read_error",
+	"client_close",
+	"server_shutdown",
+	"protocol_error",
+}
+
 // MetricsHandlerOptions configures Prometheus handler data sources.
 type MetricsHandlerOptions struct {
 	WSHandler    *ws.Handler
@@ -71,6 +80,62 @@ func newMetricsHandler(opts MetricsHandlerOptions) gin.HandlerFunc {
 	))
 
 	registry.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "ws_last_ping_unix", Help: "Unix timestamp of last WS ping sent"},
+		func() float64 {
+			if opts.WSHandler == nil {
+				return 0
+			}
+			return float64(opts.WSHandler.GetStats().Ping.LastPingUnix)
+		},
+	))
+
+	registry.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "ws_last_pong_unix", Help: "Unix timestamp of last WS pong received"},
+		func() float64 {
+			if opts.WSHandler == nil {
+				return 0
+			}
+			return float64(opts.WSHandler.GetStats().Ping.LastPongUnix)
+		},
+	))
+
+	registry.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "ws_last_ping_rtt_ms", Help: "Last observed WS ping round-trip time in milliseconds"},
+		func() float64 {
+			if opts.WSHandler == nil {
+				return 0
+			}
+			return float64(opts.WSHandler.GetStats().Ping.LastRTTMs)
+		},
+	))
+
+	registry.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "ws_disconnect_total", Help: "Total websocket disconnects observed by server"},
+		func() float64 {
+			if opts.StateManager != nil {
+				return float64(opts.StateManager.GetState().Runtime.WSDisconnectTotal)
+			}
+			if opts.WSHandler == nil {
+				return 0
+			}
+			return float64(opts.WSHandler.GetStats().Disconnect.Total)
+		},
+	))
+
+	registry.MustRegister(prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "ws_disconnect_close_4009_total", Help: "Websocket disconnects caused by close code 4009"},
+		func() float64 {
+			if opts.StateManager != nil {
+				return float64(opts.StateManager.GetState().Runtime.WSDisconnectClose4009)
+			}
+			if opts.WSHandler == nil {
+				return 0
+			}
+			return float64(opts.WSHandler.GetStats().Disconnect.Close4009)
+		},
+	))
+
+	registry.MustRegister(prometheus.NewGaugeFunc(
 		prometheus.GaugeOpts{Namespace: "cts_core", Name: "runtime_scheduler_cycle_count", Help: "Last known scheduler cycle count from runtime state"},
 		func() float64 {
 			if opts.StateManager == nil {
@@ -112,6 +177,12 @@ func newMetricsHandler(opts MetricsHandlerOptions) gin.HandlerFunc {
 	)
 	registry.MustRegister(resourceRejections)
 
+	disconnectReasons := prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{Namespace: "cts_core", Name: "ws_disconnect_reason_total", Help: "Websocket disconnects by reason"},
+		[]string{"reason"},
+	)
+	registry.MustRegister(disconnectReasons)
+
 	scoreDistribution := prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{Namespace: "cts_core", Name: "scheduler_score_distribution", Help: "Scheduler score distribution snapshot"},
 		[]string{"quantile"},
@@ -150,6 +221,11 @@ func newMetricsHandler(opts MetricsHandlerOptions) gin.HandlerFunc {
 			resourceRejections.WithLabelValues(reason).Set(0)
 		}
 
+		disconnectReasons.Reset()
+		for _, reason := range defaultWSDisconnectReasons {
+			disconnectReasons.WithLabelValues(reason).Set(0)
+		}
+
 		if opts.StateManager != nil {
 			runtimeState := opts.StateManager.GetState().Runtime
 			for result, count := range runtimeState.SchedulerAssignAttempts {
@@ -162,6 +238,17 @@ func newMetricsHandler(opts MetricsHandlerOptions) gin.HandlerFunc {
 
 			scoreDistribution.WithLabelValues("p50").Set(runtimeState.SchedulerScoreP50)
 			scoreDistribution.WithLabelValues("p95").Set(runtimeState.SchedulerScoreP95)
+		}
+
+		if opts.StateManager != nil {
+			for reason, count := range opts.StateManager.GetState().Runtime.WSDisconnectByReason {
+				disconnectReasons.WithLabelValues(reason).Set(float64(count))
+			}
+		} else if opts.WSHandler != nil {
+			disconnect := opts.WSHandler.GetStats().Disconnect
+			for reason, count := range disconnect.ByReason {
+				disconnectReasons.WithLabelValues(reason).Set(float64(count))
+			}
 		}
 		handler.ServeHTTP(c.Writer, c.Request)
 	}

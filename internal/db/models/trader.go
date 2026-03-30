@@ -12,13 +12,14 @@ import (
 // Назначение: Регистрация трейдер-демонов в системе
 //
 // Lifecycle:
-//   1. Админ создает запись (STATUS='registered')
+//   1. При первом mTLS подключении создается запись (STATUS='pending')
 //   2. Трейдер подключается по mTLS (проверка CERTIFICATE_CN)
-//   3. После успешного подключения STATUS='active'
+//   3. После ручного approve статус переводится в 'active'
 //   4. При отключении может стать 'suspended' или 'decommissioned'
 //
 // Архитектура:
-//   - Админ предварительно регистрирует трейдеров ПЕРЕД их запуском
+//   - Identity берется только из CN клиентского сертификата
+//   - Запись трейдера создается автоматически при первом подключении
 //   - Каждый трейдер имеет уникальный CN в mTLS сертификате
 //   - Трейдеры самостоятельно управляют rate limits своих IP
 //   - CTS-Core использует эту таблицу для:
@@ -48,7 +49,7 @@ type Trader struct {
 	Region sql.NullString `json:"region,omitempty" db:"REGION"`
 
 	// STATUS - текущее состояние трейдера
-	//   'registered' - создан админом, но еще не подключался
+	//   'pending' - создан автоматически, подключение разрешено, но задачи не выдаются
 	//   'active' - подключен и работает
 	//   'suspended' - временно приостановлен (админом или из-за ошибок)
 	//   'decommissioned' - выведен из эксплуатации
@@ -83,7 +84,7 @@ type Trader struct {
 type TraderStatus string
 
 const (
-	TraderStatusRegistered     TraderStatus = "registered"     // Создан, но не подключался
+	TraderStatusPending        TraderStatus = "pending"        // Создан автоматически, ожидает активации
 	TraderStatusActive         TraderStatus = "active"         // Подключен и работает
 	TraderStatusSuspended      TraderStatus = "suspended"      // Приостановлен
 	TraderStatusDecommissioned TraderStatus = "decommissioned" // Выведен из эксплуатации

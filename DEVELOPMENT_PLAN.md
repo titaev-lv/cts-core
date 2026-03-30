@@ -127,6 +127,8 @@
 - Telemetry от trader (`heartbeat`, latency данные) считается источником для ранжирования.
 - Для trade-задач используется full-sweep по всем требуемым биржам, а не выборочная latency по одной бирже.
 - Resource-policy и assignment-quality параметры должны быть операционно наблюдаемы через `/metrics` и `/health`.
+- Результаты выполнения (`trade.result`, `monitor.result`) передаются из `trader` в `cts-core` по WS как основной путь.
+- REST для результатов допускается только как fallback/replay (recovery) и не используется как основной runtime-канал.
 
 ## 4. Следующий интеграционный блок
 

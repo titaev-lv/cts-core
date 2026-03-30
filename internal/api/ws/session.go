@@ -33,6 +33,7 @@ type sessionRuntime struct {
 	sessionID         string
 	traderID          string
 	traderDBID        int
+	traderStatus      string
 	registeredAtMs    int64
 	lastHeartbeatMs   int64
 	timedOutAtMs      int64
@@ -58,11 +59,12 @@ func (s *sessionRuntime) markRegistered(traderID string, nowMs int64) {
 	s.state = sessionStateRegistered
 }
 
-func (s *sessionRuntime) setRegistrationInfo(role string, capabilities []string, effectiveExchanges []string, traderDBID int) {
+func (s *sessionRuntime) setRegistrationInfo(role string, capabilities []string, effectiveExchanges []string, traderDBID int, traderStatus string) {
 	s.role = role
 	s.capabilities = append([]string(nil), capabilities...)
 	s.effectiveExchs = append([]string(nil), effectiveExchanges...)
 	s.traderDBID = traderDBID
+	s.traderStatus = strings.ToLower(strings.TrimSpace(traderStatus))
 }
 
 func (s *sessionRuntime) markHeartbeat(nowMs int64) {

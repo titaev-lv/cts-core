@@ -803,6 +803,13 @@ func selectCandidatesInternal(snapshots []ws.TraderSnapshot, now time.Time, heal
 		if s.TraderID == "" || s.SessionID == "" {
 			continue
 		}
+		status := strings.ToLower(strings.TrimSpace(s.TraderStatus))
+		if status == "pending" || status == "suspended" || status == "decommissioned" {
+			continue
+		}
+		if status != "" && status != "active" {
+			continue
+		}
 		if s.State != sessionStateActive {
 			continue
 		}

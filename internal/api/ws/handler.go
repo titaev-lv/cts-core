@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -32,17 +33,27 @@ type Handler struct {
 	connectionsByConn   map[*websocket.Conn]*wsConnectionEntry
 	heartbeatInterval   time.Duration
 	heartbeatTimeout    time.Duration
+	writeTimeout        time.Duration
 	maxPayloadBytes     int
 	maxMessagesPerSec   int
 	maxUnknownActions   int
 	unknownActionWindow time.Duration
 	requestDedupWindow  time.Duration
+	requireClientCert   bool
+	allowedCNs          map[string]struct{}
+	allowedOUs          map[string]struct{}
+	allowedDNSNames     map[string]struct{}
 	persistence         SessionPersistence
 	dbRetry             DBRetryConfig
 	stateManager        runtimeStateSink
 	active              atomic.Int64
 	total               atomic.Int64
 	lastSeen            atomic.Int64
+
+	metricsMu           sync.Mutex
+	disconnectTotal     uint64
+	disconnectClose4009 uint64
+	disconnectByReason  map[string]uint64
 }
 
 type wsConnectionEntry struct {
@@ -50,7 +61,26 @@ type wsConnectionEntry struct {
 	traderID  string
 	conn      *websocket.Conn
 	writeMu   sync.Mutex
+	seqMu     sync.Mutex
+
+	seqTrackingEnabled bool
+	inboundSeq         uint64
+	outboundSeq        uint64
+	peerAck            uint64
+
+	pingMu     sync.Mutex
+	lastPingAt time.Time
+	lastPongAt time.Time
+	lastRTT    time.Duration
 }
+
+const (
+	wsCloseCodeSequenceGap = 4009
+	defaultWSWriteTimeout  = 10 * time.Second
+
+	wsDisconnectReasonClose4009 = "close_4009_sequence_gap"
+	wsDisconnectReasonTimeout   = "timeout"
+)
 
 type SessionCreateInput struct {
 	TraderID       int
@@ -61,8 +91,14 @@ type SessionCreateInput struct {
 	LastHeartbeat  time.Time
 }
 
+type TraderIdentity struct {
+	TraderDBID int
+	TraderID   string
+	Status     string
+}
+
 type SessionPersistence interface {
-	ResolveTraderID(ctx context.Context, traderRef string) (int, error)
+	ResolveOrCreateTraderByCN(ctx context.Context, certificateCN string) (TraderIdentity, error)
 	CreateSession(ctx context.Context, input SessionCreateInput) error
 	UpdateHeartbeat(ctx context.Context, sessionID string) error
 	FinalizeSession(ctx context.Context, sessionID string, reason string, errorMsg *string) error
@@ -86,29 +122,53 @@ type runtimeTimeoutSink interface {
 	IncrementRuntimeWSTimeout(lastTimeoutUnix int64)
 }
 
+type runtimeDisconnectSink interface {
+	SetRuntimeWSDisconnect(total uint64, close4009 uint64, byReason map[string]uint64)
+}
+
 type HandlerOptions struct {
 	HeartbeatInterval   time.Duration
 	HeartbeatTimeout    time.Duration
+	WriteTimeout        time.Duration
 	MaxPayloadBytes     int
 	MaxMessagesPerSec   int
 	MaxUnknownActions   int
 	UnknownActionWindow time.Duration
 	RequestDedupWindow  time.Duration
+	RequireClientCert   bool
+	AllowedCommonNames  []string
+	AllowedOUs          []string
+	AllowedDNSNames     []string
 	Persistence         SessionPersistence
 	DBRetry             DBRetryConfig
 	StateManager        runtimeStateSink
 }
 
 type Stats struct {
-	ActiveConnections int64 `json:"active_connections"`
-	TotalConnections  int64 `json:"total_connections"`
-	LastConnectUnix   int64 `json:"last_connect_unix,omitempty"`
+	ActiveConnections int64           `json:"active_connections"`
+	TotalConnections  int64           `json:"total_connections"`
+	LastConnectUnix   int64           `json:"last_connect_unix,omitempty"`
+	Ping              PingStats       `json:"ping"`
+	Disconnect        DisconnectStats `json:"disconnect"`
+}
+
+type PingStats struct {
+	LastPingUnix int64 `json:"last_ping_unix"`
+	LastPongUnix int64 `json:"last_pong_unix"`
+	LastRTTMs    int64 `json:"last_rtt_ms"`
+}
+
+type DisconnectStats struct {
+	Total     uint64            `json:"total"`
+	Close4009 uint64            `json:"close_4009"`
+	ByReason  map[string]uint64 `json:"by_reason"`
 }
 
 // TraderSnapshot is a runtime view of a single trader WS session.
 type TraderSnapshot struct {
 	TraderID           string             `json:"trader_id"`
 	TraderDBID         int                `json:"trader_db_id,omitempty"`
+	TraderStatus       string             `json:"trader_status,omitempty"`
 	SessionID          string             `json:"session_id"`
 	State              string             `json:"state"`
 	RegisteredAtUnix   int64              `json:"registered_at_unix"`
@@ -369,6 +429,8 @@ func NewHandlerWithOptions(opts HandlerOptions) *Handler {
 		heartbeatTimeout = 15 * time.Second
 	}
 
+	writeTimeout := normalizeWriteTimeout(opts.WriteTimeout)
+
 	return &Handler{
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
@@ -382,19 +444,36 @@ func NewHandlerWithOptions(opts HandlerOptions) *Handler {
 		connectionsByConn:   make(map[*websocket.Conn]*wsConnectionEntry),
 		heartbeatInterval:   heartbeatInterval,
 		heartbeatTimeout:    heartbeatTimeout,
+		writeTimeout:        writeTimeout,
 		maxPayloadBytes:     normalizeMaxPayloadBytes(opts.MaxPayloadBytes),
 		maxMessagesPerSec:   normalizeMaxMessagesPerSec(opts.MaxMessagesPerSec),
 		maxUnknownActions:   normalizeMaxUnknownActions(opts.MaxUnknownActions),
 		unknownActionWindow: normalizeUnknownActionWindow(opts.UnknownActionWindow),
 		requestDedupWindow:  normalizeRequestDedupWindow(opts.RequestDedupWindow),
+		requireClientCert:   opts.RequireClientCert,
+		allowedCNs:          normalizeAllowedValues(opts.AllowedCommonNames),
+		allowedOUs:          normalizeAllowedValues(opts.AllowedOUs),
+		allowedDNSNames:     normalizeAllowedValues(opts.AllowedDNSNames),
 		persistence:         opts.Persistence,
 		dbRetry:             normalizeDBRetryConfig(opts.DBRetry),
 		stateManager:        opts.StateManager,
+		disconnectByReason:  make(map[string]uint64),
 	}
 }
 
 // Serve handles WebSocket connections (stub implementation).
 func (h *Handler) Serve(c *gin.Context) {
+	if ok, reason := h.authorizeWSClientCertificate(c.Request); !ok {
+		logger.Get("ws").Warn("WS client certificate rejected", "reason", reason, "ip", c.ClientIP(), "path", c.Request.URL.Path)
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"error":  "WS client certificate is required",
+			"reason": reason,
+		})
+		return
+	}
+
+	clientCertCN := extractClientCertificateCN(c.Request)
+
 	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		logger.Get("ws").Error("WS upgrade failed", "error", err)
@@ -422,6 +501,21 @@ func (h *Handler) Serve(c *gin.Context) {
 	session := newSessionRuntime(sessionID)
 	connEntry := h.addConnection(sessionID, conn)
 	defer h.removeConnection(sessionID)
+	if h.heartbeatTimeout > 0 {
+		_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
+	}
+	conn.SetPongHandler(func(_ string) error {
+		connEntry.recordPongReceived()
+		if h.heartbeatTimeout > 0 {
+			return conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
+		}
+		return nil
+	})
+
+	stopPing := make(chan struct{})
+	defer close(stopPing)
+	go h.runPingLoop(connEntry, connID, requestID, stopPing)
+
 	persistedSession := false
 	requestIDs := make(map[string]time.Time)
 	rateWindowStart := time.Now().UTC()
@@ -439,16 +533,17 @@ func (h *Handler) Serve(c *gin.Context) {
 		msgType, rawPayload, err := conn.ReadMessage()
 		if err != nil {
 			nowMs := time.Now().UnixMilli()
-			reason := classifyDisconnectReason(err)
+			reason, isClose4009 := classifyWSDisconnectReason(err)
+			h.recordDisconnect(reason, isClose4009)
 			errMsg := err.Error()
-			if reason == disconnectReasonTimeout && session.markTimedOut(nowMs) {
+			if reason == wsDisconnectReasonTimeout && session.markTimedOut(nowMs) {
 				h.syncRuntimeTimeout(nowMs / 1000)
 				h.accessLog.Warn("ws_timeout", "conn_id", connID, "request_id", requestID, "trader_id", session.traderID, "session_id", session.sessionID, "session_state", session.state, "timed_out_at_ms", session.timedOutAtMs, "last_heartbeat_ms", session.lastHeartbeatMs)
 			}
 
 			if h.persistence != nil && persistedSession {
 				if persistErr := h.withDBWriteRetry("finalize_session", func(ctx context.Context) error {
-					return h.persistence.FinalizeSession(ctx, session.sessionID, string(reason), &errMsg)
+					return h.persistence.FinalizeSession(ctx, session.sessionID, reason, &errMsg)
 				}); persistErr != nil {
 					h.accessLog.Error("ws_persist_finalize_failed", "conn_id", connID, "session_id", session.sessionID, "reason", reason, "error", persistErr)
 				}
@@ -462,8 +557,25 @@ func (h *Handler) Serve(c *gin.Context) {
 			return
 		}
 
+		if msgType == websocket.PongMessage {
+			connEntry.recordPongReceived()
+			if h.heartbeatTimeout > 0 {
+				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
+			}
+			continue
+		}
+		if msgType == websocket.PingMessage {
+			if h.heartbeatTimeout > 0 {
+				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
+			}
+			continue
+		}
+
 		msgID++
 		h.accessLog.Info("ws_in", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "msg_type", msgType, "size_bytes", len(rawPayload))
+		if h.heartbeatTimeout > 0 {
+			_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
+		}
 
 		if len(rawPayload) > h.maxPayloadBytes {
 			msgRequestID := resolveRequestID("", msgID)
@@ -522,6 +634,19 @@ func (h *Handler) Serve(c *gin.Context) {
 			continue
 		}
 
+		if ok, gap, expected := connEntry.observeInboundSeq(msg.Seq); !ok {
+			if gap {
+				h.closeOnSequenceGap(connEntry, connID, msgRequestID, expected, msg.Seq)
+				return
+			}
+			h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "Invalid sequence", map[string]interface{}{"expected_seq": expected, "received_seq": msg.Seq}))
+			continue
+		}
+
+		if msg.Ack > 0 {
+			connEntry.observePeerAck(msg.Ack)
+		}
+
 		switch msg.Action {
 		case actionTraderRegister:
 			if msg.Type != msgTypeRequest {
@@ -540,11 +665,6 @@ func (h *Handler) Serve(c *gin.Context) {
 				continue
 			}
 
-			if req.TraderID == "" {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id is required", requiredFieldDetails("trader_id", "payload.trader_id", "string")))
-				continue
-			}
-
 			if req.Version == "" {
 				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "version is required", requiredFieldDetails("version", "payload.version", "string")))
 				continue
@@ -556,11 +676,25 @@ func (h *Handler) Serve(c *gin.Context) {
 			availableExchanges := defaultAvailableExchanges()
 			effectiveExchanges := buildEffectiveExchanges(capabilities, availableExchanges)
 			loadIndex, tradeLoadIndex := extractCurrentLoadIndices(req.CurrentLoad)
+			canonicalTraderID := strings.TrimSpace(clientCertCN)
+			if canonicalTraderID == "" {
+				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "certificate CN is required", requiredFieldDetails("certificate_cn", "tls.peer_certificate.subject.cn", "string")))
+				continue
+			}
 			resolvedTraderID := 0
+			resolvedTraderStatus := ""
 			if h.persistence != nil {
-				if err := h.withDBWriteRetry("resolve_trader", func(ctx context.Context) error {
+				if err := h.withDBWriteRetry("resolve_or_create_trader", func(ctx context.Context) error {
 					var resolveErr error
-					resolvedTraderID, resolveErr = h.persistence.ResolveTraderID(ctx, req.TraderID)
+					var identity TraderIdentity
+					identity, resolveErr = h.persistence.ResolveOrCreateTraderByCN(ctx, canonicalTraderID)
+					if resolveErr == nil {
+						resolvedTraderID = identity.TraderDBID
+						resolvedTraderStatus = identity.Status
+						if strings.TrimSpace(identity.TraderID) != "" {
+							canonicalTraderID = strings.TrimSpace(identity.TraderID)
+						}
+					}
 					return resolveErr
 				}); err != nil {
 					h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInternalError, "Failed to resolve trader registration", nil))
@@ -583,9 +717,9 @@ func (h *Handler) Serve(c *gin.Context) {
 				persistedSession = true
 			}
 
-			session.markRegistered(req.TraderID, nowMs)
-			session.setRegistrationInfo(role, capabilities, effectiveExchanges, resolvedTraderID)
-			h.bindConnectionTrader(session.sessionID, req.TraderID)
+			session.markRegistered(canonicalTraderID, nowMs)
+			session.setRegistrationInfo(role, capabilities, effectiveExchanges, resolvedTraderID, resolvedTraderStatus)
+			h.bindConnectionTrader(session.sessionID, canonicalTraderID)
 			session.setTelemetry(loadIndex, tradeLoadIndex)
 			h.upsertSessionSnapshot(session)
 			if h.heartbeatTimeout > 0 {
@@ -594,7 +728,7 @@ func (h *Handler) Serve(c *gin.Context) {
 			timeoutSec := durationSecondsCeil(h.heartbeatTimeout)
 			h.sendEnvelope(conn, connID, msgID, newRegisterAckEnvelope(msgRequestID, registerAck{
 				Status:                 "ok",
-				TraderID:               req.TraderID,
+				TraderID:               canonicalTraderID,
 				SessionID:              session.sessionID,
 				SessionTimeoutSec:      timeoutSec,
 				ServerTime:             nowMs,
@@ -602,7 +736,7 @@ func (h *Handler) Serve(c *gin.Context) {
 				AvailableExchanges:     availableExchanges,
 				EffectiveExchanges:     effectiveExchanges,
 			}))
-			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", req.TraderID, "version", req.Version, "region", req.Region)
+			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", canonicalTraderID, "version", req.Version, "region", req.Region)
 		case actionTraderHeartbeat:
 			if session.traderID == "" {
 				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "trader.register is required before heartbeat", nil))
@@ -615,14 +749,8 @@ func (h *Handler) Serve(c *gin.Context) {
 				continue
 			}
 
-			if req.TraderID == "" {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id is required", requiredFieldDetails("trader_id", "payload.trader_id", "string")))
-				continue
-			}
-
-			if req.TraderID != session.traderID {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id does not match registered trader", mismatchFieldDetails("trader_id", "payload.trader_id", session.traderID, req.TraderID)))
-				continue
+			if req.TraderID != "" && req.TraderID != session.traderID {
+				h.accessLog.Warn("ws_heartbeat_identity_mismatch_ignored", "conn_id", connID, "request_id", msgRequestID, "session_trader_id", session.traderID, "payload_trader_id", req.TraderID)
 			}
 
 			if req.SessionID != "" && req.SessionID != session.sessionID {
@@ -667,12 +795,12 @@ func (h *Handler) Serve(c *gin.Context) {
 			if h.heartbeatTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
 			}
-			h.accessLog.Info("ws_heartbeat", "conn_id", connID, "request_id", msgRequestID, "trader_id", req.TraderID, "session_id", session.sessionID, "status", req.Status, "last_heartbeat_ms", session.lastHeartbeatMs, "session_state", session.state)
+			h.accessLog.Info("ws_heartbeat", "conn_id", connID, "request_id", msgRequestID, "trader_id", session.traderID, "session_id", session.sessionID, "status", req.Status, "last_heartbeat_ms", session.lastHeartbeatMs, "session_state", session.state)
 
 			if msg.Type == msgTypeRequest {
 				h.sendEnvelope(conn, connID, msgID, newHeartbeatAckEnvelope(msgRequestID, heartbeatAck{
 					Status:     "ok",
-					TraderID:   req.TraderID,
+					TraderID:   session.traderID,
 					SessionID:  session.sessionID,
 					ServerTime: session.lastHeartbeatMs,
 				}))
@@ -689,13 +817,10 @@ func (h *Handler) Serve(c *gin.Context) {
 				continue
 			}
 
-			if req.TraderID == "" {
-				req.TraderID = session.traderID
+			if req.TraderID != "" && req.TraderID != session.traderID {
+				h.accessLog.Warn("ws_latency_result_identity_mismatch_ignored", "conn_id", connID, "request_id", msgRequestID, "session_trader_id", session.traderID, "payload_trader_id", req.TraderID)
 			}
-			if req.TraderID != session.traderID {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "trader_id does not match registered trader", mismatchFieldDetails("trader_id", "payload.trader_id", session.traderID, req.TraderID)))
-				continue
-			}
+			req.TraderID = session.traderID
 
 			if req.SessionID != "" && req.SessionID != session.sessionID {
 				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "session_id does not match active session", mismatchFieldDetails("session_id", "payload.session_id", session.sessionID, req.SessionID)))
@@ -742,6 +867,17 @@ func (h *Handler) Serve(c *gin.Context) {
 }
 
 func (h *Handler) sendEnvelope(conn *websocket.Conn, connID string, msgID int64, msg envelope) {
+	h.connectionsMu.RLock()
+	entry := h.connectionsByConn[conn]
+	h.connectionsMu.RUnlock()
+	if entry != nil {
+		seq, ack := entry.nextOutboundSeqAck()
+		msg.Seq = seq
+		if ack > 0 {
+			msg.Ack = ack
+		}
+	}
+
 	b, err := json.Marshal(msg)
 	if err != nil {
 		h.outLog.Error("ws_out_error", "conn_id", connID, "msg_id", msgID, "error", fmt.Sprintf("marshal ws response: %v", err))
@@ -778,16 +914,7 @@ func (h *Handler) DispatchLatencyTest(_ context.Context, sessionID string, trade
 		Reason:      "periodic_retest",
 		RequestedAt: time.Now().UnixMilli(),
 	})
-	b, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal latency.test: %w", err)
-	}
-
-	if err := h.writeTextMessage(entry, b); err != nil {
-		return fmt.Errorf("send latency.test: %w", err)
-	}
-
-	h.outLog.Info("ws_out", "event", actionLatencyTest, "conn_id", entry.sessionID, "msg_id", int64(0), "request_id", requestID)
+	h.sendEnvelope(entry.conn, entry.sessionID, 0, msg)
 	return nil
 }
 
@@ -826,36 +953,306 @@ func (h *Handler) removeConnection(sessionID string) {
 	h.connectionsMu.Unlock()
 }
 
-func (h *Handler) writeMessage(conn *websocket.Conn, msgType int, data []byte) error {
-	h.connectionsMu.RLock()
-	entry := h.connectionsByConn[conn]
-	h.connectionsMu.RUnlock()
-	if entry == nil {
-		return conn.WriteMessage(msgType, data)
+func writeWithDeadline(conn *websocket.Conn, timeout time.Duration, fn func(*websocket.Conn, time.Time) error) error {
+	if conn == nil {
+		return fmt.Errorf("connection is nil")
 	}
-
-	entry.writeMu.Lock()
-	defer entry.writeMu.Unlock()
-	if err := entry.conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+	deadline := time.Now().Add(timeout)
+	if err := conn.SetWriteDeadline(deadline); err != nil {
 		return err
 	}
-	err := entry.conn.WriteMessage(msgType, data)
-	_ = entry.conn.SetWriteDeadline(time.Time{})
+	err := fn(conn, deadline)
+	_ = conn.SetWriteDeadline(time.Time{})
 	return err
 }
 
-func (h *Handler) writeTextMessage(entry *wsConnectionEntry, data []byte) error {
+func (h *Handler) withWriteLock(entry *wsConnectionEntry, fn func(*websocket.Conn, time.Time) error) error {
 	if entry == nil || entry.conn == nil {
 		return fmt.Errorf("connection entry is nil")
 	}
 	entry.writeMu.Lock()
 	defer entry.writeMu.Unlock()
-	if err := entry.conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
-		return err
+	return writeWithDeadline(entry.conn, h.writeTimeout, fn)
+}
+
+func (h *Handler) writeMessage(conn *websocket.Conn, msgType int, data []byte) error {
+	if conn == nil {
+		return fmt.Errorf("connection is nil")
 	}
-	err := entry.conn.WriteMessage(websocket.TextMessage, data)
-	_ = entry.conn.SetWriteDeadline(time.Time{})
-	return err
+
+	h.connectionsMu.RLock()
+	entry := h.connectionsByConn[conn]
+	h.connectionsMu.RUnlock()
+	if entry == nil {
+		return writeWithDeadline(conn, h.writeTimeout, func(conn *websocket.Conn, deadline time.Time) error {
+			return conn.WriteMessage(msgType, data)
+		})
+	}
+
+	return h.withWriteLock(entry, func(conn *websocket.Conn, deadline time.Time) error {
+		return conn.WriteMessage(msgType, data)
+	})
+}
+
+func (h *Handler) writeTextMessage(entry *wsConnectionEntry, data []byte) error {
+	return h.withWriteLock(entry, func(conn *websocket.Conn, deadline time.Time) error {
+		return conn.WriteMessage(websocket.TextMessage, data)
+	})
+}
+
+func (h *Handler) closeOnSequenceGap(entry *wsConnectionEntry, connID string, requestID string, expected uint64, received uint64) {
+	if entry == nil || entry.conn == nil {
+		return
+	}
+
+	reason := fmt.Sprintf("sequence gap: expected=%d received=%d", expected, received)
+	_ = h.withWriteLock(entry, func(conn *websocket.Conn, deadline time.Time) error {
+		return conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(wsCloseCodeSequenceGap, reason), deadline)
+	})
+	h.recordDisconnect(wsDisconnectReasonClose4009, true)
+
+	h.accessLog.Warn("ws_sequence_gap", "conn_id", connID, "request_id", requestID, "session_id", entry.sessionID, "expected_seq", expected, "received_seq", received)
+}
+
+func (h *Handler) runPingLoop(entry *wsConnectionEntry, connID string, requestID string, stop <-chan struct{}) {
+	if entry == nil || entry.conn == nil {
+		return
+	}
+	if h.heartbeatInterval <= 0 {
+		return
+	}
+
+	ticker := time.NewTicker(h.heartbeatInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-stop:
+			return
+		case <-ticker.C:
+			if err := h.writePingMessage(entry); err != nil {
+				h.accessLog.Warn("ws_ping_failed", "conn_id", connID, "request_id", requestID, "session_id", entry.sessionID, "error", err)
+				_ = entry.conn.Close()
+				return
+			}
+		}
+	}
+}
+
+func (h *Handler) writePingMessage(entry *wsConnectionEntry) error {
+	if entry == nil || entry.conn == nil {
+		return fmt.Errorf("connection entry is nil")
+	}
+
+	entry.recordPingSent()
+	return h.withWriteLock(entry, func(conn *websocket.Conn, deadline time.Time) error {
+		return conn.WriteControl(websocket.PingMessage, []byte("ping"), deadline)
+	})
+}
+
+func (h *Handler) closeConnection(entry *wsConnectionEntry, code int, reason string) error {
+	if entry == nil || entry.conn == nil {
+		return nil
+	}
+	if reason == "" {
+		reason = "server_shutdown"
+	}
+
+	return h.withWriteLock(entry, func(conn *websocket.Conn, deadline time.Time) error {
+		msg := websocket.FormatCloseMessage(code, reason)
+		return conn.WriteControl(websocket.CloseMessage, msg, deadline)
+	})
+}
+
+func (h *Handler) CloseAll(code int, reason string) {
+	h.connectionsMu.RLock()
+	entries := make([]*wsConnectionEntry, 0, len(h.connections))
+	for _, entry := range h.connections {
+		entries = append(entries, entry)
+	}
+	h.connectionsMu.RUnlock()
+
+	for _, entry := range entries {
+		if err := h.closeConnection(entry, code, reason); err != nil {
+			h.accessLog.Warn("ws_close_failed", "session_id", entry.sessionID, "error", err)
+		}
+	}
+}
+
+func (h *Handler) authorizeWSClientCertificate(r *http.Request) (bool, string) {
+	if !h.requireClientCert {
+		return true, ""
+	}
+	if r == nil || r.TLS == nil {
+		return false, "tls_required"
+	}
+	if len(r.TLS.PeerCertificates) == 0 {
+		return false, "client_cert_missing"
+	}
+
+	cert := r.TLS.PeerCertificates[0]
+	if len(h.allowedCNs) > 0 && !matchesAllowedValue(cert.Subject.CommonName, h.allowedCNs) {
+		return false, "client_cert_cn_not_allowed"
+	}
+	if len(h.allowedOUs) > 0 && !matchesAllowedValues(cert.Subject.OrganizationalUnit, h.allowedOUs) {
+		return false, "client_cert_ou_not_allowed"
+	}
+	if len(h.allowedDNSNames) > 0 && !matchesAllowedValues(cert.DNSNames, h.allowedDNSNames) {
+		return false, "client_cert_dns_not_allowed"
+	}
+
+	return true, ""
+}
+
+func extractClientCertificateCN(r *http.Request) string {
+	if r == nil || r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(r.TLS.PeerCertificates[0].Subject.CommonName)
+}
+
+func matchesAllowedValue(value string, allowed map[string]struct{}) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	_, ok := allowed[normalizeAllowedValue(value)]
+	return ok
+}
+
+func matchesAllowedValues(values []string, allowed map[string]struct{}) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	for _, value := range values {
+		if _, ok := allowed[normalizeAllowedValue(value)]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAllowedValues(values []string) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+
+	out := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		norm := normalizeAllowedValue(value)
+		if norm == "" {
+			continue
+		}
+		out[norm] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeAllowedValue(value string) string {
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func (e *wsConnectionEntry) observeInboundSeq(seq uint64) (ok bool, gap bool, expected uint64) {
+	if e == nil {
+		return true, false, 0
+	}
+
+	e.seqMu.Lock()
+	defer e.seqMu.Unlock()
+
+	if !e.seqTrackingEnabled {
+		if seq == 0 {
+			return true, false, 0
+		}
+		e.seqTrackingEnabled = true
+		expected = 1
+		if seq != expected {
+			return false, true, expected
+		}
+		e.inboundSeq = seq
+		return true, false, expected
+	}
+
+	expected = e.inboundSeq + 1
+	if seq == 0 {
+		return false, false, expected
+	}
+	if seq == expected {
+		e.inboundSeq = seq
+		return true, false, expected
+	}
+	if seq > expected {
+		return false, true, expected
+	}
+
+	return false, false, expected
+}
+
+func (e *wsConnectionEntry) observePeerAck(ack uint64) {
+	if e == nil || ack == 0 {
+		return
+	}
+
+	e.seqMu.Lock()
+	if ack > e.peerAck {
+		e.peerAck = ack
+	}
+	e.seqMu.Unlock()
+}
+
+func (e *wsConnectionEntry) nextOutboundSeqAck() (seq uint64, ack uint64) {
+	if e == nil {
+		return 0, 0
+	}
+
+	e.seqMu.Lock()
+	e.outboundSeq++
+	seq = e.outboundSeq
+	ack = e.inboundSeq
+	e.seqMu.Unlock()
+	return seq, ack
+}
+
+func (e *wsConnectionEntry) recordPingSent() {
+	if e == nil {
+		return
+	}
+
+	e.pingMu.Lock()
+	e.lastPingAt = time.Now()
+	e.pingMu.Unlock()
+}
+
+func (e *wsConnectionEntry) recordPongReceived() {
+	if e == nil {
+		return
+	}
+
+	e.pingMu.Lock()
+	if !e.lastPingAt.IsZero() {
+		e.lastRTT = time.Since(e.lastPingAt)
+	}
+	e.lastPongAt = time.Now()
+	e.pingMu.Unlock()
+}
+
+type pingSnapshot struct {
+	lastPingAt time.Time
+	lastPongAt time.Time
+	lastRTT    time.Duration
+}
+
+func (e *wsConnectionEntry) pingSnapshot() pingSnapshot {
+	if e == nil {
+		return pingSnapshot{}
+	}
+
+	e.pingMu.Lock()
+	s := pingSnapshot{lastPingAt: e.lastPingAt, lastPongAt: e.lastPongAt, lastRTT: e.lastRTT}
+	e.pingMu.Unlock()
+	return s
 }
 
 func (h *Handler) GetStats() Stats {
@@ -863,7 +1260,80 @@ func (h *Handler) GetStats() Stats {
 		ActiveConnections: h.active.Load(),
 		TotalConnections:  h.total.Load(),
 		LastConnectUnix:   h.lastSeen.Load(),
+		Ping:              h.aggregatePingStats(),
+		Disconnect:        h.aggregateDisconnectStats(),
 	}
+}
+
+func (h *Handler) aggregatePingStats() PingStats {
+	h.connectionsMu.RLock()
+	defer h.connectionsMu.RUnlock()
+
+	var selected pingSnapshot
+	for _, entry := range h.connections {
+		s := entry.pingSnapshot()
+		if s.lastPingAt.After(selected.lastPingAt) {
+			selected = s
+			continue
+		}
+		if s.lastPingAt.Equal(selected.lastPingAt) && s.lastPongAt.After(selected.lastPongAt) {
+			selected = s
+		}
+	}
+
+	return PingStats{
+		LastPingUnix: selected.lastPingAt.Unix(),
+		LastPongUnix: selected.lastPongAt.Unix(),
+		LastRTTMs:    selected.lastRTT.Milliseconds(),
+	}
+}
+
+func (h *Handler) aggregateDisconnectStats() DisconnectStats {
+	h.metricsMu.Lock()
+	total := h.disconnectTotal
+	close4009 := h.disconnectClose4009
+	reasons := make(map[string]uint64, len(h.disconnectByReason))
+	for reason, count := range h.disconnectByReason {
+		reasons[reason] = count
+	}
+	h.metricsMu.Unlock()
+
+	return DisconnectStats{Total: total, Close4009: close4009, ByReason: reasons}
+}
+
+func (h *Handler) recordDisconnect(reason string, isClose4009 bool) {
+	if reason == "" {
+		reason = "unknown"
+	}
+
+	h.metricsMu.Lock()
+	h.disconnectTotal++
+	h.disconnectByReason[reason]++
+	if isClose4009 {
+		h.disconnectClose4009++
+	}
+	total := h.disconnectTotal
+	close4009 := h.disconnectClose4009
+	reasons := make(map[string]uint64, len(h.disconnectByReason))
+	for k, v := range h.disconnectByReason {
+		reasons[k] = v
+	}
+	h.metricsMu.Unlock()
+
+	h.syncRuntimeDisconnect(total, close4009, reasons)
+}
+
+func classifyWSDisconnectReason(err error) (string, bool) {
+	if err == nil {
+		return string(disconnectReasonServerShutdown), false
+	}
+
+	var closeErr *websocket.CloseError
+	if errors.As(err, &closeErr) && closeErr.Code == wsCloseCodeSequenceGap {
+		return wsDisconnectReasonClose4009, true
+	}
+
+	return string(classifyDisconnectReason(err)), false
 }
 
 // GetTraderSnapshots returns a copy of current runtime trader session snapshots.
@@ -887,6 +1357,7 @@ func (h *Handler) upsertSessionSnapshot(session *sessionRuntime) {
 	h.sessions[session.sessionID] = TraderSnapshot{
 		TraderID:           session.traderID,
 		TraderDBID:         session.traderDBID,
+		TraderStatus:       session.traderStatus,
 		SessionID:          session.sessionID,
 		State:              string(session.state),
 		RegisteredAtUnix:   session.registeredAtMs / 1000,
@@ -951,6 +1422,17 @@ func (h *Handler) syncRuntimeTimeout(lastTimeoutUnix int64) {
 		return
 	}
 	sink.IncrementRuntimeWSTimeout(lastTimeoutUnix)
+}
+
+func (h *Handler) syncRuntimeDisconnect(total uint64, close4009 uint64, byReason map[string]uint64) {
+	if h.stateManager == nil {
+		return
+	}
+	sink, ok := h.stateManager.(runtimeDisconnectSink)
+	if !ok {
+		return
+	}
+	sink.SetRuntimeWSDisconnect(total, close4009, byReason)
 }
 
 func (h *Handler) withDBWriteRetry(op string, fn func(ctx context.Context) error) error {
@@ -1058,6 +1540,13 @@ func normalizeUnknownActionWindow(v time.Duration) time.Duration {
 func normalizeRequestDedupWindow(v time.Duration) time.Duration {
 	if v <= 0 {
 		return 1 * time.Minute
+	}
+	return v
+}
+
+func normalizeWriteTimeout(v time.Duration) time.Duration {
+	if v <= 0 {
+		return defaultWSWriteTimeout
 	}
 	return v
 }

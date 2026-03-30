@@ -32,14 +32,25 @@ type DatabaseTargetConfig struct {
 
 // ServerConfig contains REST API server settings
 type ServerConfig struct {
-	Port     int           `yaml:"port"`
-	TLS      TLSConfig     `yaml:"tls"`
-	Timeouts TimeoutConfig `yaml:"timeouts"`
-	Limits   LimitsConfig  `yaml:"limits"`
-	HTTP2    *HTTP2Config  `yaml:"http2,omitempty"`
+	Port     int             `yaml:"port"`
+	TLS      ServerTLSConfig `yaml:"tls"`
+	Timeouts TimeoutConfig   `yaml:"timeouts"`
+	Limits   LimitsConfig    `yaml:"limits"`
+	HTTP2    *HTTP2Config    `yaml:"http2,omitempty"`
 }
 
-// TLSConfig contains TLS/mTLS settings
+// ServerTLSConfig contains REST/WS TLS settings.
+// TLS is always enabled and WS client certificate validation is always enforced by code.
+type ServerTLSConfig struct {
+	CertPath                       string   `yaml:"cert_path"`
+	KeyPath                        string   `yaml:"key_path"`
+	CAPath                         string   `yaml:"ca_path"`
+	AllowedClientCommonNames       []string `yaml:"allowed_client_common_names"`
+	AllowedClientOrganizationalOUs []string `yaml:"allowed_client_organizational_units"`
+	AllowedClientDNSNames          []string `yaml:"allowed_client_dns_names"`
+}
+
+// TLSConfig contains generic TLS settings for outbound services/databases.
 type TLSConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 	CertPath string `yaml:"cert_path"`
@@ -155,6 +166,7 @@ type LoggingConfig struct {
 type SessionConfig struct {
 	HeartbeatInterval   time.Duration `yaml:"heartbeat_interval"`
 	HeartbeatTimeout    time.Duration `yaml:"heartbeat_timeout"`
+	WriteTimeout        time.Duration `yaml:"write_timeout"`
 	GracePeriod         time.Duration `yaml:"grace_period"`
 	CleanupInterval     time.Duration `yaml:"cleanup_interval"`
 	ProtocolVersion     string        `yaml:"protocol_version"`

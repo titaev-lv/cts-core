@@ -21,8 +21,12 @@ COMPOSE_FILE="${COMPOSE_FILE:-$COMPOSE_DIR/docker-compose.yml}"
 CTS_HEALTH_URL="${CTS_HEALTH_URL:-}"
 CTS_METRICS_URL="${CTS_METRICS_URL:-}"
 CTS_WS_URL="${CTS_WS_URL:-}"
-CTS_SMOKE_TRADER_ID="${CTS_SMOKE_TRADER_ID:-smoke-trader-e2e}"
-CTS_SMOKE_TRADER_NAME="${CTS_SMOKE_TRADER_NAME:-Smoke Trader E2E}"
+CTS_WS_CLIENT_CA_PATH="${CTS_WS_CLIENT_CA_PATH:-$COMPOSE_DIR/volumes/pki/ca/ca.crt}"
+CTS_WS_CLIENT_CERT_PATH="${CTS_WS_CLIENT_CERT_PATH:-$COMPOSE_DIR/volumes/pki/cts-core/clients/trader-2/trader-2-cts.crt}"
+CTS_WS_CLIENT_KEY_PATH="${CTS_WS_CLIENT_KEY_PATH:-$COMPOSE_DIR/volumes/pki/cts-core/clients/trader-2/trader-2-cts.key}"
+CTS_WS_SERVER_NAME="${CTS_WS_SERVER_NAME:-localhost}"
+CTS_SMOKE_CERTIFICATE_CN="${CTS_SMOKE_CERTIFICATE_CN:-}"
+CTS_SMOKE_RESET_TRADER="${CTS_SMOKE_RESET_TRADER:-1}"
 MYSQL_USER="${MYSQL_USER:-root}"
 MYSQL_PASSWORD="${MYSQL_PASSWORD:-root}"
 MYSQL_DATABASE="${MYSQL_DATABASE:-ct_system}"
@@ -39,7 +43,23 @@ if [ ! -f "$COMPOSE_FILE" ]; then
   exit 1
 fi
 
+for f in "$CTS_WS_CLIENT_CA_PATH" "$CTS_WS_CLIENT_CERT_PATH" "$CTS_WS_CLIENT_KEY_PATH"; do
+  if [ ! -f "$f" ]; then
+    echo "required file not found: $f" >&2
+    exit 1
+  fi
+done
+
+if [ -z "$CTS_SMOKE_CERTIFICATE_CN" ]; then
+  CTS_SMOKE_CERTIFICATE_CN="$(openssl x509 -in "$CTS_WS_CLIENT_CERT_PATH" -noout -subject | sed -n 's/.*CN *= *\([^,]*\).*/\1/p')"
+fi
+if [ -z "$CTS_SMOKE_CERTIFICATE_CN" ]; then
+  echo "failed to resolve trader CN from certificate: $CTS_WS_CLIENT_CERT_PATH" >&2
+  exit 1
+fi
+
 echo "[smoke] compose file: $COMPOSE_FILE"
+echo "[smoke] trader identity CN: $CTS_SMOKE_CERTIFICATE_CN"
 
 SERVICES=(mysql hsm cts-core)
 if [ "$WITH_TRADER" -eq 1 ]; then
@@ -57,9 +77,7 @@ echo "[smoke] waiting for cts-core health endpoint"
 if [ -z "$CTS_HEALTH_URL" ]; then
   CANDIDATE_HEALTH_URLS=(
     "https://localhost:8080/health"
-    "http://localhost:8080/health"
     "https://localhost:8081/health"
-    "http://localhost:8081/health"
   )
 else
   CANDIDATE_HEALTH_URLS=("$CTS_HEALTH_URL")
@@ -105,18 +123,19 @@ if [ -z "$CTS_WS_URL" ]; then
     https://localhost:8080/health)
       CTS_WS_URL="wss://localhost:8080/ws"
       ;;
-    http://localhost:8080/health)
-      CTS_WS_URL="ws://localhost:8080/ws"
-      ;;
     https://localhost:8081/health)
       CTS_WS_URL="wss://localhost:8081/ws"
       ;;
     *)
-      CTS_WS_URL="ws://localhost:8081/ws"
+      CTS_WS_URL="wss://localhost:8080/ws"
       ;;
   esac
 fi
 echo "[smoke] ws url: $CTS_WS_URL"
+if [[ "$CTS_WS_URL" != wss://* ]]; then
+  echo "[smoke] ERROR: CTS_WS_URL must use wss:// in hard-cutover mode" >&2
+  exit 1
+fi
 
 if [ -z "$CTS_METRICS_URL" ]; then
   CTS_METRICS_URL="${CTS_HEALTH_URL%/health}/metrics"
@@ -124,20 +143,129 @@ fi
 echo "[smoke] metrics url: $CTS_METRICS_URL"
 
 echo "[smoke] checking metrics endpoint"
-if ! curl -k -fsS "$CTS_METRICS_URL" | grep -Eq "go_goroutines|cts_core_ws_active_connections"; then
+METRICS_PAYLOAD="$(curl -k -fsS "$CTS_METRICS_URL" || true)"
+if ! echo "$METRICS_PAYLOAD" | grep -Eq "go_goroutines|cts_core_ws_active_connections"; then
   echo "[smoke] ERROR: metrics endpoint missing expected prometheus series: $CTS_METRICS_URL" >&2
   exit 1
 fi
 
-echo "[smoke] seeding smoke trader in MySQL"
-docker compose -f "$COMPOSE_FILE" exec -T mysql \
-  mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
-  "INSERT INTO TRADER (TRADER_NAME, CERTIFICATE_CN, REGION, STATUS, MAX_TASKS) \
-   VALUES ('$CTS_SMOKE_TRADER_NAME', '$CTS_SMOKE_TRADER_ID', 'smoke', 'registered', 10) \
-   ON DUPLICATE KEY UPDATE DATE_MODIFY = CURRENT_TIMESTAMP;"
+if [ "$CTS_SMOKE_RESET_TRADER" = "1" ]; then
+  echo "[smoke] resetting trader row for deterministic auto-create"
+  TRADER_ID_TO_RESET="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+    mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+    "SELECT ID FROM TRADER WHERE CERTIFICATE_CN = '$CTS_SMOKE_CERTIFICATE_CN' LIMIT 1;" 2>/dev/null || true)"
+
+  if [ -n "$TRADER_ID_TO_RESET" ]; then
+    TRADER_RES_TABLE_EXISTS="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+      mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRADER_EXCHANGE_RESOURCE';" 2>/dev/null || echo "0")"
+    if [ "$TRADER_RES_TABLE_EXISTS" = "1" ]; then
+      docker compose -f "$COMPOSE_FILE" exec -T mysql \
+        mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+        "DELETE FROM TRADER_EXCHANGE_RESOURCE WHERE TRADER_ID = $TRADER_ID_TO_RESET;"
+    fi
+
+    TRADER_SESSION_TABLE_EXISTS="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+      mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRADER_SESSION';" 2>/dev/null || echo "0")"
+    if [ "$TRADER_SESSION_TABLE_EXISTS" = "1" ]; then
+      docker compose -f "$COMPOSE_FILE" exec -T mysql \
+        mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+        "DELETE FROM TRADER_SESSION WHERE TRADER_ID = $TRADER_ID_TO_RESET;"
+    fi
+
+    MONITORING_TABLE_EXISTS="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+      mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'MONITORING';" 2>/dev/null || echo "0")"
+    if [ "$MONITORING_TABLE_EXISTS" = "1" ]; then
+      docker compose -f "$COMPOSE_FILE" exec -T mysql \
+        mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+        "UPDATE MONITORING SET ASSIGNED_TRADER_ID = NULL WHERE ASSIGNED_TRADER_ID = $TRADER_ID_TO_RESET;
+         UPDATE MONITORING SET BACKUP_TRADER_ID = NULL WHERE BACKUP_TRADER_ID = $TRADER_ID_TO_RESET;"
+    fi
+
+    TRADE_TABLE_EXISTS="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+      mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+      "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRADE';" 2>/dev/null || echo "0")"
+    if [ "$TRADE_TABLE_EXISTS" = "1" ]; then
+      docker compose -f "$COMPOSE_FILE" exec -T mysql \
+        mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+        "UPDATE TRADE SET TRADER_ID = NULL WHERE TRADER_ID = $TRADER_ID_TO_RESET;"
+    fi
+
+    docker compose -f "$COMPOSE_FILE" exec -T mysql \
+      mysql -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+      "DELETE FROM TRADER WHERE ID = $TRADER_ID_TO_RESET;"
+  fi
+fi
 
 echo "[smoke] running ws lifecycle client (connect/register/heartbeat/disconnect)"
-CTS_WS_URL="$CTS_WS_URL" CTS_SMOKE_TRADER_ID="$CTS_SMOKE_TRADER_ID" go run ./tests/smoke_ws_lifecycle_client.go
+CTS_WS_URL="$CTS_WS_URL" \
+CTS_WS_CLIENT_CA_PATH="$CTS_WS_CLIENT_CA_PATH" \
+CTS_WS_CLIENT_CERT_PATH="$CTS_WS_CLIENT_CERT_PATH" \
+CTS_WS_CLIENT_KEY_PATH="$CTS_WS_CLIENT_KEY_PATH" \
+CTS_WS_SERVER_NAME="$CTS_WS_SERVER_NAME" \
+CTS_SMOKE_CERTIFICATE_CN="$CTS_SMOKE_CERTIFICATE_CN" \
+go run ./tests/smoke_ws_lifecycle_client.go
+
+echo "[smoke] validating trader auto-create status"
+TRADER_ROW="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+  mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+  "SELECT ID, STATUS FROM TRADER WHERE CERTIFICATE_CN = '$CTS_SMOKE_CERTIFICATE_CN' LIMIT 1;" 2>/dev/null || true)"
+
+if [ -z "$TRADER_ROW" ]; then
+  echo "[smoke] ERROR: trader row was not created for CN '$CTS_SMOKE_CERTIFICATE_CN'" >&2
+  exit 1
+fi
+
+TRADER_DB_ID="$(echo "$TRADER_ROW" | awk '{print $1}')"
+TRADER_STATUS="$(echo "$TRADER_ROW" | awk '{print $2}')"
+if [ "$TRADER_STATUS" != "pending" ]; then
+  echo "[smoke] ERROR: expected trader status 'pending', got '$TRADER_STATUS' (TRADER.ID=$TRADER_DB_ID)" >&2
+  exit 1
+fi
+echo "[smoke] trader is pending as expected (id=$TRADER_DB_ID)"
+
+echo "[smoke] validating scheduler gate (pending trader must not receive assignments)"
+MONITORING_TABLE_EXISTS="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+  mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'MONITORING';" 2>/dev/null || echo "0")"
+if [ "$MONITORING_TABLE_EXISTS" = "1" ]; then
+  MONITORING_COUNT="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+    mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+    "SELECT COUNT(*) FROM MONITORING WHERE ASSIGNED_TRADER_ID = $TRADER_DB_ID OR BACKUP_TRADER_ID = $TRADER_DB_ID;" 2>/dev/null || echo "0")"
+  if [ "$MONITORING_COUNT" != "0" ]; then
+    echo "[smoke] ERROR: pending trader has MONITORING assignment rows: $MONITORING_COUNT" >&2
+    exit 1
+  fi
+fi
+
+TRADE_TABLE_EXISTS="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+  mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+  "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRADE';" 2>/dev/null || echo "0")"
+if [ "$TRADE_TABLE_EXISTS" = "1" ]; then
+  TRADE_COUNT="$(docker compose -f "$COMPOSE_FILE" exec -T mysql \
+    mysql -N -s -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" -D "$MYSQL_DATABASE" -e \
+    "SELECT COUNT(*) FROM TRADE WHERE TRADER_ID = $TRADER_DB_ID;" 2>/dev/null || echo "0")"
+  if [ "$TRADE_COUNT" != "0" ]; then
+    echo "[smoke] ERROR: pending trader has TRADE assignments: $TRADE_COUNT" >&2
+    exit 1
+  fi
+fi
+
+echo "[smoke] scheduler gate check passed"
+
+AUDIT_LOG_PATH="${CTS_AUDIT_LOG_PATH:-$COMPOSE_DIR/services/cts-core/logs/audit.log}"
+if [ -f "$AUDIT_LOG_PATH" ]; then
+  AUDIT_CREATE_COUNT="$(tail -n 500 "$AUDIT_LOG_PATH" | awk -v cn="$CTS_SMOKE_CERTIFICATE_CN" 'index($0,"\"action\":\"TRADER_CREATE\"") && index($0,"\"certificate_cn\":\"" cn "\"") {c++} END {print c+0}')"
+  if [ "$AUDIT_CREATE_COUNT" = "0" ]; then
+    echo "[smoke] WARNING: TRADER_CREATE audit event not found in $AUDIT_LOG_PATH for CN '$CTS_SMOKE_CERTIFICATE_CN'" >&2
+  else
+    echo "[smoke] TRADER_CREATE audit events found in file: $AUDIT_CREATE_COUNT"
+  fi
+else
+  echo "[smoke] WARNING: audit log file not found: $AUDIT_LOG_PATH" >&2
+fi
 
 echo "[smoke] checking ws lifecycle logs (last 5m)"
 LOGS="$(docker compose -f "$COMPOSE_FILE" logs --since 5m cts-core 2>/dev/null || true)"
@@ -165,4 +293,4 @@ else
   curl -k -fsS "$CTS_HEALTH_URL" >/dev/null
 fi
 
-echo "[smoke] PASS: phase2 compose smoke checks completed"
+echo "[smoke] PASS: hard-cutover ws lifecycle smoke checks completed"

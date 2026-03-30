@@ -20,11 +20,15 @@ type Options struct {
 	WSHandler             *ws.Handler
 	WSHeartbeatInterval   time.Duration
 	WSHeartbeatTimeout    time.Duration
+	WSWriteTimeout        time.Duration
 	WSMaxPayloadBytes     int
 	WSMaxMessagesPerSec   int
 	WSMaxUnknownActions   int
 	WSUnknownActionWindow time.Duration
 	WSRequestDedupWindow  time.Duration
+	WSAllowedCommonNames  []string
+	WSAllowedOUs          []string
+	WSAllowedDNSNames     []string
 	HSMTrading            *hsm.Client
 	HSMTwoFA              *hsm.Client
 	StateManager          *state.Manager
@@ -52,11 +56,16 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) (*gin.Engine, *ws.Handler
 		wsHandler = ws.NewHandlerWithOptions(ws.HandlerOptions{
 			HeartbeatInterval:   opts.WSHeartbeatInterval,
 			HeartbeatTimeout:    opts.WSHeartbeatTimeout,
+			WriteTimeout:        opts.WSWriteTimeout,
 			MaxPayloadBytes:     opts.WSMaxPayloadBytes,
 			MaxMessagesPerSec:   opts.WSMaxMessagesPerSec,
 			MaxUnknownActions:   opts.WSMaxUnknownActions,
 			UnknownActionWindow: opts.WSUnknownActionWindow,
 			RequestDedupWindow:  opts.WSRequestDedupWindow,
+			RequireClientCert:   true,
+			AllowedCommonNames:  opts.WSAllowedCommonNames,
+			AllowedOUs:          opts.WSAllowedOUs,
+			AllowedDNSNames:     opts.WSAllowedDNSNames,
 			Persistence:         newWSSessionPersistence(dbClient),
 			StateManager:        opts.StateManager,
 		})

@@ -83,6 +83,7 @@ func (h *HealthHandler) Health(c *gin.Context) {
 
 	if h.stateManager != nil {
 		h.stateManager.SetRuntimeWS(wsStats.ActiveConnections, wsStats.LastConnectUnix)
+		h.stateManager.SetRuntimeWSPing(wsStats.Ping.LastPingUnix, wsStats.Ping.LastPongUnix, wsStats.Ping.LastRTTMs)
 	}
 
 	stateSnapshot := gin.H{}
@@ -139,22 +140,34 @@ func (h *HealthHandler) Health(c *gin.Context) {
 				"assignment_mode":      "single_candidate_with_retry",
 			},
 			"websocket": gin.H{
-				"status":              "ok",
-				"active_connections":  wsStats.ActiveConnections,
-				"total_connections":   wsStats.TotalConnections,
-				"last_connect_unix":   wsStats.LastConnectUnix,
-				"last_heartbeat_unix": runtimeSnapshot.LastWSHeartbeatUnix,
-				"last_timeout_unix":   runtimeSnapshot.LastWSTimeoutUnix,
-				"timeout_count":       runtimeSnapshot.WSTimeoutCount,
+				"status":                "ok",
+				"active_connections":    wsStats.ActiveConnections,
+				"total_connections":     wsStats.TotalConnections,
+				"last_connect_unix":     wsStats.LastConnectUnix,
+				"last_ping_unix":        wsStats.Ping.LastPingUnix,
+				"last_pong_unix":        wsStats.Ping.LastPongUnix,
+				"last_rtt_ms":           wsStats.Ping.LastRTTMs,
+				"last_heartbeat_unix":   runtimeSnapshot.LastWSHeartbeatUnix,
+				"last_timeout_unix":     runtimeSnapshot.LastWSTimeoutUnix,
+				"timeout_count":         runtimeSnapshot.WSTimeoutCount,
+				"disconnect_total":      runtimeSnapshot.WSDisconnectTotal,
+				"disconnect_close_4009": runtimeSnapshot.WSDisconnectClose4009,
+				"disconnect_by_reason":  runtimeSnapshot.WSDisconnectByReason,
 			},
 			"traders": gin.H{
 				"status":                  traderStatus,
 				"source":                  "ws_ping_pong",
 				"aggregation_implemented": false,
 				"connected_count":         wsStats.ActiveConnections,
+				"last_ping_unix":          wsStats.Ping.LastPingUnix,
+				"last_pong_unix":          wsStats.Ping.LastPongUnix,
+				"last_rtt_ms":             wsStats.Ping.LastRTTMs,
 				"last_heartbeat_unix":     runtimeSnapshot.LastWSHeartbeatUnix,
 				"last_timeout_unix":       runtimeSnapshot.LastWSTimeoutUnix,
 				"timeout_count":           runtimeSnapshot.WSTimeoutCount,
+				"disconnect_total":        runtimeSnapshot.WSDisconnectTotal,
+				"disconnect_close_4009":   runtimeSnapshot.WSDisconnectClose4009,
+				"disconnect_by_reason":    runtimeSnapshot.WSDisconnectByReason,
 			},
 		},
 		"runtime": gin.H{

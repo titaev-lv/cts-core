@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gorilla/websocket"
 	"github.com/jmoiron/sqlx"
 	"github.com/titaev-lv/cts-core/internal/api/rest"
 	"github.com/titaev-lv/cts-core/internal/config"
@@ -313,11 +316,15 @@ func main() {
 		WSBurst:               cfg.RateLimit.WebSocket.Burst,
 		WSHeartbeatInterval:   cfg.Session.HeartbeatInterval,
 		WSHeartbeatTimeout:    cfg.Session.HeartbeatTimeout,
+		WSWriteTimeout:        cfg.Session.WriteTimeout,
 		WSMaxPayloadBytes:     cfg.Session.MaxPayloadBytes,
 		WSMaxMessagesPerSec:   cfg.RateLimit.WebSocket.PerSecond(),
 		WSMaxUnknownActions:   cfg.Session.MaxUnknownActions,
 		WSUnknownActionWindow: cfg.Session.UnknownActionWindow,
 		WSRequestDedupWindow:  cfg.Session.RequestDedupWindow,
+		WSAllowedCommonNames:  cfg.Server.TLS.AllowedClientCommonNames,
+		WSAllowedOUs:          cfg.Server.TLS.AllowedClientOrganizationalOUs,
+		WSAllowedDNSNames:     cfg.Server.TLS.AllowedClientDNSNames,
 		HSMTrading:            hsmTradingClient,
 		HSMTwoFA:              hsm2FAClient,
 		StateManager:          stateManager,
@@ -357,6 +364,32 @@ func main() {
 		MaxHeaderBytes:    cfg.Server.Limits.MaxHeaderBytes,
 	}
 
+	closeAllWS := func(reason string) {
+		if wsHandler == nil {
+			return
+		}
+		wsHandler.CloseAll(websocket.CloseNormalClosure, reason)
+	}
+
+	caBytes, readErr := os.ReadFile(cfg.Server.TLS.CAPath)
+	if readErr != nil {
+		log.Error("Failed to read WS client CA file", "path", cfg.Server.TLS.CAPath, "error", readErr)
+		os.Exit(1)
+	}
+
+	clientCAs := x509.NewCertPool()
+	if ok := clientCAs.AppendCertsFromPEM(caBytes); !ok {
+		log.Error("Failed to parse WS client CA file", "path", cfg.Server.TLS.CAPath)
+		os.Exit(1)
+	}
+
+	httpServer.TLSConfig = &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		ClientAuth: tls.VerifyClientCertIfGiven,
+		ClientCAs:  clientCAs,
+	}
+	log.Info("WS client certificate verification enabled", "ca_path", cfg.Server.TLS.CAPath)
+
 	if cfg.Server.HTTP2 != nil {
 		parsed, err := cfg.Server.HTTP2.Parse()
 		if err != nil {
@@ -378,16 +411,11 @@ func main() {
 	}
 
 	log.Info("CTS-Core initialized successfully")
-	log.Info("REST server starting", "addr", addr, "tls_enabled", cfg.Server.TLS.Enabled)
+	log.Info("REST server starting", "addr", addr, "tls_enabled", true)
 
 	serverErrCh := make(chan error, 1)
 	go func() {
-		var serveErr error
-		if cfg.Server.TLS.Enabled {
-			serveErr = httpServer.ListenAndServeTLS(cfg.Server.TLS.CertPath, cfg.Server.TLS.KeyPath)
-		} else {
-			serveErr = httpServer.ListenAndServe()
-		}
+		serveErr := httpServer.ListenAndServeTLS(cfg.Server.TLS.CertPath, cfg.Server.TLS.KeyPath)
 		serverErrCh <- serveErr
 	}()
 
@@ -399,8 +427,10 @@ func main() {
 		log.Info("Shutdown signal received")
 		schedulerEngine.Stop()
 		stateManager.SetServerStatus("stopping")
+		closeAllWS("server_shutdown")
 	case serveErr := <-serverErrCh:
 		schedulerEngine.Stop()
+		closeAllWS("server_error")
 		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			log.Error("REST server stopped with error", "error", serveErr)
 			if closeErr := stateManager.Close(); closeErr != nil {

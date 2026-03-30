@@ -39,7 +39,7 @@ func TestTrader_JSONMarshaling(t *testing.T) {
 
 func TestTraderStatus_Constants(t *testing.T) {
 	statuses := []TraderStatus{
-		TraderStatusRegistered,
+		TraderStatusPending,
 		TraderStatusActive,
 		TraderStatusSuspended,
 		TraderStatusDecommissioned,

@@ -2,8 +2,17 @@ package ws
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"math/big"
+	"net"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -13,6 +22,108 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 )
+
+const defaultTestClientCN = "trader-eu-1"
+
+func TestAuthorizeWSClientCertificateNotRequired(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{RequireClientCert: false})
+	ok, reason := h.authorizeWSClientCertificate(&http.Request{})
+	if !ok {
+		t.Fatalf("expected allow when client cert is not required, got reason=%q", reason)
+	}
+}
+
+func TestAuthorizeWSClientCertificateMissing(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{RequireClientCert: true})
+	ok, reason := h.authorizeWSClientCertificate(&http.Request{TLS: &tls.ConnectionState{}})
+	if ok {
+		t.Fatalf("expected reject when client cert is missing")
+	}
+	if reason != "client_cert_missing" {
+		t.Fatalf("expected reason client_cert_missing, got %q", reason)
+	}
+}
+
+func TestAuthorizeWSClientCertificateAllowlistMatch(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{
+		RequireClientCert:  true,
+		AllowedCommonNames: []string{"trader-alpha"},
+		AllowedOUs:         []string{"trading"},
+		AllowedDNSNames:    []string{"trader.alpha.internal"},
+	})
+
+	cert := &x509.Certificate{
+		Subject: pkix.Name{
+			CommonName:         "trader-alpha",
+			OrganizationalUnit: []string{"Trading"},
+		},
+		DNSNames: []string{"trader.alpha.internal"},
+	}
+
+	ok, reason := h.authorizeWSClientCertificate(&http.Request{TLS: &tls.ConnectionState{PeerCertificates: []*x509.Certificate{cert}}})
+	if !ok {
+		t.Fatalf("expected allow for matching allowlists, got reason=%q", reason)
+	}
+}
+
+func TestRegisterUsesCertificateCNWhenClientCertRequired(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{RequireClientCert: true})
+	conn := dialTestWSSWithHandlerAndClientCN(t, h, "trader-cn-1")
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "req-cn-priority-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "payload-trader-id",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	if resp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, resp.Action)
+	}
+
+	var ack registerAck
+	if err := json.Unmarshal(resp.Payload, &ack); err != nil {
+		t.Fatalf("unmarshal ack: %v", err)
+	}
+	if ack.TraderID != "trader-cn-1" {
+		t.Fatalf("expected trader_id from certificate CN %q, got %q", "trader-cn-1", ack.TraderID)
+	}
+}
+
+func TestRegisterRejectsEmptyCertificateCNWhenClientCertRequired(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{RequireClientCert: true})
+	conn := dialTestWSSWithHandlerAndClientCN(t, h, "")
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "req-cn-missing-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "payload-trader-id",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	assertErrorCode(t, resp, errInvalidPayload)
+	assertErrorDetail(t, resp, "field", "certificate_cn")
+	assertErrorDetail(t, resp, "path", "tls.peer_certificate.subject.cn")
+	assertErrorDetail(t, resp, "reason", "required")
+}
 
 func TestRegisterSuccess(t *testing.T) {
 	conn := dialTestWS(t)
@@ -97,7 +208,7 @@ func TestRegisterAckIncludesExchangeCatalogAndEffectiveExchanges(t *testing.T) {
 }
 
 func TestRegisterMissingTraderID(t *testing.T) {
-	conn := dialTestWS(t)
+	conn := dialTestWSSWithHandlerAndClientCN(t, NewHandler(), "")
 	defer conn.Close()
 
 	consumeConnected(t, conn)
@@ -115,8 +226,8 @@ func TestRegisterMissingTraderID(t *testing.T) {
 
 	resp := readEnvelope(t, conn)
 	assertErrorCode(t, resp, errInvalidPayload)
-	assertErrorDetail(t, resp, "field", "trader_id")
-	assertErrorDetail(t, resp, "path", "payload.trader_id")
+	assertErrorDetail(t, resp, "field", "certificate_cn")
+	assertErrorDetail(t, resp, "path", "tls.peer_certificate.subject.cn")
 	assertErrorDetail(t, resp, "reason", "required")
 }
 
@@ -510,10 +621,23 @@ func TestHeartbeatTraderIDMismatchDetails(t *testing.T) {
 	writeJSON(t, conn, hbReq)
 
 	resp := readEnvelope(t, conn)
-	assertErrorCode(t, resp, errInvalidPayload)
-	assertErrorDetail(t, resp, "field", "trader_id")
-	assertErrorDetail(t, resp, "path", "payload.trader_id")
-	assertErrorDetail(t, resp, "reason", "mismatch")
+	if resp.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q, got %q", actionHeartbeatAck, resp.Action)
+	}
+
+	var payload heartbeatAck
+	if err := json.Unmarshal(resp.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal heartbeat ack payload: %v", err)
+	}
+	if payload.Status != "ok" {
+		t.Fatalf("expected status %q, got %q", "ok", payload.Status)
+	}
+	if payload.TraderID != "trader-eu-1" {
+		t.Fatalf("expected trader_id %q, got %q", "trader-eu-1", payload.TraderID)
+	}
+	if payload.SessionID == "" {
+		t.Fatalf("expected non-empty session_id in heartbeat ack")
+	}
 }
 
 func TestHeartbeatEventAfterRegisterHasNoResponse(t *testing.T) {
@@ -536,6 +660,106 @@ func TestHeartbeatEventAfterRegisterHasNoResponse(t *testing.T) {
 
 	if _, _, err := readMessageWithTimeout(conn, 150*time.Millisecond); err == nil {
 		t.Fatalf("expected no response for heartbeat event")
+	}
+}
+
+func TestSeqAckStampedOnServerResponses(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	registerReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		Seq:       1,
+		RequestID: "seq-reg-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-seq-1",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, registerReq)
+
+	regResp := readEnvelope(t, conn)
+	if regResp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, regResp.Action)
+	}
+	if regResp.Seq != 1 {
+		t.Fatalf("expected outbound seq=1, got %d", regResp.Seq)
+	}
+	if regResp.Ack != 1 {
+		t.Fatalf("expected outbound ack=1, got %d", regResp.Ack)
+	}
+
+	hbReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		Seq:       2,
+		RequestID: "seq-hb-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-seq-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hbReq)
+
+	hbResp := readEnvelope(t, conn)
+	if hbResp.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q, got %q", actionHeartbeatAck, hbResp.Action)
+	}
+	if hbResp.Seq != 2 {
+		t.Fatalf("expected outbound seq=2, got %d", hbResp.Seq)
+	}
+	if hbResp.Ack != 2 {
+		t.Fatalf("expected outbound ack=2, got %d", hbResp.Ack)
+	}
+}
+
+func TestSequenceGapClosesConnection(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	registerReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		Seq:       1,
+		RequestID: "gap-reg-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-gap-1",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, registerReq)
+	_ = readEnvelope(t, conn)
+
+	gapReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		Seq:       3,
+		RequestID: "gap-hb-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-gap-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, gapReq)
+
+	_, _, err := readMessageWithTimeout(conn, 300*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected connection close after sequence gap")
+	}
+
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("expected websocket.CloseError, got %T (%v)", err, err)
+	}
+	if closeErr.Code != wsCloseCodeSequenceGap {
+		t.Fatalf("expected close code %d, got %d", wsCloseCodeSequenceGap, closeErr.Code)
 	}
 }
 
@@ -646,7 +870,7 @@ func TestRuntimeLifecycleTelemetrySync(t *testing.T) {
 }
 
 func TestSessionPersistenceLifecycle(t *testing.T) {
-	persistence := &testSessionPersistence{resolvedTraderID: 101}
+	persistence := &testSessionPersistence{resolvedTrader: TraderIdentity{TraderDBID: 101, TraderID: "trader-eu-1", Status: "active"}}
 	h := NewHandlerWithOptions(HandlerOptions{
 		HeartbeatTimeout: 3 * time.Second,
 		Persistence:      persistence,
@@ -697,7 +921,7 @@ func TestSessionPersistenceLifecycle(t *testing.T) {
 	})
 
 	if persistence.resolveCalls() == 0 {
-		t.Fatalf("expected ResolveTraderID to be called")
+		t.Fatalf("expected ResolveOrCreateTraderByCN to be called")
 	}
 	if persistence.createCalls() == 0 {
 		t.Fatalf("expected CreateSession to be called")
@@ -987,25 +1211,45 @@ func TestParallelConnectionsRegisterHeartbeatStability(t *testing.T) {
 	h := NewHandlerWithOptions(HandlerOptions{
 		MaxMessagesPerSec: 200,
 	})
+	caCert, caKey, caPool := generateTestCA(t)
+	serverCert := generateSignedTLSCert(t, caCert, caKey, "localhost", false)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/ws", h.Serve)
-	ts := httptest.NewServer(r)
+	ts := httptest.NewUnstartedServer(r)
+	ts.TLS = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+	}
+	ts.StartTLS()
 	defer ts.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	wsURL := "wss" + strings.TrimPrefix(ts.URL, "https") + "/ws"
 
 	const workers = 20
 	errCh := make(chan error, workers)
 	var wg sync.WaitGroup
+	clientCerts := make([]tls.Certificate, workers)
+	for i := 0; i < workers; i++ {
+		clientCerts[i] = generateSignedTLSCert(t, caCert, caKey, fmt.Sprintf("trader-par-%d", i), true)
+	}
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
 
-			conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+			dialer := websocket.Dialer{TLSClientConfig: &tls.Config{
+				MinVersion:   tls.VersionTLS13,
+				RootCAs:      caPool,
+				Certificates: []tls.Certificate{clientCerts[i]},
+				ServerName:   "localhost",
+			}}
+
+			conn, _, err := dialer.Dial(wsURL, nil)
 			if err != nil {
 				errCh <- fmt.Errorf("dial worker %d: %w", i, err)
 				return
@@ -1093,40 +1337,138 @@ func TestParallelConnectionsRegisterHeartbeatStability(t *testing.T) {
 	})
 }
 
-func dialTestWS(t *testing.T) *websocket.Conn {
+func dialTestWSSWithHandlerAndClientCN(t *testing.T, h *Handler, clientCN string) *websocket.Conn {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
-	r := gin.New()
-	r.GET("/ws", NewHandler().Serve)
-
-	ts := httptest.NewServer(r)
-	t.Cleanup(ts.Close)
-
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		t.Fatalf("dial ws: %v", err)
-	}
-	return conn
-}
-
-func dialTestWSWithHandler(t *testing.T, h *Handler) *websocket.Conn {
-	t.Helper()
-	gin.SetMode(gin.TestMode)
+	caCert, caKey, caPool := generateTestCA(t)
+	serverCert := generateSignedTLSCert(t, caCert, caKey, "localhost", false)
+	clientCert := generateSignedTLSCert(t, caCert, caKey, clientCN, true)
 
 	r := gin.New()
 	r.GET("/ws", h.Serve)
 
-	ts := httptest.NewServer(r)
+	ts := httptest.NewUnstartedServer(r)
+	ts.TLS = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+	}
+	ts.StartTLS()
 	t.Cleanup(ts.Close)
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	wsURL := "wss" + strings.TrimPrefix(ts.URL, "https") + "/ws"
+	dialer := websocket.Dialer{
+		TLSClientConfig: &tls.Config{
+			MinVersion:   tls.VersionTLS13,
+			RootCAs:      caPool,
+			Certificates: []tls.Certificate{clientCert},
+			ServerName:   "localhost",
+		},
+	}
+
+	conn, _, err := dialer.Dial(wsURL, nil)
 	if err != nil {
-		t.Fatalf("dial ws: %v", err)
+		t.Fatalf("dial wss: %v", err)
 	}
 	return conn
+}
+
+func generateTestCA(t *testing.T) (*x509.Certificate, *rsa.PrivateKey, *x509.CertPool) {
+	t.Helper()
+
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate ca key: %v", err)
+	}
+
+	caTemplate := &x509.Certificate{
+		SerialNumber:          mustRandomSerial(t),
+		Subject:               pkix.Name{CommonName: "cts-test-ca"},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create ca certificate: %v", err)
+	}
+
+	parsedCA, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatalf("parse ca certificate: %v", err)
+	}
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(parsedCA)
+
+	return parsedCA, caKey, caPool
+}
+
+func generateSignedTLSCert(t *testing.T, caCert *x509.Certificate, caKey *rsa.PrivateKey, commonName string, isClient bool) tls.Certificate {
+	t.Helper()
+
+	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate leaf key: %v", err)
+	}
+
+	leafTemplate := &x509.Certificate{
+		SerialNumber: mustRandomSerial(t),
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-1 * time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+	}
+
+	if isClient {
+		leafTemplate.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+	} else {
+		leafTemplate.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+		leafTemplate.DNSNames = []string{"localhost"}
+		leafTemplate.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
+	}
+
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create leaf certificate: %v", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(leafKey)})
+
+	leafTLS, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatalf("build tls key pair: %v", err)
+	}
+
+	return leafTLS
+}
+
+func mustRandomSerial(t *testing.T) *big.Int {
+	t.Helper()
+
+	max := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		t.Fatalf("generate serial number: %v", err)
+	}
+	if serial.Sign() == 0 {
+		return big.NewInt(1)
+	}
+	return serial
+}
+
+func dialTestWS(t *testing.T) *websocket.Conn {
+	return dialTestWSSWithHandlerAndClientCN(t, NewHandler(), defaultTestClientCN)
+}
+
+func dialTestWSWithHandler(t *testing.T, h *Handler) *websocket.Conn {
+	return dialTestWSSWithHandlerAndClientCN(t, h, defaultTestClientCN)
 }
 
 func consumeConnected(t *testing.T, conn *websocket.Conn) {
@@ -1234,35 +1576,38 @@ func readMessageWithTimeout(conn *websocket.Conn, timeout time.Duration) (int, [
 }
 
 type testRuntimeStateSink struct {
-	mu                sync.Mutex
-	active            int64
-	lastConnectUnix   int64
-	lastHeartbeatUnix int64
-	lastTimeoutUnix   int64
-	timeoutCount      int64
+	mu                  sync.Mutex
+	active              int64
+	lastConnectUnix     int64
+	lastHeartbeatUnix   int64
+	lastTimeoutUnix     int64
+	timeoutCount        int64
+	disconnectTotal     uint64
+	disconnectClose4009 uint64
+	disconnectByReason  map[string]uint64
 }
 
 type testSessionPersistence struct {
-	mu               sync.Mutex
-	resolvedTraderID int
-	resolveErr       error
-	createErr        error
-	heartbeatErr     error
-	finalizeErr      error
-	resolveCount     int
-	createCount      int
-	heartbeatCount   int
-	finalizeCount    int
+	mu             sync.Mutex
+	resolvedTrader TraderIdentity
+	resolveErr     error
+	createErr      error
+	heartbeatErr   error
+	finalizeErr    error
+	resolveCount   int
+	createCount    int
+	heartbeatCount int
+	finalizeCount  int
 }
 
-func (p *testSessionPersistence) ResolveTraderID(_ context.Context, _ string) (int, error) {
+func (p *testSessionPersistence) ResolveOrCreateTraderByCN(_ context.Context, _ string) (TraderIdentity, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.resolveCount++
 	if p.resolveErr != nil {
-		return 0, p.resolveErr
+		return TraderIdentity{}, p.resolveErr
 	}
-	return p.resolvedTraderID, nil
+	return p.resolvedTrader, nil
 }
 
 func (p *testSessionPersistence) CreateSession(_ context.Context, _ SessionCreateInput) error {
@@ -1330,6 +1675,18 @@ func (s *testRuntimeStateSink) IncrementRuntimeWSTimeout(lastTimeoutUnix int64) 
 	s.timeoutCount++
 }
 
+func (s *testRuntimeStateSink) SetRuntimeWSDisconnect(total uint64, close4009 uint64, byReason map[string]uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.disconnectTotal = total
+	s.disconnectClose4009 = close4009
+	reasons := make(map[string]uint64, len(byReason))
+	for k, v := range byReason {
+		reasons[k] = v
+	}
+	s.disconnectByReason = reasons
+}
+
 func (s *testRuntimeStateSink) snapshot() (int64, int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1340,6 +1697,57 @@ func (s *testRuntimeStateSink) lifecycleSnapshot() (int64, int64, int64, int64, 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.active, s.lastConnectUnix, s.lastHeartbeatUnix, s.lastTimeoutUnix, s.timeoutCount
+}
+
+func (s *testRuntimeStateSink) disconnectSnapshot() (uint64, uint64, map[string]uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	reasons := make(map[string]uint64, len(s.disconnectByReason))
+	for k, v := range s.disconnectByReason {
+		reasons[k] = v
+	}
+	return s.disconnectTotal, s.disconnectClose4009, reasons
+}
+
+func TestRecordDisconnectSyncsRuntimeState(t *testing.T) {
+	sink := &testRuntimeStateSink{}
+	h := NewHandlerWithOptions(HandlerOptions{StateManager: sink})
+
+	h.recordDisconnect("timeout", false)
+	h.recordDisconnect(wsDisconnectReasonClose4009, true)
+
+	total, close4009, reasons := sink.disconnectSnapshot()
+	if total != 2 {
+		t.Fatalf("expected total disconnects=2, got %d", total)
+	}
+	if close4009 != 1 {
+		t.Fatalf("expected close4009=1, got %d", close4009)
+	}
+	if reasons["timeout"] != 1 {
+		t.Fatalf("expected timeout reason count=1, got %d", reasons["timeout"])
+	}
+	if reasons[wsDisconnectReasonClose4009] != 1 {
+		t.Fatalf("expected close_4009 reason count=1, got %d", reasons[wsDisconnectReasonClose4009])
+	}
+}
+
+func TestNewHandlerWithOptionsUsesConfiguredWriteTimeout(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{WriteTimeout: 17 * time.Second})
+	if h.writeTimeout != 17*time.Second {
+		t.Fatalf("expected handler write timeout=17s, got %s", h.writeTimeout)
+	}
+}
+
+func TestNewHandlerWithOptionsWriteTimeoutFallbackToDefault(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{WriteTimeout: 0})
+	if h.writeTimeout != defaultWSWriteTimeout {
+		t.Fatalf("expected default handler write timeout=%s, got %s", defaultWSWriteTimeout, h.writeTimeout)
+	}
+
+	h = NewHandlerWithOptions(HandlerOptions{WriteTimeout: -1 * time.Second})
+	if h.writeTimeout != defaultWSWriteTimeout {
+		t.Fatalf("expected default handler write timeout=%s for negative input, got %s", defaultWSWriteTimeout, h.writeTimeout)
+	}
 }
 
 func waitForCondition(t *testing.T, timeout time.Duration, fn func() bool) {

@@ -17,9 +17,15 @@ type ServerState struct {
 type RuntimeState struct {
 	ActiveWSConnections         int64            `json:"active_ws_connections"`
 	LastWSConnectUnix           int64            `json:"last_ws_connect_unix"`
+	LastWSPingUnix              int64            `json:"last_ws_ping_unix"`
+	LastWSPongUnix              int64            `json:"last_ws_pong_unix"`
+	LastWSPingRTTMs             int64            `json:"last_ws_ping_rtt_ms"`
 	LastWSHeartbeatUnix         int64            `json:"last_ws_heartbeat_unix"`
 	LastWSTimeoutUnix           int64            `json:"last_ws_timeout_unix"`
 	WSTimeoutCount              int64            `json:"ws_timeout_count"`
+	WSDisconnectTotal           int64            `json:"ws_disconnect_total"`
+	WSDisconnectClose4009       int64            `json:"ws_disconnect_close_4009"`
+	WSDisconnectByReason        map[string]int64 `json:"ws_disconnect_by_reason"`
 	SchedulerCycleCount         int64            `json:"scheduler_cycle_count"`
 	SchedulerLastCandidateCount int64            `json:"scheduler_last_candidate_count"`
 	SchedulerLastRunUnix        int64            `json:"scheduler_last_run_unix"`
@@ -41,6 +47,7 @@ func NewDaemonState() *DaemonState {
 			Status:    "starting",
 		},
 		Runtime: RuntimeState{
+			WSDisconnectByReason:        map[string]int64{},
 			SchedulerAssignAttempts:     map[string]int64{},
 			SchedulerResourceRejections: map[string]int64{},
 		},

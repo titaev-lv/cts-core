@@ -6,6 +6,14 @@ import (
 	"time"
 )
 
+func validServerTLSConfig() ServerTLSConfig {
+	return ServerTLSConfig{
+		CertPath: "pki/server/cts-core.crt",
+		KeyPath:  "pki/server/cts-core.key",
+		CAPath:   "pki/ca/ca.crt",
+	}
+}
+
 func TestLoad(t *testing.T) {
 	// Use example config for testing
 	cfg, err := Load("../../conf/config.example.yaml")
@@ -110,10 +118,10 @@ func TestValidate(t *testing.T) {
 			cfg: Config{
 				Server: ServerConfig{
 					Port: 8443,
-					TLS: TLSConfig{
-						Enabled:  true,
+					TLS: ServerTLSConfig{
 						CertPath: "pki/server/cts-core.crt",
 						KeyPath:  "pki/server/cts-core.key",
+						CAPath:   "pki/ca/ca.crt",
 					},
 				},
 				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
@@ -123,21 +131,21 @@ func TestValidate(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "valid config with tls disabled and empty cert paths",
+			name: "invalid tls missing cert paths",
 			cfg: Config{
-				Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+				Server:    ServerConfig{Port: 8443},
 				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 				State:     StateConfig{FilePath: "state/daemon.state"},
 				Logging:   LoggingConfig{Level: "info", Dir: "logs"},
 			},
-			wantErr: false,
+			wantErr: true,
 		},
 		{
-			name: "invalid tls enabled without cert path",
+			name: "invalid tls without cert path",
 			cfg: Config{
-				Server: ServerConfig{Port: 8443, TLS: TLSConfig{
-					Enabled: true,
+				Server: ServerConfig{Port: 8443, TLS: ServerTLSConfig{
 					KeyPath: "pki/server/cts-core.key",
+					CAPath:  "pki/ca/ca.crt",
 				}},
 				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 				State:     StateConfig{FilePath: "state/daemon.state"},
@@ -146,11 +154,11 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid tls enabled without key path",
+			name: "invalid tls without key path",
 			cfg: Config{
-				Server: ServerConfig{Port: 8443, TLS: TLSConfig{
-					Enabled:  true,
+				Server: ServerConfig{Port: 8443, TLS: ServerTLSConfig{
 					CertPath: "pki/server/cts-core.crt",
+					CAPath:   "pki/ca/ca.crt",
 				}},
 				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 				State:     StateConfig{FilePath: "state/daemon.state"},
@@ -161,7 +169,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "invalid port",
 			cfg: Config{
-				Server:    ServerConfig{Port: 99999}, // Invalid
+				Server:    ServerConfig{Port: 99999, TLS: validServerTLSConfig()}, // Invalid
 				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 				State:     StateConfig{FilePath: "state/daemon.state"},
 				Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -171,7 +179,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "invalid log level",
 			cfg: Config{
-				Server:    ServerConfig{Port: 8443},
+				Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 				State:     StateConfig{FilePath: "state/daemon.state"},
 				Logging:   LoggingConfig{Level: "verbose", Dir: "logs"}, // Invalid
@@ -181,7 +189,7 @@ func TestValidate(t *testing.T) {
 		{
 			name: "empty database",
 			cfg: Config{
-				Server:    ServerConfig{Port: 8443},
+				Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 				Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "", Port: 3306}}}, // Invalid
 				State:     StateConfig{FilePath: "state/daemon.state"},
 				Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -227,7 +235,7 @@ func TestEnvOverrides(t *testing.T) {
 
 func TestValidateServerTimeoutDefaults(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -249,7 +257,7 @@ func TestValidateServerTimeoutBounds(t *testing.T) {
 	cfg := Config{
 		Server: ServerConfig{
 			Port: 8443,
-			TLS:  TLSConfig{Enabled: false},
+			TLS:  validServerTLSConfig(),
 			Timeouts: TimeoutConfig{
 				Read: -1 * time.Second,
 			},
@@ -268,7 +276,7 @@ func TestValidateServerMaxHeaderBytesBounds(t *testing.T) {
 	cfg := Config{
 		Server: ServerConfig{
 			Port: 8443,
-			TLS:  TLSConfig{Enabled: false},
+			TLS:  validServerTLSConfig(),
 			Limits: LimitsConfig{
 				MaxHeaderBytes: 1024,
 			},
@@ -287,7 +295,7 @@ func TestValidateServerHTTP2Invalid(t *testing.T) {
 	cfg := Config{
 		Server: ServerConfig{
 			Port: 8443,
-			TLS:  TLSConfig{Enabled: false},
+			TLS:  validServerTLSConfig(),
 			HTTP2: &HTTP2Config{
 				MaxFrameSize: "invalid",
 			},
@@ -304,7 +312,7 @@ func TestValidateServerHTTP2Invalid(t *testing.T) {
 
 func TestValidateRateLimitDefaultsAndAlias(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -327,7 +335,7 @@ func TestValidateRateLimitDefaultsAndAlias(t *testing.T) {
 
 func TestValidateRateLimitInvalid(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -343,7 +351,7 @@ func TestValidateRateLimitInvalid(t *testing.T) {
 
 func TestValidateSessionDefaults(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -353,7 +361,7 @@ func TestValidateSessionDefaults(t *testing.T) {
 		t.Fatalf("Validate() error = %v", err)
 	}
 
-	if cfg.Session.HeartbeatInterval == 0 || cfg.Session.HeartbeatTimeout == 0 || cfg.Session.GracePeriod == 0 || cfg.Session.CleanupInterval == 0 {
+	if cfg.Session.HeartbeatInterval == 0 || cfg.Session.HeartbeatTimeout == 0 || cfg.Session.WriteTimeout == 0 || cfg.Session.GracePeriod == 0 || cfg.Session.CleanupInterval == 0 {
 		t.Fatalf("expected session defaults to be populated, got %+v", cfg.Session)
 	}
 	if cfg.Session.ProtocolVersion == "" {
@@ -366,7 +374,7 @@ func TestValidateSessionDefaults(t *testing.T) {
 
 func TestValidateSessionTimeoutLessThanInterval(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -383,9 +391,32 @@ func TestValidateSessionTimeoutLessThanInterval(t *testing.T) {
 	}
 }
 
+func TestValidateSessionWriteTimeoutCustomPreserved(t *testing.T) {
+	cfg := Config{
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
+		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
+		State:     StateConfig{FilePath: "state/daemon.state"},
+		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
+		Session: SessionConfig{
+			HeartbeatInterval: 5 * time.Second,
+			HeartbeatTimeout:  15 * time.Second,
+			WriteTimeout:      17 * time.Second,
+			GracePeriod:       10 * time.Second,
+			CleanupInterval:   30 * time.Second,
+		},
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if cfg.Session.WriteTimeout != 17*time.Second {
+		t.Fatalf("expected custom session.write_timeout=17s to be preserved, got %s", cfg.Session.WriteTimeout)
+	}
+}
+
 func TestValidateSessionMaxPayloadBytesInvalid(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -406,7 +437,7 @@ func TestValidateSessionMaxPayloadBytesInvalid(t *testing.T) {
 
 func TestValidateSchedulerDefaults(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -423,7 +454,7 @@ func TestValidateSchedulerDefaults(t *testing.T) {
 
 func TestValidateSchedulerIntervalInvalid(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -439,7 +470,7 @@ func TestValidateSchedulerIntervalInvalid(t *testing.T) {
 
 func TestValidateSchedulerResourcePolicyDefaults(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},
@@ -456,7 +487,7 @@ func TestValidateSchedulerResourcePolicyDefaults(t *testing.T) {
 
 func TestValidateSchedulerResourcePolicyInvalid(t *testing.T) {
 	cfg := Config{
-		Server:    ServerConfig{Port: 8443, TLS: TLSConfig{Enabled: false}},
+		Server:    ServerConfig{Port: 8443, TLS: validServerTLSConfig()},
 		Databases: DatabasesConfig{System: DatabaseTargetConfig{Engine: "mysql", MySQL: MySQLConfig{Database: "ct_system", Port: 3306}}},
 		State:     StateConfig{FilePath: "state/daemon.state"},
 		Logging:   LoggingConfig{Level: "info", Dir: "logs"},

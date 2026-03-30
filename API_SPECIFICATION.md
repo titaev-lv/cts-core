@@ -74,7 +74,21 @@ REST API (stateless):
   - target: Admin configuration
   - target: Bulk operations
   - target: Reporting & analytics
+  - target: Recovery/replay результатов (fallback path, не hot path)
 ```
+
+### 1.3 Trader Identity Rules (normative)
+
+- Для trader WS identity выводится только из CN клиентского сертификата (mTLS).
+- `payload.trader_id` не используется для идентификации.
+- В trader channel допускаются только клиентские сертификаты с `OU=Trading`.
+- CN должен быть уникальным в `TRADER.CERTIFICATE_CN`.
+- При перевыпуске сертификата CN должен оставаться неизменным; иначе требуется отдельная миграция identity.
+- Runtime-логика статусов `pending` / `active` / `suspended` привязана к CN-derived identity.
+
+Политика transport для runtime:
+- `trade.result` и `monitor.result` передаются от `trader` в `cts-core` через WebSocket (основной путь).
+- REST для этих данных допускается только как fallback/replay для восстановления после сбоев и дозаливки исторических батчей.
 
 ---
 
@@ -153,7 +167,6 @@ event:
   "action": "trader.register",
   "request_id": "req-1",
   "payload": {
-    "trader_id": "trader-eu-1",
     "version": "1.0.0",
     "region": "eu-frankfurt",
     "capabilities": ["binance", "kucoin", "bybit", "okx"],
@@ -215,10 +228,10 @@ event:
   "ts": 1737823200001,
   "payload": {
     "code": "INVALID_PAYLOAD",
-    "message": "trader_id is required",
+    "message": "version is required",
     "details": {
-      "field": "trader_id",
-      "path": "payload.trader_id",
+      "field": "version",
+      "path": "payload.version",
       "expected_type": "string",
       "reason": "required"
     }
@@ -238,7 +251,7 @@ Bootstrap rules after `trader.register_ack`:
 
 **Errors:**
 - `INVALID_MESSAGE` - malformed JSON, non-text frame, or unsupported message type
-- `INVALID_PAYLOAD` - payload validation error (missing `trader_id`, `version`, or bad JSON)
+- `INVALID_PAYLOAD` - payload validation error (missing `version` or bad JSON)
 - `UNKNOWN_ACTION` - unsupported WS action
 - `DUPLICATE_CONNECTION` - duplicate `trader.register` in same WS session
 - `UNSUPPORTED_VERSION` - unsupported `protocol_version`
@@ -259,7 +272,6 @@ Bootstrap rules after `trader.register_ack`:
   "type": "event",
   "action": "trader.heartbeat",
   "payload": {
-    "trader_id": "trader-eu-1",
     "session_id": "session-uuid",
     "status": "active",
     "load_index": 0.42,
@@ -302,7 +314,6 @@ Bootstrap rules after `trader.register_ack`:
   "action": "trader.heartbeat",
   "request_id": "hb-1",
   "payload": {
-    "trader_id": "trader-eu-1",
     "session_id": "session-uuid",
     "status": "active"
   }
@@ -332,7 +343,7 @@ Bootstrap rules after `trader.register_ack`:
 
 **Validation rules (current):**
 - `trader.register` must be completed before heartbeat.
-- `payload.trader_id` is required and must match registered trader.
+- `payload.trader_id` (if present) is ignored for identity; identity is derived from certificate CN.
 - if `payload.session_id` is set, it must match active session.
 - Heartbeat payload must include telemetry needed for scheduler profile (`task_stats`, `exchange_stats`, `system_metrics`).
 - Trader reports normalized `load_index` (`0..1`) on each heartbeat (or in paired `metrics.report`), CTS-Core stores and aggregates this value.
@@ -546,6 +557,8 @@ CTS-Core при получении trade.result:
 
 **Note:** Нет response, но CTS-Core acknowledgement через heartbeat.
 
+**Transport policy:** `trade.result` - WS-first канал для runtime. REST допускается только как fallback/replay контур (операционные recovery-сценарии), а не основной поток доставки.
+
 ---
 
 #### 2.4.5 monitor.result (event)
@@ -591,6 +604,8 @@ CTS-Core при получении trade.result:
 ```
 
 **Note:** Отправляется batch каждые 5 минут. Данные также пишутся напрямую в ClickHouse.
+
+**Transport policy:** `monitor.result` - WS-first канал для runtime. REST допускается только как fallback/replay контур, если требуется восстановительная доставка после рассинхрона.
 
 ---
 
@@ -1101,7 +1116,7 @@ Authorization: Bearer <JWT-token>
 Список всех трейдеров.
 
 **Query params:**
-- `status` (optional): `registered`, `active`, `suspended`, `decommissioned`
+- `status` (optional): `pending`, `active`, `suspended`, `decommissioned`
 - `region` (optional): `eu-frankfurt`, `us-east`, etc.
 - `limit` (optional): default 100
 - `offset` (optional): default 0
@@ -1170,7 +1185,7 @@ Authorization: Bearer <JWT-token>
 
 #### POST /api/v1/traders
 
-Регистрация нового трейдера (pre-registration).
+Админский create/update профиля трейдера (не обязателен для первого подключения).
 
 **Request:**
 ```json
@@ -1191,7 +1206,7 @@ Authorization: Bearer <JWT-token>
     "trader": {
       "id": 26,
       "trader_id": "trader-us-1",
-      "status": "registered",
+      "status": "pending",
       "date_create": "2026-01-27T15:05:00Z"
     }
   }
@@ -1637,7 +1652,8 @@ Version info.
 
 **Traders:**
 - **mTLS certificate** with `OU=Trading` in subject
-- Certificate CN must match `trader_id` in database
+- Certificate CN is canonical `trader_id` in database (`TRADER.CERTIFICATE_CN`)
+- `payload.trader_id` does not participate in identity resolution
 - CTS-Core validates certificate during TLS handshake
 
 **Web UI:**
@@ -1712,12 +1728,12 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
   "ts": 1737823200001,
   "payload": {
     "code": "INVALID_PAYLOAD",
-    "message": "trader_id does not match registered trader",
+    "message": "session_id does not match active session",
     "details": {
-      "field": "trader_id",
-      "path": "payload.trader_id",
-      "expected": "trader-eu-1",
-      "received": "other-trader",
+      "field": "session_id",
+      "path": "payload.session_id",
+      "expected": "session-uuid",
+      "received": "other-session",
       "reason": "mismatch"
     }
   }
@@ -1764,7 +1780,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | `RATE_LIMIT_EXCEEDED` | 429 | Превышен rate limit |
 | `RISK_LIMIT_EXCEEDED` | 429 | Превышен risk limit |
 | `EXCHANGE_LIMIT_EXCEEDED` | 429 | Превышен лимит биржи (orders/volume) |
-| `TRADER_NOT_REGISTERED` | 400 | Trader не pre-registered в системе |
+| `TRADER_NOT_REGISTERED` | 400 | Trader identity не найдена/недоступна по certificate CN |
 | `TRADER_OFFLINE` | 503 | Трейдер отключен/недоступен |
 | `TASK_ASSIGNMENT_FAILED` | 500 | Не удалось назначить задачу |
 | `INSUFFICIENT_BALANCE` | 400 | Недостаточно баланса на бирже |

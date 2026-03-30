@@ -65,14 +65,16 @@
 - `TRADER_NAME`
 - `CERTIFICATE_CN` (UNIQUE)
 - `REGION`
-- `STATUS` (`registered|active|suspended|decommissioned`)
+- `STATUS` (`pending|active|suspended|decommissioned`)
 - `MAX_TASKS`
 - `DATE_CREATE`, `DATE_MODIFY`
 - `USER_CREATED`, `USER_MODIFY`, `NOTES`
 
 Правила:
 
-- `CERTIFICATE_CN` обязан совпадать с CN сертификата трейдера.
+- `CERTIFICATE_CN` является каноническим `trader_id` и берется только из CN клиентского сертификата.
+- Поле `payload.trader_id` не используется для аутентификации/идентификации.
+- Для trader WS допускаются только клиентские сертификаты с `OU=Trading`.
 - Удаление через soft-delete: `STATUS='decommissioned'`.
 
 ### TRADER_SESSION

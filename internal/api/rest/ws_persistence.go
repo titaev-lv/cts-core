@@ -4,17 +4,23 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/titaev-lv/cts-core/internal/api/ws"
 	"github.com/titaev-lv/cts-core/internal/db"
 	"github.com/titaev-lv/cts-core/internal/db/models"
 	"github.com/titaev-lv/cts-core/internal/db/repository"
+	"github.com/titaev-lv/cts-core/internal/logger"
 )
 
 type wsSessionPersistence struct {
 	traderRepo        repository.TraderRepository
 	traderSessionRepo repository.TraderSessionRepository
+	auditLog          interface {
+		Info(msg string, args ...any)
+		Warn(msg string, args ...any)
+	}
 }
 
 func newWSSessionPersistence(dbClient *db.MySQLClient) ws.SessionPersistence {
@@ -27,18 +33,48 @@ func newWSSessionPersistence(dbClient *db.MySQLClient) ws.SessionPersistence {
 	return &wsSessionPersistence{
 		traderRepo:        repo.Trader(),
 		traderSessionRepo: repo.TraderSession(),
+		auditLog:          logger.GetAudit("ws_persistence"),
 	}
 }
 
-func (p *wsSessionPersistence) ResolveTraderID(ctx context.Context, traderRef string) (int, error) {
-	trader, err := p.traderRepo.GetByCertificateCN(ctx, traderRef)
+func (p *wsSessionPersistence) ResolveOrCreateTraderByCN(ctx context.Context, certificateCN string) (ws.TraderIdentity, error) {
+	trader, created, err := p.traderRepo.GetOrCreateByCertificateCN(ctx, certificateCN)
 	if err != nil {
-		return 0, err
+		return ws.TraderIdentity{}, err
 	}
 	if trader == nil {
-		return 0, fmt.Errorf("trader not found: %s", traderRef)
+		return ws.TraderIdentity{}, fmt.Errorf("trader not found after resolve-or-create: %s", certificateCN)
 	}
-	return trader.ID, nil
+
+	if created {
+		if err := p.logTraderAutoCreate(ctx, trader); err != nil {
+			p.auditLog.Warn("ws_trader_auto_create_audit_failed", "certificate_cn", trader.CertificateCN, "trader_id", trader.ID, "error", err)
+		}
+	}
+
+	return ws.TraderIdentity{
+		TraderDBID: trader.ID,
+		TraderID:   trader.CertificateCN,
+		Status:     string(trader.Status),
+	}, nil
+}
+
+func (p *wsSessionPersistence) logTraderAutoCreate(ctx context.Context, trader *models.Trader) error {
+	if p.auditLog == nil || trader == nil {
+		return nil
+	}
+
+	p.auditLog.Info("audit",
+		"action", string(models.AuditActionTraderCreate),
+		"resource_type", string(models.ResourceTypeTrader),
+		"resource_id", strconv.Itoa(trader.ID),
+		"success", true,
+		"source", "ws_mtls_auto_create",
+		"certificate_cn", trader.CertificateCN,
+		"status", string(trader.Status),
+		"trader_id", trader.ID,
+	)
+	return nil
 }
 
 func (p *wsSessionPersistence) CreateSession(ctx context.Context, input ws.SessionCreateInput) error {

@@ -1,7 +1,7 @@
 # Phase 2 Smoke Runbook
 
-Updated: 2026-03-14
-Scope: CTS-Core Phase 2 runtime checks (WS lifecycle + restart/shutdown behavior)
+Updated: 2026-03-29
+Scope: CTS-Core hard-cutover runtime checks (TLS + mTLS WS lifecycle + pending gate)
 
 ## 1. Goal
 
@@ -15,7 +15,13 @@ Validate that CTS-Core is operational in docker compose and that the base lifecy
 
 ## 3. Quick Smoke (Automated)
 
-From `services/cts-core`:
+From workspace root (recommended):
+
+```bash
+make smoke-core-ws
+```
+
+Equivalent direct run from `services/cts-core`:
 
 ```bash
 ./tests/smoke_phase2_ws_lifecycle.sh
@@ -39,10 +45,13 @@ SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./tests/smoke_phase2_ws_lifecycle.sh
 
 What the script verifies:
 - health is reachable for already running CTS-Core stack (or starts stack if `SMOKE_SKIP_UP=0`)
-- `/health` is reachable from host (auto-detects `http/https` + `8080/8081`)
+- `/health` is reachable from host over TLS (`https://localhost:8080/health`)
 - `/metrics` is reachable and exposes Prometheus series (`go_goroutines` and `cts_core_ws_active_connections`)
 - CTS-Core process is present in compose status
-- deterministic WS lifecycle via helper client (`tests/smoke_ws_lifecycle_client.go`)
+- deterministic WS lifecycle via helper client (`tests/smoke_ws_lifecycle_client.go`) over `wss://` + mTLS client cert
+- trader identity is derived from certificate CN and auto-created trader has `pending` status
+- pending trader is not assigned in `MONITORING` / `TRADE`
+- `TRADER_CREATE` audit event is present in file log (`services/cts-core/logs/audit.log`)
 - WS lifecycle logs are present (`ws_register`, `ws_heartbeat`, `ws_disconnect|ws_timeout`)
 - optional restart/shutdown checks if `SMOKE_NO_RESTART=0`
 
@@ -57,7 +66,7 @@ docker compose up -d mysql hsm cts-core
 2. Verify health endpoint:
 
 ```bash
-curl -k -sS https://localhost:8080/health || curl -sS http://localhost:8081/health
+curl -k -sS https://localhost:8080/health
 ```
 
 Expected:
@@ -79,7 +88,7 @@ Expected events in normal flow:
 4. Verify metrics endpoint:
 
 ```bash
-curl -k -sS https://localhost:8080/metrics || curl -sS http://localhost:8081/metrics
+curl -k -sS https://localhost:8080/metrics
 ```
 
 Expected series include:
@@ -91,6 +100,11 @@ Expected series include:
 ```bash
 CTS_WS_URL=wss://localhost:8080/ws go run ./tests/smoke_ws_lifecycle_client.go
 ```
+
+Если используете нестандартные пути сертификатов, задайте:
+- `CTS_WS_CLIENT_CA_PATH`
+- `CTS_WS_CLIENT_CERT_PATH`
+- `CTS_WS_CLIENT_KEY_PATH`
 
 ## 5. Restart Behavior Check
 
@@ -104,14 +118,14 @@ docker compose restart cts-core
 
 ```bash
 docker compose ps cts-core
-curl -k -sS https://localhost:8080/health || curl -sS http://localhost:8081/health
+curl -k -sS https://localhost:8080/health
 ```
 
 3. Validate state continues to update (`state.updated_at` moves forward):
 
 ```bash
 sleep 2
-curl -k -sS https://localhost:8080/health || curl -sS http://localhost:8081/health
+curl -k -sS https://localhost:8080/health
 ```
 
 ## 6. Shutdown Behavior Check
@@ -132,7 +146,7 @@ docker compose ps cts-core
 
 ```bash
 docker compose start cts-core
-curl -k -sS https://localhost:8080/health || curl -sS http://localhost:8081/health
+curl -k -sS https://localhost:8080/health
 ```
 
 ## 7. Troubleshooting
@@ -142,6 +156,8 @@ curl -k -sS https://localhost:8080/health || curl -sS http://localhost:8081/heal
   - inspect logs: `docker compose logs --since 5m cts-core`
 - No WS lifecycle logs:
   - ensure trader (or any WS client) actually sends `trader.register` + `trader.heartbeat`
+- Missing auto-create audit event:
+  - inspect `services/cts-core/logs/audit.log` for `action=TRADER_CREATE`
 - DB/HSM degraded:
   - check dependency containers and logs (`mysql`, `hsm`)
 
