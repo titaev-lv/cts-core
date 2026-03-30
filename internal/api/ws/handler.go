@@ -62,6 +62,8 @@ type wsConnectionEntry struct {
 	conn      *websocket.Conn
 	writeMu   sync.Mutex
 	seqMu     sync.Mutex
+	closed    chan struct{}
+	closeOnce sync.Once
 
 	seqTrackingEnabled bool
 	inboundSeq         uint64
@@ -76,7 +78,7 @@ type wsConnectionEntry struct {
 
 const (
 	wsCloseCodeSequenceGap = 4009
-	defaultWSWriteTimeout  = 10 * time.Second
+	defaultWSWriteTimeout  = 5 * time.Second
 
 	wsDisconnectReasonClose4009 = "close_4009_sequence_gap"
 	wsDisconnectReasonTimeout   = "timeout"
@@ -421,12 +423,12 @@ func NewHandler() *Handler {
 func NewHandlerWithOptions(opts HandlerOptions) *Handler {
 	heartbeatInterval := opts.HeartbeatInterval
 	if heartbeatInterval <= 0 {
-		heartbeatInterval = 5 * time.Second
+		heartbeatInterval = 10 * time.Second
 	}
 
 	heartbeatTimeout := opts.HeartbeatTimeout
 	if heartbeatTimeout <= 0 {
-		heartbeatTimeout = 15 * time.Second
+		heartbeatTimeout = 30 * time.Second
 	}
 
 	writeTimeout := normalizeWriteTimeout(opts.WriteTimeout)
@@ -634,10 +636,14 @@ func (h *Handler) Serve(c *gin.Context) {
 			continue
 		}
 
-		if ok, gap, expected := connEntry.observeInboundSeq(msg.Seq); !ok {
+		if ok, gap, duplicate, expected := connEntry.observeInboundSeq(msg.Seq); !ok {
 			if gap {
 				h.closeOnSequenceGap(connEntry, connID, msgRequestID, expected, msg.Seq)
 				return
+			}
+			if duplicate {
+				h.accessLog.Debug("ws_duplicate_seq_ignored", "conn_id", connID, "request_id", msgRequestID, "expected_seq", expected, "received_seq", msg.Seq)
+				continue
 			}
 			h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "Invalid sequence", map[string]interface{}{"expected_seq": expected, "received_seq": msg.Seq}))
 			continue
@@ -923,7 +929,7 @@ func (h *Handler) DispatchLatencyTest(_ context.Context, sessionID string, trade
 }
 
 func (h *Handler) addConnection(sessionID string, conn *websocket.Conn) *wsConnectionEntry {
-	entry := &wsConnectionEntry{sessionID: sessionID, conn: conn}
+	entry := &wsConnectionEntry{sessionID: sessionID, conn: conn, closed: make(chan struct{})}
 	h.connectionsMu.Lock()
 	h.connections[sessionID] = entry
 	h.connectionsByConn[conn] = entry
@@ -946,6 +952,7 @@ func (h *Handler) removeConnection(sessionID string) {
 	if sessionID == "" {
 		return
 	}
+	var entry *wsConnectionEntry
 	h.connectionsMu.Lock()
 	entry, ok := h.connections[sessionID]
 	if ok {
@@ -955,6 +962,9 @@ func (h *Handler) removeConnection(sessionID string) {
 		}
 	}
 	h.connectionsMu.Unlock()
+	if entry != nil {
+		entry.markClosed()
+	}
 }
 
 func writeWithDeadline(conn *websocket.Conn, timeout time.Duration, fn func(*websocket.Conn, time.Time) error) error {
@@ -1076,10 +1086,45 @@ func (h *Handler) CloseAll(code int, reason string) {
 	}
 	h.connectionsMu.RUnlock()
 
+	waitTimeout := h.closeHandshakeWaitTimeout()
+
 	for _, entry := range entries {
 		if err := h.closeConnection(entry, code, reason); err != nil {
 			h.accessLog.Warn("ws_close_failed", "session_id", entry.sessionID, "error", err)
 		}
+		if !h.waitForConnectionClose(entry, waitTimeout) {
+			h.accessLog.Warn("ws_close_wait_timeout", "session_id", entry.sessionID, "timeout", waitTimeout)
+		}
+	}
+}
+
+func (h *Handler) closeHandshakeWaitTimeout() time.Duration {
+	wait := h.writeTimeout
+	if wait <= 0 {
+		wait = defaultWSWriteTimeout
+	}
+	if wait > 2*time.Second {
+		return 2 * time.Second
+	}
+	return wait
+}
+
+func (h *Handler) waitForConnectionClose(entry *wsConnectionEntry, timeout time.Duration) bool {
+	if entry == nil || entry.closed == nil {
+		return true
+	}
+	if timeout <= 0 {
+		return false
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-entry.closed:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
@@ -1158,9 +1203,9 @@ func normalizeAllowedValue(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
 }
 
-func (e *wsConnectionEntry) observeInboundSeq(seq uint64) (ok bool, gap bool, expected uint64) {
+func (e *wsConnectionEntry) observeInboundSeq(seq uint64) (ok bool, gap bool, duplicate bool, expected uint64) {
 	if e == nil {
-		return true, false, 0
+		return true, false, false, 0
 	}
 
 	e.seqMu.Lock()
@@ -1168,30 +1213,30 @@ func (e *wsConnectionEntry) observeInboundSeq(seq uint64) (ok bool, gap bool, ex
 
 	if !e.seqTrackingEnabled {
 		if seq == 0 {
-			return true, false, 0
+			return true, false, false, 0
 		}
 		e.seqTrackingEnabled = true
 		expected = 1
 		if seq != expected {
-			return false, true, expected
+			return false, true, false, expected
 		}
 		e.inboundSeq = seq
-		return true, false, expected
+		return true, false, false, expected
 	}
 
 	expected = e.inboundSeq + 1
 	if seq == 0 {
-		return false, false, expected
+		return false, false, false, expected
 	}
 	if seq == expected {
 		e.inboundSeq = seq
-		return true, false, expected
+		return true, false, false, expected
 	}
 	if seq > expected {
-		return false, true, expected
+		return false, true, false, expected
 	}
 
-	return false, false, expected
+	return false, false, true, expected
 }
 
 func (e *wsConnectionEntry) observePeerAck(ack uint64) {
@@ -1240,6 +1285,17 @@ func (e *wsConnectionEntry) recordPongReceived() {
 	}
 	e.lastPongAt = time.Now()
 	e.pingMu.Unlock()
+}
+
+func (e *wsConnectionEntry) markClosed() {
+	if e == nil {
+		return
+	}
+	e.closeOnce.Do(func() {
+		if e.closed != nil {
+			close(e.closed)
+		}
+	})
 }
 
 type pingSnapshot struct {

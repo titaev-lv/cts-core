@@ -385,10 +385,10 @@ func main() {
 
 	httpServer.TLSConfig = &tls.Config{
 		MinVersion: tls.VersionTLS13,
-		ClientAuth: tls.VerifyClientCertIfGiven,
+		ClientAuth: tls.RequireAndVerifyClientCert,
 		ClientCAs:  clientCAs,
 	}
-	log.Info("WS client certificate verification enabled", "ca_path", cfg.Server.TLS.CAPath)
+	log.Info("WS strict mTLS enabled", "ca_path", cfg.Server.TLS.CAPath, "client_cert_required", true)
 
 	if cfg.Server.HTTP2 != nil {
 		parsed, err := cfg.Server.HTTP2.Parse()

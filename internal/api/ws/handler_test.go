@@ -66,6 +66,38 @@ func TestAuthorizeWSClientCertificateAllowlistMatch(t *testing.T) {
 	}
 }
 
+func TestWSSHandshakeRejectsMissingClientCertificate(t *testing.T) {
+	g := gin.New()
+	h := NewHandlerWithOptions(HandlerOptions{RequireClientCert: true})
+	g.GET("/ws", h.Serve)
+
+	caCert, caKey, caPool := generateTestCA(t)
+	serverCert := generateSignedTLSCert(t, caCert, caKey, "localhost", false)
+
+	ts := httptest.NewUnstartedServer(g)
+	ts.TLS = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+	}
+	ts.StartTLS()
+	defer ts.Close()
+
+	wsURL := "wss" + strings.TrimPrefix(ts.URL, "https") + "/ws"
+	dialer := websocket.Dialer{TLSClientConfig: &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		RootCAs:    caPool,
+		ServerName: "localhost",
+	}}
+
+	conn, _, err := dialer.Dial(wsURL, nil)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatalf("expected TLS handshake failure without client certificate")
+	}
+}
+
 func TestRegisterUsesCertificateCNWhenClientCertRequired(t *testing.T) {
 	h := NewHandlerWithOptions(HandlerOptions{RequireClientCert: true})
 	conn := dialTestWSSWithHandlerAndClientCN(t, h, "trader-cn-1")
@@ -760,6 +792,123 @@ func TestSequenceGapClosesConnection(t *testing.T) {
 	}
 	if closeErr.Code != wsCloseCodeSequenceGap {
 		t.Fatalf("expected close code %d, got %d", wsCloseCodeSequenceGap, closeErr.Code)
+	}
+}
+
+func TestDuplicateInboundSeqIsIgnored(t *testing.T) {
+	conn := dialTestWS(t)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	registerReq := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		Seq:       1,
+		RequestID: "dup-reg-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-dup-1",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, registerReq)
+	_ = readEnvelope(t, conn)
+
+	hb := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		Seq:       2,
+		RequestID: "dup-hb-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-dup-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, hb)
+
+	hbAck := readEnvelope(t, conn)
+	if hbAck.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q, got %q", actionHeartbeatAck, hbAck.Action)
+	}
+
+	// Duplicate seq frame should be ignored without protocol error.
+	hb.RequestID = "dup-hb-2"
+	writeJSON(t, conn, hb)
+
+	nextHB := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderHeartbeat,
+		Seq:       3,
+		RequestID: "dup-hb-3",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "trader-dup-1",
+			"status":    "active",
+		}),
+	}
+	writeJSON(t, conn, nextHB)
+	nextAck := readEnvelope(t, conn)
+	if nextAck.Action != actionHeartbeatAck {
+		t.Fatalf("expected action %q after duplicate, got %q", actionHeartbeatAck, nextAck.Action)
+	}
+	if nextAck.RequestID != "dup-hb-3" {
+		t.Fatalf("expected ack for request_id dup-hb-3, got %q", nextAck.RequestID)
+	}
+}
+
+func TestCloseAllClosesActiveConnection(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{WriteTimeout: 250 * time.Millisecond})
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+	registerTrader(t, conn, "trader-close-all-1", "close-all-reg-1")
+
+	done := make(chan struct{})
+	go func() {
+		h.CloseAll(websocket.CloseNormalClosure, "server_shutdown")
+		close(done)
+	}()
+
+	_, _, err := readMessageWithTimeout(conn, 500*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected close error after CloseAll")
+	}
+	if _, ok := err.(*websocket.CloseError); !ok {
+		t.Fatalf("expected websocket.CloseError, got %T (%v)", err, err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatalf("CloseAll did not complete in time")
+	}
+
+	waitForCondition(t, 500*time.Millisecond, func() bool {
+		return h.GetStats().ActiveConnections == 0
+	})
+}
+
+func TestWaitForConnectionCloseTimeout(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{WriteTimeout: 100 * time.Millisecond})
+	entry := &wsConnectionEntry{closed: make(chan struct{})}
+
+	if h.waitForConnectionClose(entry, 30*time.Millisecond) {
+		t.Fatalf("expected waitForConnectionClose to time out")
+	}
+}
+
+func TestWaitForConnectionCloseSignals(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{WriteTimeout: 100 * time.Millisecond})
+	entry := &wsConnectionEntry{closed: make(chan struct{})}
+
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		entry.markClosed()
+	}()
+
+	if !h.waitForConnectionClose(entry, 200*time.Millisecond) {
+		t.Fatalf("expected waitForConnectionClose to observe close signal")
 	}
 }
 

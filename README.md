@@ -17,11 +17,11 @@
   - integration coverage: health + metrics + ws lifecycle path
 - WS observability delta:
   - Добавлены метрики отключений: `cts_core_ws_disconnect_total`, `cts_core_ws_disconnect_close_4009_total`, `cts_core_ws_disconnect_reason_total{reason="..."}` для отслеживания reconnect/close-4009.
-  - Сервер при shutdown шлет WS Close (1000) с reason `server_shutdown`, write-deadline унифицирована и настраивается через `session.write_timeout` (дефолт 10s, WAN-friendly) для всех send/control кадров.
+  - Сервер при shutdown шлет WS Close (1000) с reason `server_shutdown`, write-deadline унифицирована и настраивается через `session.write_timeout` (дефолт 5s) для всех send/control кадров.
 
 Настройка WS write timeout:
 
-- YAML: `session.write_timeout` (пример в `conf/config.example.yaml` = `10s`).
+- YAML: `session.write_timeout` (пример в `conf/config.example.yaml` = `5s`).
 - Рекомендуемый диапазон: `> 0` и `<= 24h`.
 
 ## WS Identity Policy (Trader Channel)

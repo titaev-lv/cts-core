@@ -126,9 +126,9 @@ logging:
 
 # Session management (Phase 1.4)
 session:
-  heartbeat_interval: 5s
-  heartbeat_timeout: 15s         # 3 missed heartbeats; disconnect reason="timeout" when read deadline is exceeded
-  write_timeout: 10s             # WAN-friendly WS write/control timeout
+  heartbeat_interval: 10s
+  heartbeat_timeout: 30s         # 3 missed heartbeats; disconnect reason="timeout" when read deadline is exceeded
+  write_timeout: 5s              # WS write/control timeout baseline
   grace_period: 60s
   cleanup_interval: 300s         # 5 minutes
   protocol_version: "2"

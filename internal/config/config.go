@@ -143,13 +143,13 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Session.HeartbeatInterval == 0 {
-		c.Session.HeartbeatInterval = 5 * time.Second
+		c.Session.HeartbeatInterval = 10 * time.Second
 	}
 	if c.Session.HeartbeatTimeout == 0 {
-		c.Session.HeartbeatTimeout = 15 * time.Second
+		c.Session.HeartbeatTimeout = 30 * time.Second
 	}
 	if c.Session.WriteTimeout == 0 {
-		c.Session.WriteTimeout = 10 * time.Second
+		c.Session.WriteTimeout = 5 * time.Second
 	}
 	if c.Session.GracePeriod == 0 {
 		c.Session.GracePeriod = 60 * time.Second
