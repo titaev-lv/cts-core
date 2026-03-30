@@ -41,7 +41,7 @@ databases:
     mysql:
       host: "mysql"
       port: 3306
-      user: "root"
+      user: "cts-core"
       password: "root"          # TODO: Use env var CTS_DATABASES_SYSTEM_MYSQL_PASSWORD in production
       database: "ct_system"
 
@@ -51,7 +51,7 @@ databases:
         conn_max_lifetime: 300s      # 5 minutes
 
       tls:
-        enabled: false               # Set to true for production with mTLS certificates
+        enabled: true
         ca_path: "pki/ca/ca.crt"
         cert_path: "pki/client/cts-core-mysql.crt"
         key_path: "pki/client/cts-core-mysql.key"
