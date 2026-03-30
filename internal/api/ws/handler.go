@@ -711,6 +711,10 @@ func (h *Handler) Serve(c *gin.Context) {
 						LastHeartbeat:  time.UnixMilli(nowMs).UTC(),
 					})
 				}); err != nil {
+					if errors.Is(err, ErrActiveSessionExists) {
+						h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errDuplicateConnection, "Trader already has an active session", map[string]interface{}{"trader_id": canonicalTraderID}))
+						continue
+					}
 					h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInternalError, "Failed to create trader session", nil))
 					continue
 				}
@@ -1449,6 +1453,9 @@ func (h *Handler) withDBWriteRetry(op string, fn func(ctx context.Context) error
 		cancel()
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, ErrActiveSessionExists) {
+			return err
 		}
 
 		lastErr = err

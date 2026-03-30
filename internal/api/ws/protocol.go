@@ -2,6 +2,7 @@ package ws
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -34,6 +35,8 @@ const (
 	errMessageTooLarge     = "MESSAGE_TOO_LARGE"
 	errActionFlood         = "ACTION_FLOOD"
 )
+
+var ErrActiveSessionExists = errors.New("active trader session already exists")
 
 var supportedWSErrorCodes = map[string]struct{}{
 	errInvalidMessage:      {},

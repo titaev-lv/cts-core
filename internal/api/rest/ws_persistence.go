@@ -3,9 +3,11 @@ package rest
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strconv"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"github.com/titaev-lv/cts-core/internal/api/ws"
 	"github.com/titaev-lv/cts-core/internal/db"
@@ -86,7 +88,13 @@ func (p *wsSessionPersistence) CreateSession(ctx context.Context, input ws.Sessi
 		ConnectedAt:    input.ConnectedAt,
 		LastHeartbeat:  input.LastHeartbeat,
 	}
-	return p.traderSessionRepo.Create(ctx, session)
+	if err := p.traderSessionRepo.Create(ctx, session); err != nil {
+		if isMySQLDuplicateEntryError(err) {
+			return fmt.Errorf("%w: trader_id=%d", ws.ErrActiveSessionExists, input.TraderID)
+		}
+		return err
+	}
+	return nil
 }
 
 func (p *wsSessionPersistence) UpdateHeartbeat(ctx context.Context, sessionID string) error {
@@ -123,4 +131,9 @@ func nullableString(v string) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: v, Valid: true}
+}
+
+func isMySQLDuplicateEntryError(err error) bool {
+	var mysqlErr *mysqlDriver.MySQLError
+	return errors.As(err, &mysqlErr) && mysqlErr.Number == 1062
 }

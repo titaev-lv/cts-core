@@ -958,6 +958,37 @@ func TestRegisterFailsWhenTraderResolveFails(t *testing.T) {
 	assertErrorCode(t, resp, errInternalError)
 }
 
+func TestRegisterFailsWithDuplicateConnectionWhenActiveSessionExists(t *testing.T) {
+	persistence := &testSessionPersistence{
+		resolvedTrader: TraderIdentity{TraderDBID: 101, TraderID: defaultTestClientCN, Status: "active"},
+		createErr:      ErrActiveSessionExists,
+	}
+	h := NewHandlerWithOptions(HandlerOptions{
+		Persistence: persistence,
+	})
+
+	conn := dialTestWSWithHandler(t, h)
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "active-session-conflict-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "ignored-by-cn",
+			"version":   "1.0.0",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	assertErrorCode(t, resp, errDuplicateConnection)
+	assertErrorDetail(t, resp, "trader_id", defaultTestClientCN)
+}
+
 func TestUnsupportedProtocolVersion(t *testing.T) {
 	conn := dialTestWS(t)
 	defer conn.Close()
