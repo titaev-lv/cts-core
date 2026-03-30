@@ -54,8 +54,8 @@ func main() {
 	}
 
 	caPath := envOrDefault("CTS_WS_CLIENT_CA_PATH", "../../volumes/pki/ca/ca.crt")
-	certPath := envOrDefault("CTS_WS_CLIENT_CERT_PATH", "../../volumes/pki/cts-core/clients/trader-2/trader-2-cts.crt")
-	keyPath := envOrDefault("CTS_WS_CLIENT_KEY_PATH", "../../volumes/pki/cts-core/clients/trader-2/trader-2-cts.key")
+	certPath := envOrDefault("CTS_WS_CLIENT_CERT_PATH", "../../volumes/pki/cts-core/clients/trader-1/trader-1-cts.crt")
+	keyPath := envOrDefault("CTS_WS_CLIENT_KEY_PATH", "../../volumes/pki/cts-core/clients/trader-1/trader-1-cts.key")
 	serverName := os.Getenv("CTS_WS_SERVER_NAME")
 	if serverName == "" {
 		serverName = parsed.Hostname()
@@ -77,7 +77,7 @@ func main() {
 
 	expectedTraderID := os.Getenv("CTS_SMOKE_CERTIFICATE_CN")
 	if expectedTraderID == "" {
-		expectedTraderID = "trader-2-cts-client"
+		expectedTraderID = "trader-1-cts-client"
 	}
 
 	dialer := *websocket.DefaultDialer
