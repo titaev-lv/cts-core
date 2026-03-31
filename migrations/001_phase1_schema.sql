@@ -23,6 +23,14 @@
 --   - Exchange rate limits are IP-bound (trader's IP, not Core's)
 --   - Traders report metrics to Core via TRADER_EXCHANGE_RESOURCE
 --   - Core uses metrics for load balancing, but traders make final decisions
+--
+-- DBeaver line-by-line mode:
+--   - This migration is executable statement-by-statement.
+--   - For each guarded block, run all statements in order:
+--       SET @sql = IF(...);
+--       PREPARE stmt FROM @sql;
+--       EXECUTE stmt;
+--       DEALLOCATE PREPARE stmt;
 -- ============================================================================
 
 USE ct_system;

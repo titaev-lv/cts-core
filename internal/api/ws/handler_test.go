@@ -1075,6 +1075,9 @@ func TestSessionPersistenceLifecycle(t *testing.T) {
 	if persistence.createCalls() == 0 {
 		t.Fatalf("expected CreateSession to be called")
 	}
+	if persistence.releaseCalls() == 0 {
+		t.Fatalf("expected UpdateTraderRelease to be called")
+	}
 	if persistence.heartbeatCalls() == 0 {
 		t.Fatalf("expected UpdateHeartbeat to be called")
 	}
@@ -1772,10 +1775,12 @@ type testSessionPersistence struct {
 	resolvedTrader TraderIdentity
 	resolveErr     error
 	createErr      error
+	releaseErr     error
 	heartbeatErr   error
 	finalizeErr    error
 	resolveCount   int
 	createCount    int
+	releaseCount   int
 	heartbeatCount int
 	finalizeCount  int
 }
@@ -1795,6 +1800,13 @@ func (p *testSessionPersistence) CreateSession(_ context.Context, _ SessionCreat
 	defer p.mu.Unlock()
 	p.createCount++
 	return p.createErr
+}
+
+func (p *testSessionPersistence) UpdateTraderRelease(_ context.Context, _ int, _ string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.releaseCount++
+	return p.releaseErr
 }
 
 func (p *testSessionPersistence) UpdateHeartbeat(_ context.Context, _ string) error {
@@ -1821,6 +1833,12 @@ func (p *testSessionPersistence) createCalls() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.createCount
+}
+
+func (p *testSessionPersistence) releaseCalls() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.releaseCount
 }
 
 func (p *testSessionPersistence) heartbeatCalls() int {

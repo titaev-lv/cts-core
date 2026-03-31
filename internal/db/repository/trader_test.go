@@ -218,6 +218,22 @@ func TestTraderRepository_UpdateStatus(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestTraderRepository_UpdateRelease(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	require.NoError(t, err)
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	repo := NewTraderRepository(sqlxDB)
+
+	mock.ExpectExec("UPDATE TRADER").
+		WithArgs("2.0.2", sqlmock.AnyArg(), 1).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	err = repo.UpdateRelease(context.Background(), 1, "2.0.2")
+	assert.NoError(t, err)
+}
+
 func TestTraderRepository_Delete(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
 	require.NoError(t, err)

@@ -24,6 +24,8 @@ type TraderRepository interface {
 	Update(ctx context.Context, trader *models.Trader) error
 	// UpdateStatus changes trader status
 	UpdateStatus(ctx context.Context, id int, status models.TraderStatus) error
+	// UpdateRelease stores latest trader build release reported during register
+	UpdateRelease(ctx context.Context, id int, release string) error
 	// Delete soft-deletes a trader (sets status to decommissioned)
 	Delete(ctx context.Context, id int) error
 }

@@ -55,6 +55,10 @@ type Trader struct {
 	//   'decommissioned' - выведен из эксплуатации
 	Status TraderStatus `json:"status" db:"STATUS"`
 
+	// RELEASE_VERSION - последняя релизная версия, присланная трейдером при trader.register
+	// Пример: "2.0.2", "2026.03.31-rc1"
+	ReleaseVersion sql.NullString `json:"release_version,omitempty" db:"RELEASE_VERSION"`
+
 	// Capacity Management
 	// MAX_TASKS - максимум параллельных задач для этого трейдера
 	// По умолчанию 10. Ограничивает нагрузку на трейдер-демон.

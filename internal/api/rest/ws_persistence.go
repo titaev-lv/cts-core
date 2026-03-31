@@ -97,6 +97,13 @@ func (p *wsSessionPersistence) CreateSession(ctx context.Context, input ws.Sessi
 	return nil
 }
 
+func (p *wsSessionPersistence) UpdateTraderRelease(ctx context.Context, traderID int, release string) error {
+	if traderID <= 0 {
+		return fmt.Errorf("invalid trader id for release update: %d", traderID)
+	}
+	return p.traderRepo.UpdateRelease(ctx, traderID, release)
+}
+
 func (p *wsSessionPersistence) UpdateHeartbeat(ctx context.Context, sessionID string) error {
 	return p.traderSessionRepo.UpdateHeartbeat(ctx, sessionID)
 }

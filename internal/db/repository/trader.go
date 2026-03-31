@@ -56,7 +56,7 @@ func (r *traderRepository) Create(ctx context.Context, trader *models.Trader) er
 func (r *traderRepository) GetByID(ctx context.Context, id int) (*models.Trader, error) {
 	query := `
 		SELECT ID, TRADER_NAME, CERTIFICATE_CN, REGION, STATUS, MAX_TASKS,
-		       DATE_CREATE, DATE_MODIFY, USER_CREATED, USER_MODIFY, NOTES
+		       RELEASE_VERSION, DATE_CREATE, DATE_MODIFY, USER_CREATED, USER_MODIFY, NOTES
 		FROM TRADER
 		WHERE ID = ?
 	`
@@ -77,7 +77,7 @@ func (r *traderRepository) GetByID(ctx context.Context, id int) (*models.Trader,
 func (r *traderRepository) GetByCertificateCN(ctx context.Context, cn string) (*models.Trader, error) {
 	query := `
 		SELECT ID, TRADER_NAME, CERTIFICATE_CN, REGION, STATUS, MAX_TASKS,
-		       DATE_CREATE, DATE_MODIFY, USER_CREATED, USER_MODIFY, NOTES
+		       RELEASE_VERSION, DATE_CREATE, DATE_MODIFY, USER_CREATED, USER_MODIFY, NOTES
 		FROM TRADER
 		WHERE CERTIFICATE_CN = ?
 	`
@@ -156,7 +156,7 @@ func (r *traderRepository) GetOrCreateByCertificateCN(ctx context.Context, cn st
 func (r *traderRepository) List(ctx context.Context, status *models.TraderStatus) ([]*models.Trader, error) {
 	query := `
 		SELECT ID, TRADER_NAME, CERTIFICATE_CN, REGION, STATUS, MAX_TASKS,
-		       DATE_CREATE, DATE_MODIFY, USER_CREATED, USER_MODIFY, NOTES
+		       RELEASE_VERSION, DATE_CREATE, DATE_MODIFY, USER_CREATED, USER_MODIFY, NOTES
 		FROM TRADER
 	`
 	args := []interface{}{}
@@ -223,6 +223,40 @@ func (r *traderRepository) UpdateStatus(ctx context.Context, id int, status mode
 	result, err := r.db.ExecContext(ctx, query, status, time.Now(), id)
 	if err != nil {
 		return fmt.Errorf("failed to update trader status: %w", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("trader not found: id=%d", id)
+	}
+
+	return nil
+}
+
+// UpdateRelease stores latest trader release reported by runtime registration.
+func (r *traderRepository) UpdateRelease(ctx context.Context, id int, release string) error {
+	release = strings.TrimSpace(release)
+	var releaseValue interface{}
+	if release == "" {
+		releaseValue = nil
+	} else {
+		releaseValue = release
+	}
+
+	query := `
+		UPDATE TRADER
+		SET RELEASE_VERSION = ?,
+		    DATE_MODIFY = ?
+		WHERE ID = ?
+	`
+
+	result, err := r.db.ExecContext(ctx, query, releaseValue, time.Now(), id)
+	if err != nil {
+		return fmt.Errorf("failed to update trader release: %w", err)
 	}
 
 	rows, err := result.RowsAffected()

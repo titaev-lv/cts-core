@@ -102,6 +102,7 @@ type TraderIdentity struct {
 type SessionPersistence interface {
 	ResolveOrCreateTraderByCN(ctx context.Context, certificateCN string) (TraderIdentity, error)
 	CreateSession(ctx context.Context, input SessionCreateInput) error
+	UpdateTraderRelease(ctx context.Context, traderID int, release string) error
 	UpdateHeartbeat(ctx context.Context, sessionID string) error
 	FinalizeSession(ctx context.Context, sessionID string, reason string, errorMsg *string) error
 }
@@ -674,6 +675,10 @@ func (h *Handler) Serve(c *gin.Context) {
 			nowMs := time.Now().UnixMilli()
 			role := normalizeTraderRole(req.Role)
 			capabilities := normalizeCapabilities(req.Capabilities)
+			clientRelease := strings.TrimSpace(req.Release)
+			if clientRelease == "" {
+				clientRelease = strings.TrimSpace(req.Version)
+			}
 			availableExchanges := defaultAvailableExchanges()
 			effectiveExchanges := buildEffectiveExchanges(capabilities, availableExchanges)
 			loadIndex, tradeLoadIndex := extractCurrentLoadIndices(req.CurrentLoad)
@@ -720,6 +725,14 @@ func (h *Handler) Serve(c *gin.Context) {
 					continue
 				}
 				persistedSession = true
+
+				if resolvedTraderID > 0 && clientRelease != "" {
+					if err := h.withDBWriteRetry("update_trader_release", func(ctx context.Context) error {
+						return h.persistence.UpdateTraderRelease(ctx, resolvedTraderID, clientRelease)
+					}); err != nil {
+						h.accessLog.Warn("ws_register_release_persist_failed", "conn_id", connID, "request_id", msgRequestID, "trader_id", canonicalTraderID, "release", clientRelease, "error", err)
+					}
+				}
 			}
 
 			session.markRegistered(canonicalTraderID, nowMs)
@@ -741,7 +754,7 @@ func (h *Handler) Serve(c *gin.Context) {
 				AvailableExchanges:     availableExchanges,
 				EffectiveExchanges:     effectiveExchanges,
 			}))
-			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", canonicalTraderID, "protocol_version", msg.ProtocolVersion, "client_version", req.Version, "region", req.Region)
+			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", canonicalTraderID, "protocol_version", msg.ProtocolVersion, "client_release", clientRelease, "client_version", req.Version, "region", req.Region)
 		case actionTraderHeartbeat:
 			if session.traderID == "" {
 				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "trader.register is required before heartbeat", nil))
