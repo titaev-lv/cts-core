@@ -332,8 +332,7 @@ flowchart TB
 │      "type": "request",                                                             │
 │      "action": "trader.register",                                                   │
 │      "payload": {                                                                   │
-│          "trader_id": "trader-eu-1",                                                │
-│          "version": "1.0.0",                                                        │
+│          "release": "v0.0.1",                                                       │
 │          "capabilities": ["binance", "kucoin"],                                     │
 │          "region": "eu-frankfurt",                                                  │
 │          "metrics": {                                                               │
@@ -344,12 +343,11 @@ flowchart TB
 │      }                                                                              │
 │  }                                                                                  │
 │                                                                                     │
-│  2. HEARTBEAT (каждые 5 сек)                                                        │
+│  2. HEARTBEAT (каждые 60 сек)                                                       │
 │  {                                                                                  │
 │      "type": "event",                                                               │
 │      "action": "trader.heartbeat",                                                  │
 │      "payload": {                                                                   │
-│          "trader_id": "trader-eu-1",                                                │
 │          "status": "active|idle|busy",                                              │
 │          "active_tasks": 5,                                                         │
 │          "active_ws_connections": 3,                                                │
@@ -1297,7 +1295,7 @@ MYSQL SYNC:
        "config": {...}
      }
 
-  7. Trader начинает отправлять heartbeat каждые 5s
+    7. Trader начинает отправлять heartbeat каждые 60s
 
 ПРАВИЛА IDENTITY:
   - trader_id берется только из CN сертификата.
@@ -1306,10 +1304,10 @@ MYSQL SYNC:
   - pending/active/suspended логика привязана к CN-derived identity.
 
 HEARTBEAT:
-  Trader -> CTS-Core: {"action": "heartbeat", "load": 0.3, "active_tasks": 3}
-  CTS-Core -> Trader: {"action": "heartbeat.ack"}
-  
-  Timeout: 15s (3 missed heartbeats)
+    Trader -> CTS-Core: {"action": "trader.heartbeat", "load": 0.3, "active_tasks": 3}
+    CTS-Core -> Trader: {"action": "trader.heartbeat_ack"}
+
+    Timeout: 180s (3 missed heartbeats)
 
 ОТКЛЮЧЕНИЕ:
   1. Graceful: trader отправляет {"action": "trader.disconnect"}
@@ -1322,8 +1320,8 @@ HEARTBEAT:
 
 **Timeout Values:**
 ```yaml
-heartbeat_interval: 5s   # Trader sends heartbeat
-heartbeat_timeout: 15s   # 3 missed = disconnect
+heartbeat_interval: 60s  # Trader sends heartbeat
+heartbeat_timeout: 180s  # 3 missed = disconnect
 grace_period: 60s        # Wait before cleanup
 failover_timeout: 60s    # Max time for task reassignment
 ```

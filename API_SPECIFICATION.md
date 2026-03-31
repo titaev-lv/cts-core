@@ -117,7 +117,7 @@ REST API (stateless):
 {
   "type": "request|response|event",
   "action": "string",
-  "protocol_version": "2",
+  "protocol_version": "1",
   "request_id": "req-123",
   "payload": {},
   "ts": 1737823200000
@@ -166,8 +166,9 @@ event:
   "type": "request",
   "action": "trader.register",
   "request_id": "req-1",
+  "protocol_version": "1",
   "payload": {
-    "version": "1.0.0",
+    "release": "v0.0.1",
     "region": "eu-frankfurt",
     "capabilities": ["binance", "kucoin", "bybit", "okx"],
     "resources": {
@@ -195,7 +196,7 @@ event:
     "status": "ok",
     "trader_id": "trader-eu-1",
     "session_id": "session-uuid",
-    "session_timeout_sec": 30,
+    "session_timeout_sec": 180,
     "server_time": 1737823200000,
     "exchange_catalog_version": "2026-03-15T00:00:00Z",
     "available_exchanges": [
@@ -228,12 +229,12 @@ event:
   "ts": 1737823200001,
   "payload": {
     "code": "INVALID_PAYLOAD",
-    "message": "version is required",
+    "message": "Invalid register payload",
     "details": {
-      "field": "version",
-      "path": "payload.version",
-      "expected_type": "string",
-      "reason": "required"
+      "field": "payload",
+      "path": "payload",
+      "expected_type": "object",
+      "reason": "malformed"
     }
   }
 }
@@ -251,7 +252,7 @@ Bootstrap rules after `trader.register_ack`:
 
 **Errors:**
 - `INVALID_MESSAGE` - malformed JSON, non-text frame, or unsupported message type
-- `INVALID_PAYLOAD` - payload validation error (missing `version` or bad JSON)
+- `INVALID_PAYLOAD` - payload validation error (bad JSON or malformed fields)
 - `UNKNOWN_ACTION` - unsupported WS action
 - `DUPLICATE_CONNECTION` - duplicate `trader.register` in same WS session
 - `UNSUPPORTED_VERSION` - unsupported `protocol_version`
@@ -264,7 +265,7 @@ Bootstrap rules after `trader.register_ack`:
 
 #### 2.4.2 trader.heartbeat (event)
 
-Периодический heartbeat (каждые 5 сек).
+Периодический heartbeat (по умолчанию каждые 60 сек).
 
 **Event mode (fire-and-forget):**
 ```json
@@ -1875,12 +1876,12 @@ Accept: application/vnd.cts.v1+json
 
 ```json
 {
-  "protocol_version": "2"
+  "protocol_version": "1"
 }
 ```
 
 **Supported versions:**
-- `2` - Current (2026-03-14)
+- `1` - Current (2026-04-01)
 
 **Version compatibility:**
 - Если `protocol_version` указан и не поддерживается, сервер возвращает `UNSUPPORTED_VERSION`
