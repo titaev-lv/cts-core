@@ -111,7 +111,6 @@ func TestRegisterUsesCertificateCNWhenClientCertRequired(t *testing.T) {
 		RequestID: "req-cn-priority-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "payload-trader-id",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -144,7 +143,6 @@ func TestRegisterRejectsEmptyCertificateCNWhenClientCertRequired(t *testing.T) {
 		RequestID: "req-cn-missing-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "payload-trader-id",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -169,7 +167,6 @@ func TestRegisterSuccess(t *testing.T) {
 		RequestID: "req-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-eu-1",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -204,7 +201,6 @@ func TestRegisterAckIncludesExchangeCatalogAndEffectiveExchanges(t *testing.T) {
 		RequestID: "req-reg-catalog-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id":    "trader-eu-1",
-			"version":      "1.0.0",
 			"region":       "eu-frankfurt",
 			"capabilities": []string{"binance", "kucoin", "unknown"},
 		}),
@@ -250,8 +246,7 @@ func TestRegisterMissingTraderID(t *testing.T) {
 		Action:    actionTraderRegister,
 		RequestID: "req-2",
 		Payload: mustJSON(t, map[string]interface{}{
-			"version": "1.0.0",
-			"region":  "eu-frankfurt",
+			"region": "eu-frankfurt",
 		}),
 	}
 	writeJSON(t, conn, req)
@@ -313,7 +308,6 @@ func TestDuplicateRegister(t *testing.T) {
 		RequestID: "req-4",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-eu-1",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -341,7 +335,6 @@ func TestRegisterWithoutRequestIDGetsServerRequestID(t *testing.T) {
 		Action: actionTraderRegister,
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-eu-2",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -408,7 +401,6 @@ func TestSnapshotStoresRegisterAndHeartbeatTelemetry(t *testing.T) {
 		RequestID: "snapshot-reg-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id":    "trader-snap-1",
-			"version":      "1.0.0",
 			"region":       "eu-frankfurt",
 			"role":         "monitor",
 			"capabilities": []string{"binance", "kucoin"},
@@ -482,7 +474,6 @@ func TestDispatchLatencyTestToRegisteredSession(t *testing.T) {
 		RequestID: "lat-dispatch-reg-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id":    "trader-lat-disp-1",
-			"version":      "1.0.0",
 			"region":       "eu-frankfurt",
 			"capabilities": []string{"binance", "kucoin"},
 		}),
@@ -569,7 +560,6 @@ func TestHeartbeatExchangeStatsUpdatesLatencyProfileInSnapshot(t *testing.T) {
 		RequestID: "snapshot-lat-reg-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id":    "trader-lat-1",
-			"version":      "1.0.0",
 			"region":       "eu-frankfurt",
 			"capabilities": []string{"binance", "kucoin"},
 		}),
@@ -708,7 +698,6 @@ func TestSeqAckStampedOnServerResponses(t *testing.T) {
 		RequestID: "seq-reg-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-seq-1",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -762,7 +751,6 @@ func TestSequenceGapClosesConnection(t *testing.T) {
 		RequestID: "gap-reg-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-gap-1",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -808,7 +796,6 @@ func TestDuplicateInboundSeqIsIgnored(t *testing.T) {
 		RequestID: "dup-reg-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-dup-1",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -952,7 +939,6 @@ func TestRuntimeStateSyncAndConfiguredSessionTimeoutSec(t *testing.T) {
 		RequestID: "cfg-timeout-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-cfg-1",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -1036,7 +1022,7 @@ func TestSessionPersistenceLifecycle(t *testing.T) {
 		RequestID: "persist-reg-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-eu-1",
-			"version":   "1.0.0",
+			"release":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -1100,7 +1086,6 @@ func TestRegisterFailsWhenTraderResolveFails(t *testing.T) {
 		RequestID: "resolve-fail-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-unknown",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -1130,7 +1115,6 @@ func TestRegisterFailsWithDuplicateConnectionWhenActiveSessionExists(t *testing.
 		RequestID: "active-session-conflict-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "ignored-by-cn",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -1154,7 +1138,6 @@ func TestUnsupportedProtocolVersion(t *testing.T) {
 		RequestID:       "proto-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "trader-eu-1",
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -1233,7 +1216,6 @@ func TestMessageTooLarge(t *testing.T) {
 		RequestID: "too-large-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": big,
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}
@@ -1450,7 +1432,6 @@ func TestParallelConnectionsRegisterHeartbeatStability(t *testing.T) {
 				RequestID: fmt.Sprintf("par-reg-%d", i),
 				Payload: mustJSON(t, map[string]interface{}{
 					"trader_id": fmt.Sprintf("trader-par-%d", i),
-					"version":   "1.0.0",
 					"region":    "eu-frankfurt",
 				}),
 			}
@@ -1739,7 +1720,6 @@ func registerTrader(t *testing.T, conn *websocket.Conn, traderID, requestID stri
 		RequestID: requestID,
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": traderID,
-			"version":   "1.0.0",
 			"region":    "eu-frankfurt",
 		}),
 	}

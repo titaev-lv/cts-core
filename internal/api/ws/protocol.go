@@ -69,7 +69,6 @@ type envelope struct {
 
 type registerRequest struct {
 	TraderID     string                 `json:"trader_id"`
-	Version      string                 `json:"version,omitempty"`
 	Release      string                 `json:"release,omitempty"`
 	Region       string                 `json:"region"`
 	Role         string                 `json:"role,omitempty"`
