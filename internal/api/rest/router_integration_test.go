@@ -74,7 +74,7 @@ func TestRouterIntegration_HealthMetricsAndWSLifecycle(t *testing.T) {
 	register := wsEnvelope{
 		Type:            "request",
 		Action:          "trader.register",
-		ProtocolVersion: "2",
+		ProtocolVersion: "1",
 		RequestID:       "it-reg-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "it-trader-1",
@@ -91,7 +91,7 @@ func TestRouterIntegration_HealthMetricsAndWSLifecycle(t *testing.T) {
 	heartbeat := wsEnvelope{
 		Type:            "request",
 		Action:          "trader.heartbeat",
-		ProtocolVersion: "2",
+		ProtocolVersion: "1",
 		RequestID:       "it-hb-1",
 		Payload: mustJSON(t, map[string]interface{}{
 			"trader_id": "it-trader-1",

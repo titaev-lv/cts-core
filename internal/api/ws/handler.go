@@ -671,11 +671,6 @@ func (h *Handler) Serve(c *gin.Context) {
 				continue
 			}
 
-			if req.Version == "" {
-				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidPayload, "version is required", requiredFieldDetails("version", "payload.version", "string")))
-				continue
-			}
-
 			nowMs := time.Now().UnixMilli()
 			role := normalizeTraderRole(req.Role)
 			capabilities := normalizeCapabilities(req.Capabilities)
@@ -746,7 +741,7 @@ func (h *Handler) Serve(c *gin.Context) {
 				AvailableExchanges:     availableExchanges,
 				EffectiveExchanges:     effectiveExchanges,
 			}))
-			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", canonicalTraderID, "version", req.Version, "region", req.Region)
+			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", canonicalTraderID, "protocol_version", msg.ProtocolVersion, "client_version", req.Version, "region", req.Region)
 		case actionTraderHeartbeat:
 			if session.traderID == "" {
 				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "trader.register is required before heartbeat", nil))

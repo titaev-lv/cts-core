@@ -425,7 +425,7 @@ func TestValidateSessionMaxPayloadBytesInvalid(t *testing.T) {
 			HeartbeatTimeout:  15 * time.Second,
 			GracePeriod:       10 * time.Second,
 			CleanupInterval:   30 * time.Second,
-			ProtocolVersion:   "2",
+			ProtocolVersion:   "1",
 			MaxPayloadBytes:   1,
 		},
 	}

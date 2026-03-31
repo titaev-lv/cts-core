@@ -11,7 +11,7 @@ const (
 	msgTypeEvent    = "event"
 	msgTypeResponse = "response"
 
-	supportedProtocolVersion = "2"
+	supportedProtocolVersion = "1"
 
 	actionTraderRegister  = "trader.register"
 	actionRegisterAck     = "trader.register_ack"
@@ -69,7 +69,7 @@ type envelope struct {
 
 type registerRequest struct {
 	TraderID     string                 `json:"trader_id"`
-	Version      string                 `json:"version"`
+	Version      string                 `json:"version,omitempty"`
 	Region       string                 `json:"region"`
 	Role         string                 `json:"role,omitempty"`
 	Capabilities []string               `json:"capabilities,omitempty"`

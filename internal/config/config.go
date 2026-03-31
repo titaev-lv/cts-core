@@ -158,7 +158,7 @@ func (c *Config) Validate() error {
 		c.Session.CleanupInterval = 5 * time.Minute
 	}
 	if c.Session.ProtocolVersion == "" {
-		c.Session.ProtocolVersion = "2"
+		c.Session.ProtocolVersion = "1"
 	}
 	if c.Session.MaxPayloadBytes == 0 {
 		c.Session.MaxPayloadBytes = 64 * 1024

@@ -131,7 +131,7 @@ session:
   write_timeout: 5s              # WS write/control timeout baseline
   grace_period: 60s
   cleanup_interval: 300s         # 5 minutes
-  protocol_version: "2"
+  protocol_version: "1"
   max_payload_bytes: 65536       # 64 KiB
   max_unknown_actions: 5
   unknown_action_window: 10s
