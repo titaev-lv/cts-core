@@ -424,12 +424,12 @@ func NewHandler() *Handler {
 func NewHandlerWithOptions(opts HandlerOptions) *Handler {
 	heartbeatInterval := opts.HeartbeatInterval
 	if heartbeatInterval <= 0 {
-		heartbeatInterval = 10 * time.Second
+		heartbeatInterval = 60 * time.Second
 	}
 
 	heartbeatTimeout := opts.HeartbeatTimeout
 	if heartbeatTimeout <= 0 {
-		heartbeatTimeout = 30 * time.Second
+		heartbeatTimeout = 180 * time.Second
 	}
 
 	writeTimeout := normalizeWriteTimeout(opts.WriteTimeout)
