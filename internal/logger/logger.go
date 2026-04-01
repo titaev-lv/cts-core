@@ -104,12 +104,25 @@ func InitWithOptions(opts Options) error {
 	opts.WSOutPath = defaultLogPath(opts.WSOutPath, opts.Dir, "ws_out.log")
 	opts.AuditPath = defaultLogPath(opts.AuditPath, opts.Dir, "audit.log")
 
-	Log = buildLogger("error", opts.ErrorPath, true, opts)
-	AccessLog = buildLogger("access", opts.AccessPath, opts.AccessToStdout, opts)
-	OutReqLog = buildLogger("out_request", opts.OutRequestPath, opts.OutRequestToStdout, opts)
-	WSAccLog = buildLogger("ws_access", opts.WSInPath, opts.WSInToStdout, opts)
-	WSOutLog = buildLogger("ws_out", opts.WSOutPath, opts.WSOutToStdout, opts)
-	AuditLog = buildLogger("audit", opts.AuditPath, opts.AuditToStdout, opts)
+	var err error
+	if Log, err = buildLogger("error", opts.ErrorPath, true, opts); err != nil {
+		return err
+	}
+	if AccessLog, err = buildLogger("access", opts.AccessPath, opts.AccessToStdout, opts); err != nil {
+		return err
+	}
+	if OutReqLog, err = buildLogger("out_request", opts.OutRequestPath, opts.OutRequestToStdout, opts); err != nil {
+		return err
+	}
+	if WSAccLog, err = buildLogger("ws_access", opts.WSInPath, opts.WSInToStdout, opts); err != nil {
+		return err
+	}
+	if WSOutLog, err = buildLogger("ws_out", opts.WSOutPath, opts.WSOutToStdout, opts); err != nil {
+		return err
+	}
+	if AuditLog, err = buildLogger("audit", opts.AuditPath, opts.AuditToStdout, opts); err != nil {
+		return err
+	}
 
 	slog.SetDefault(Log)
 	return nil
@@ -122,13 +135,10 @@ func defaultLogPath(value string, dir string, fallback string) string {
 	return filepath.Join(filepath.Clean(dir), fallback)
 }
 
-func buildLogger(name string, path string, toStdout bool, opts Options) *slog.Logger {
-	file := &lumberjack.Logger{
-		Filename:   path,
-		MaxSize:    opts.MaxFileSizeMB,
-		MaxBackups: opts.MaxBackups,
-		MaxAge:     opts.MaxAgeDays,
-		Compress:   opts.Compress,
+func buildLogger(name string, path string, toStdout bool, opts Options) (*slog.Logger, error) {
+	file, err := newRotatingLogFile(path, opts.MaxFileSizeMB, opts.MaxBackups, opts.MaxAgeDays, opts.Compress)
+	if err != nil {
+		return nil, err
 	}
 	logFiles[name] = file
 
@@ -154,7 +164,36 @@ func buildLogger(name string, path string, toStdout bool, opts Options) *slog.Lo
 		})
 	}
 
-	return slog.New(handler)
+	return slog.New(handler), nil
+}
+
+func newRotatingLogFile(path string, maxSize, maxBackups, maxAge int, compress bool) (*lumberjack.Logger, error) {
+	l := &lumberjack.Logger{
+		Filename:   path,
+		MaxSize:    maxSize,
+		MaxBackups: maxBackups,
+		MaxAge:     maxAge,
+		Compress:   compress,
+	}
+
+	if shouldRotateOnStartup(path) {
+		if err := l.Rotate(); err != nil {
+			return nil, fmt.Errorf("rotate log on startup %s: %w", path, err)
+		}
+	}
+
+	return l, nil
+}
+
+func shouldRotateOnStartup(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if !info.Mode().IsRegular() {
+		return false
+	}
+	return info.Size() > 0
 }
 
 func newHandler(format string, writer io.Writer, opts *slog.HandlerOptions) slog.Handler {

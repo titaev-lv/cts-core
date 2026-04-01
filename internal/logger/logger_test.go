@@ -397,6 +397,51 @@ func TestRotation(t *testing.T) {
 	}
 }
 
+func TestRotateOnStartup(t *testing.T) {
+	logDir := t.TempDir()
+	errorLogPath := filepath.Join(logDir, "error.log")
+
+	if err := os.WriteFile(errorLogPath, []byte("previous-run-entry\n"), 0640); err != nil {
+		t.Fatalf("failed to seed existing error.log: %v", err)
+	}
+
+	if err := InitWithOptions(Options{
+		Level:              "info",
+		Dir:                logDir,
+		MaxFileSizeMB:      10,
+		MaxBackups:         3,
+		MaxAgeDays:         7,
+		Compress:           false,
+		ErrorPath:          errorLogPath,
+		AccessToStdout:     false,
+		OutRequestToStdout: false,
+		WSInToStdout:       false,
+		WSOutToStdout:      false,
+		AuditToStdout:      false,
+	}); err != nil {
+		t.Fatalf("InitWithOptions() failed: %v", err)
+	}
+
+	Info("current-run-entry")
+
+	if err := Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	content, err := os.ReadFile(errorLogPath)
+	if err != nil {
+		t.Fatalf("failed to read current error.log: %v", err)
+	}
+	logContent := string(content)
+	if strings.Contains(logContent, "previous-run-entry") {
+		t.Fatalf("previous run entry leaked into current error.log")
+	}
+	if !strings.Contains(logContent, "current-run-entry") {
+		t.Fatalf("current run entry missing from error.log")
+	}
+
+}
+
 func TestClose(t *testing.T) {
 	logDir := t.TempDir()
 	if err := Init("info", logDir, 10, 3, 7, true); err != nil {
