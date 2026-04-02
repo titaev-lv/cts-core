@@ -26,7 +26,8 @@ RUN set -eu; \
     else \
         BASE_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"; \
         if [ -z "${BASE_TAG}" ]; then \
-            CTS_CORE_RELEASE="${CTS_CORE_VERSION}"; \
+            echo "ERROR: no git tags found. Create the first release tag (e.g. v0.0.1)."; \
+            exit 1; \
         else \
             COMMITS_SINCE_TAG="$(git rev-list --count "${BASE_TAG}"..HEAD)"; \
             BUILD_STAMP="$(date -u +%Y%m%d%H%M%S)"; \
