@@ -487,10 +487,9 @@ func (h *Handler) Serve(c *gin.Context) {
 	connID := generateConnID()
 	requestID := middleware.GetRequestID(c)
 	clientIP := c.ClientIP()
-	userAgent := c.Request.UserAgent()
 	path := c.Request.URL.Path
 
-	h.accessLog.Info("ws_connect", "conn_id", connID, "request_id", requestID, "ip", clientIP, "user_agent", userAgent, "ws_path", path)
+	h.accessLog.Info("ws_connect", "conn_id", connID, "request_id", requestID, "ip", clientIP, "certificate_cn", clientCertCN, "ws_path", path)
 	h.active.Add(1)
 	h.total.Add(1)
 	h.lastSeen.Store(time.Now().Unix())
@@ -751,7 +750,7 @@ func (h *Handler) Serve(c *gin.Context) {
 				AvailableExchanges:     availableExchanges,
 				EffectiveExchanges:     effectiveExchanges,
 			}))
-			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", canonicalTraderID, "protocol_version", msg.ProtocolVersion, "client_release", clientRelease, "region", req.Region)
+			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", canonicalTraderID, "protocol_version", msg.ProtocolVersion, "release_version", clientRelease, "region", req.Region)
 		case actionTraderHeartbeat:
 			if session.traderID == "" {
 				h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInvalidMessage, "trader.register is required before heartbeat", nil))
