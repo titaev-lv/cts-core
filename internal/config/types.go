@@ -152,8 +152,7 @@ type LoggingConfig struct {
 	ErrorPath          string `yaml:"error_path"`
 	AccessPath         string `yaml:"access_path"`
 	OutRequestPath     string `yaml:"out_request_path"`
-	WSInPath           string `yaml:"ws_in_path"`
-	WSOutPath          string `yaml:"ws_out_path"`
+	WSPath             string `yaml:"ws_path"`
 	AuditPath          string `yaml:"audit_path"`
 	AccessToStdout     bool   `yaml:"access_to_stdout"`
 	OutRequestToStdout bool   `yaml:"out_request_to_stdout"`

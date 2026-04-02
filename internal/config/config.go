@@ -285,11 +285,8 @@ func (c *Config) Validate() error {
 	if c.Logging.OutRequestPath == "" {
 		c.Logging.OutRequestPath = filepath.Join(c.Logging.Dir, "out_request.log")
 	}
-	if c.Logging.WSInPath == "" {
-		c.Logging.WSInPath = filepath.Join(c.Logging.Dir, "ws_in.log")
-	}
-	if c.Logging.WSOutPath == "" {
-		c.Logging.WSOutPath = filepath.Join(c.Logging.Dir, "ws_out.log")
+	if c.Logging.WSPath == "" {
+		c.Logging.WSPath = filepath.Join(c.Logging.Dir, "ws.log")
 	}
 	if c.Logging.AuditPath == "" {
 		c.Logging.AuditPath = filepath.Join(c.Logging.Dir, "audit.log")

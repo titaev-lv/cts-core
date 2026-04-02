@@ -1715,22 +1715,21 @@ PRODUCTION (VM Debian):
 
 ### Log Files (CTS-Core)
 
-CTS-Core использует 6 файлов логов:
+CTS-Core использует 5 файлов логов:
 - error.log: системные ошибки и события
 - access.log: входящие HTTP запросы
 - out_request.log: исходящие HTTP запросы
-- ws_in.log: входящие WS события
-- ws_out.log: исходящие WS сообщения
+- ws.log: входящие и исходящие WS события
 - audit.log: аудит админских/системных действий
 
 ### WS Log Fields (Standard)
 
-**ws_in.log**
+**ws.log (inbound)**
 - required: timestamp, level, module, event, conn_id
 - recommended: trader_id, session_id, client_ip, user_agent, ws_path
 - optional: msg_id, request_id, error, latency_ms, size_bytes
 
-**ws_out.log**
+**ws.log (outbound)**
 - required: timestamp, level, module, event, conn_id, msg_id
 - recommended: trader_id, session_id, target, msg_type, size_bytes
 - optional: request_id, latency_ms, error, status

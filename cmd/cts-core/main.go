@@ -139,8 +139,8 @@ func main() {
 		ErrorPath:          cfg.Logging.ErrorPath,
 		AccessPath:         cfg.Logging.AccessPath,
 		OutRequestPath:     cfg.Logging.OutRequestPath,
-		WSInPath:           cfg.Logging.WSInPath,
-		WSOutPath:          cfg.Logging.WSOutPath,
+		WSInPath:           cfg.Logging.WSPath,
+		WSOutPath:          cfg.Logging.WSPath,
 		AuditPath:          cfg.Logging.AuditPath,
 		AccessToStdout:     cfg.Logging.AccessToStdout,
 		OutRequestToStdout: cfg.Logging.OutRequestToStdout,
@@ -155,9 +155,9 @@ func main() {
 
 	// Get main logger
 	log := logger.Get("main")
-	log.Debug("Logger configured", "level", cfg.Logging.Level, "dir", cfg.Logging.Dir)
-	log.Debug("Loaded configuration", "path", *configPath)
 	log.Info("INIT START cts-core", "release", release, "commit", commit, "build_time", buildTime)
+	log.Info("Logger configured", "level", cfg.Logging.Level, "dir", cfg.Logging.Dir)
+	log.Info("Loaded configuration", "path", *configPath)
 
 	log.Info("CTS-Core starting",
 		"version", version,
@@ -181,7 +181,7 @@ func main() {
 		ConnMaxLifetime: cfg.Databases.System.MySQL.Pool.ConnMaxLifetime,
 		ConnMaxIdleTime: 2 * time.Minute, // Fixed value for now
 	}
-	log.Debug("MySQL config", "host", mysqlCfg.Host, "port", mysqlCfg.Port, "database", mysqlCfg.Database, "tls", mysqlCfg.TLSEnabled)
+	log.Info("MySQL config", "host", mysqlCfg.Host, "port", mysqlCfg.Port, "database", mysqlCfg.Database, "tls", mysqlCfg.TLSEnabled)
 
 	dbLogger := logger.Get("database")
 	dbClient, err := db.NewMySQLClient(mysqlCfg, dbLogger)
@@ -224,7 +224,7 @@ func main() {
 			Multiplier:  cfg.HSM.Retry.Multiplier,
 		},
 	}
-	log.Debug("HSM trading config", "url", hsmTradingCfg.BaseURL, "context", cfg.HSM.Trading.Context, "timeout", hsmTradingCfg.RequestTimeout)
+	log.Info("HSM trading config", "url", hsmTradingCfg.BaseURL, "context", cfg.HSM.Trading.Context, "timeout", hsmTradingCfg.RequestTimeout)
 
 	hsmTradingClient, err := hsm.NewClient(hsmTradingCfg, hsmLogger)
 	if err != nil {
@@ -267,7 +267,7 @@ func main() {
 			Multiplier:  cfg.HSM.Retry.Multiplier,
 		},
 	}
-	log.Debug("HSM 2FA config", "url", hsm2FACfg.BaseURL, "context", cfg.HSM.TwoFA.Context, "timeout", hsm2FACfg.RequestTimeout)
+	log.Info("HSM 2FA config", "url", hsm2FACfg.BaseURL, "context", cfg.HSM.TwoFA.Context, "timeout", hsm2FACfg.RequestTimeout)
 
 	hsm2FAClient, err := hsm.NewClient(hsm2FACfg, hsmLogger)
 	if err != nil {

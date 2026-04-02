@@ -1,5 +1,5 @@
 # Git
-.git/
+# Keep .git in build context: Dockerfile computes release metadata from git.
 .gitignore
 .github/
 

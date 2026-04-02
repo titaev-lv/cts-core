@@ -569,3 +569,51 @@ func TestTextFormatStripsPrefixKeys(t *testing.T) {
 		t.Fatalf("json message is escaped or missing: %s", logContent)
 	}
 }
+
+func TestWSLogsMergedIntoSingleFile(t *testing.T) {
+	logDir := t.TempDir()
+	if err := InitWithOptions(Options{
+		Level:              "info",
+		Format:             "json",
+		Dir:                logDir,
+		MaxFileSizeMB:      10,
+		MaxBackups:         3,
+		MaxAgeDays:         7,
+		Compress:           false,
+		AccessToStdout:     false,
+		OutRequestToStdout: false,
+		WSInToStdout:       false,
+		WSOutToStdout:      false,
+		AuditToStdout:      false,
+	}); err != nil {
+		t.Fatalf("InitWithOptions() failed: %v", err)
+	}
+
+	GetWSAccess("ws").Info("ws_in", "event", "inbound")
+	GetWSOut("ws").Info("ws_out", "event", "outbound")
+
+	if err := Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	wsLogPath := filepath.Join(logDir, "ws.log")
+	content, err := os.ReadFile(wsLogPath)
+	if err != nil {
+		t.Fatalf("Failed to read ws.log: %v", err)
+	}
+
+	logContent := string(content)
+	if !strings.Contains(logContent, "ws_in") {
+		t.Fatalf("ws_in record not found in ws.log")
+	}
+	if !strings.Contains(logContent, "ws_out") {
+		t.Fatalf("ws_out record not found in ws.log")
+	}
+
+	if _, err := os.Stat(filepath.Join(logDir, "ws_in.log")); err == nil {
+		t.Fatalf("unexpected legacy ws_in.log file exists")
+	}
+	if _, err := os.Stat(filepath.Join(logDir, "ws_out.log")); err == nil {
+		t.Fatalf("unexpected legacy ws_out.log file exists")
+	}
+}

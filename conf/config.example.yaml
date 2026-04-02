@@ -112,8 +112,7 @@ logging:
   error_path: "/var/log/cts-core/error.log"
   access_path: "/var/log/cts-core/access.log"
   out_request_path: "/var/log/cts-core/out_request.log"
-  ws_in_path: "/var/log/cts-core/ws_in.log"
-  ws_out_path: "/var/log/cts-core/ws_out.log"
+  ws_path: "/var/log/cts-core/ws.log"
   audit_path: "/var/log/cts-core/audit.log"
   max_size_mb: 100               # Rotate when file reaches 100 MB
   max_backups: 10                # Number of rotated files to keep

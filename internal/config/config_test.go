@@ -60,11 +60,8 @@ func TestLoad(t *testing.T) {
 	if cfg.Logging.OutRequestPath != "/var/log/cts-core/out_request.log" {
 		t.Errorf("Expected out_request_path=/var/log/cts-core/out_request.log, got %s", cfg.Logging.OutRequestPath)
 	}
-	if cfg.Logging.WSInPath != "/var/log/cts-core/ws_in.log" {
-		t.Errorf("Expected ws_in_path=/var/log/cts-core/ws_in.log, got %s", cfg.Logging.WSInPath)
-	}
-	if cfg.Logging.WSOutPath != "/var/log/cts-core/ws_out.log" {
-		t.Errorf("Expected ws_out_path=/var/log/cts-core/ws_out.log, got %s", cfg.Logging.WSOutPath)
+	if cfg.Logging.WSPath != "/var/log/cts-core/ws.log" {
+		t.Errorf("Expected ws_path=/var/log/cts-core/ws.log, got %s", cfg.Logging.WSPath)
 	}
 	if cfg.Logging.AuditPath != "/var/log/cts-core/audit.log" {
 		t.Errorf("Expected audit_path=/var/log/cts-core/audit.log, got %s", cfg.Logging.AuditPath)

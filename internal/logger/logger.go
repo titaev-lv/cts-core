@@ -101,9 +101,15 @@ func InitWithOptions(opts Options) error {
 	opts.ErrorPath = defaultLogPath(opts.ErrorPath, opts.Dir, "error.log")
 	opts.AccessPath = defaultLogPath(opts.AccessPath, opts.Dir, "access.log")
 	opts.OutRequestPath = defaultLogPath(opts.OutRequestPath, opts.Dir, "out_request.log")
-	opts.WSInPath = defaultLogPath(opts.WSInPath, opts.Dir, "ws_in.log")
-	opts.WSOutPath = defaultLogPath(opts.WSOutPath, opts.Dir, "ws_out.log")
+	wsPath := opts.WSOutPath
+	if wsPath == "" {
+		wsPath = opts.WSInPath
+	}
+	wsPath = defaultLogPath(wsPath, opts.Dir, "ws.log")
+	opts.WSInPath = wsPath
+	opts.WSOutPath = wsPath
 	opts.AuditPath = defaultLogPath(opts.AuditPath, opts.Dir, "audit.log")
+	wsToStdout := opts.WSInToStdout || opts.WSOutToStdout
 
 	var err error
 	if Log, err = buildLogger("error", opts.ErrorPath, true, opts); err != nil {
@@ -115,12 +121,12 @@ func InitWithOptions(opts Options) error {
 	if OutReqLog, err = buildLogger("out_request", opts.OutRequestPath, opts.OutRequestToStdout, opts); err != nil {
 		return err
 	}
-	if WSAccLog, err = buildLogger("ws_access", opts.WSInPath, opts.WSInToStdout, opts); err != nil {
+	wsLogger, err := buildLogger("ws", wsPath, wsToStdout, opts)
+	if err != nil {
 		return err
 	}
-	if WSOutLog, err = buildLogger("ws_out", opts.WSOutPath, opts.WSOutToStdout, opts); err != nil {
-		return err
-	}
+	WSAccLog = wsLogger
+	WSOutLog = wsLogger
 	if AuditLog, err = buildLogger("audit", opts.AuditPath, opts.AuditToStdout, opts); err != nil {
 		return err
 	}
