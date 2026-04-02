@@ -523,3 +523,49 @@ func TestLogFormat(t *testing.T) {
 		t.Error("Timestamp format not found in JSON log")
 	}
 }
+
+func TestTextFormatStripsPrefixKeys(t *testing.T) {
+	logDir := t.TempDir()
+	if err := InitWithOptions(Options{
+		Level:              "info",
+		Format:             "text",
+		Dir:                logDir,
+		MaxFileSizeMB:      10,
+		MaxBackups:         3,
+		MaxAgeDays:         7,
+		Compress:           false,
+		AccessToStdout:     false,
+		OutRequestToStdout: false,
+		WSInToStdout:       false,
+		WSOutToStdout:      false,
+		AuditToStdout:      false,
+	}); err != nil {
+		t.Fatalf("InitWithOptions() failed: %v", err)
+	}
+
+	Get("main").Info(`{"event":"ws_out","payload":{"k":"v"}}`, "request_id", "req-1")
+
+	if err := Close(); err != nil {
+		t.Fatalf("Close() failed: %v", err)
+	}
+
+	errorLogPath := filepath.Join(logDir, "error.log")
+	content, err := os.ReadFile(errorLogPath)
+	if err != nil {
+		t.Fatalf("Failed to read error.log: %v", err)
+	}
+
+	logContent := strings.TrimSpace(string(content))
+	if strings.Contains(logContent, "time=") {
+		t.Fatalf("unexpected time= prefix in text log: %s", logContent)
+	}
+	if strings.Contains(logContent, "level=") {
+		t.Fatalf("unexpected level= prefix in text log: %s", logContent)
+	}
+	if strings.Contains(logContent, "msg=") {
+		t.Fatalf("unexpected msg= prefix in text log: %s", logContent)
+	}
+	if !strings.Contains(logContent, `{"event":"ws_out","payload":{"k":"v"}}`) {
+		t.Fatalf("json message is escaped or missing: %s", logContent)
+	}
+}
