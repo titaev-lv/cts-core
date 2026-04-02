@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -514,6 +515,34 @@ func (h *Handler) Serve(c *gin.Context) {
 		}
 		return nil
 	})
+	conn.SetPingHandler(func(appData string) error {
+		raw := []byte(appData)
+		seq, ack, hasSeqAck := decodeControlSeqAck(raw)
+		if hasSeqAck {
+			h.accessLog.Debug(controlFrameLogMessage("ping"), "direction", "in", "frame", "ping", "conn_id", connID, "seq", seq, "ack", ack)
+		} else {
+			h.accessLog.Debug(controlFrameLogMessage("ping"), "direction", "in", "frame", "ping", "conn_id", connID)
+		}
+
+		err := h.withWriteLock(connEntry, func(conn *websocket.Conn, deadline time.Time) error {
+			return conn.WriteControl(websocket.PongMessage, raw, deadline)
+		})
+		if err != nil {
+			h.accessLog.Warn("ws_pong_failed", "conn_id", connID, "session_id", connEntry.sessionID, "error", err)
+			return err
+		}
+
+		if hasSeqAck {
+			h.outLog.Debug(controlFrameLogMessage("pong"), "direction", "out", "frame", "pong", "conn_id", connID, "seq", seq, "ack", ack)
+		} else {
+			h.outLog.Debug(controlFrameLogMessage("pong"), "direction", "out", "frame", "pong", "conn_id", connID)
+		}
+
+		if h.heartbeatTimeout > 0 {
+			return conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
+		}
+		return nil
+	})
 
 	stopPing := make(chan struct{})
 	defer close(stopPing)
@@ -559,22 +588,6 @@ func (h *Handler) Serve(c *gin.Context) {
 			h.removeConnection(session.sessionID)
 			h.accessLog.Warn("ws_disconnect", "conn_id", connID, "request_id", requestID, "trader_id", session.traderID, "session_id", session.sessionID, "previous_session_state", stateBeforeDisconnect, "session_state", session.state, "disconnect_reason", reason, "last_heartbeat_ms", session.lastHeartbeatMs, "error", err)
 			return
-		}
-
-		if msgType == websocket.PongMessage {
-			connEntry.recordPongReceived()
-			h.accessLog.Debug(controlFrameLogMessage("pong"), "direction", "in", "frame", "pong", "conn_id", connID)
-			if h.heartbeatTimeout > 0 {
-				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
-			}
-			continue
-		}
-		if msgType == websocket.PingMessage {
-			h.accessLog.Debug(controlFrameLogMessage("ping"), "direction", "in", "frame", "ping", "conn_id", connID)
-			if h.heartbeatTimeout > 0 {
-				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
-			}
-			continue
 		}
 
 		msgID++
@@ -1612,6 +1625,15 @@ func controlFrameLogMessage(frame string) string {
 		return fmt.Sprintf("{\"type\":\"control\",\"frame\":\"%s\"}", frame)
 	}
 	return string(b)
+}
+
+func decodeControlSeqAck(raw []byte) (seq uint64, ack uint64, ok bool) {
+	if len(raw) < 16 {
+		return 0, 0, false
+	}
+	seq = binary.BigEndian.Uint64(raw[0:8])
+	ack = binary.BigEndian.Uint64(raw[8:16])
+	return seq, ack, true
 }
 
 func durationSecondsCeil(d time.Duration) int {
