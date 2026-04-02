@@ -365,7 +365,7 @@ func (e *Engine) runCycle(now time.Time) {
 
 	if len(candidates) == 0 {
 		e.publishAssignOutcome(assignResultNoCandidates, 0)
-		e.logger.Debug("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", 0, "assigned", false)
+		e.logger.Debug("Run task scheduler cycle", "event", "scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", 0, "assigned", false)
 		return
 	}
 
@@ -381,13 +381,13 @@ func (e *Engine) runCycle(now time.Time) {
 	result, err := e.assignWithRetry(context.Background(), selected, taskID, epoch, now.Unix())
 	if err != nil {
 		e.publishAssignOutcome(result, time.Since(assignStart))
-		e.logger.Warn("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", len(candidates), "assigned", false, "trader_id", selected.TraderID, "session_id", selected.SessionID, "error", err)
+		e.logger.Warn("Run task scheduler cycle", "event", "scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", len(candidates), "assigned", false, "trader_id", selected.TraderID, "session_id", selected.SessionID, "error", err)
 		return
 	}
 	e.markAssignment(taskID, selected.TraderID, epoch, now.Unix())
 	e.publishAssignOutcome(assignResultSuccess, time.Since(assignStart))
 
-	e.logger.Info("scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", len(candidates), "assigned", true, "trader_id", selected.TraderID, "session_id", selected.SessionID)
+	e.logger.Info("Run task scheduler cycle", "event", "scheduler_cycle", "cycle", cycle, "snapshot_count", len(snapshots), "candidate_count", len(candidates), "assigned", true, "trader_id", selected.TraderID, "session_id", selected.SessionID)
 }
 
 func (e *Engine) resolveTaskID(ctx context.Context) string {
@@ -737,7 +737,7 @@ func (e *Engine) runLatencySweep(now time.Time) {
 
 	targets := SelectLatencyTestTargets(e.provider.GetTraderSnapshots(), now, e.healthyWindow)
 	if len(targets) == 0 {
-		e.logger.Debug("scheduler_latency_sweep", "target_count", 0)
+		e.logger.Debug("Run task scheduler latency sweep", "event", "scheduler_latency_sweep", "target_count", 0)
 		return
 	}
 
@@ -749,7 +749,7 @@ func (e *Engine) runLatencySweep(now time.Time) {
 		}
 	}
 
-	e.logger.Info("scheduler_latency_sweep", "target_count", len(targets), "failed_count", failures)
+	e.logger.Info("Run task scheduler latency sweep", "event", "scheduler_latency_sweep", "target_count", len(targets), "failed_count", failures)
 }
 
 func latencyTickerChan(t *time.Ticker) <-chan time.Time {
