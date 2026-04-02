@@ -16,10 +16,25 @@ RUN go mod download
 # Скопировать исходный код
 COPY . .
 
-# Собрать бинарник с версией из VERSION
-RUN CTS_CORE_VERSION="$(cat VERSION)" && \
+# Собрать бинарник с release/commit/build metadata.
+RUN set -eu; \
+    CTS_CORE_VERSION="$(cat VERSION)"; \
+    CTS_CORE_COMMIT="$(git rev-parse --short HEAD)"; \
+    CTS_CORE_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"; \
+    if CTS_CORE_RELEASE="$(git describe --tags --exact-match 2>/dev/null)"; then \
+        CTS_CORE_RELEASE="$(echo "${CTS_CORE_RELEASE}" | tr -d '[:space:]')"; \
+    else \
+        BASE_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"; \
+        if [ -z "${BASE_TAG}" ]; then \
+            CTS_CORE_RELEASE="${CTS_CORE_VERSION}"; \
+        else \
+            COMMITS_SINCE_TAG="$(git rev-list --count "${BASE_TAG}"..HEAD)"; \
+            BUILD_STAMP="$(date -u +%Y%m%d%H%M%S)"; \
+            CTS_CORE_RELEASE="${BASE_TAG}-dev.${COMMITS_SINCE_TAG}+${BUILD_STAMP}.${CTS_CORE_COMMIT}"; \
+        fi; \
+    fi; \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w -X main.version=${CTS_CORE_VERSION}" \
+    go build -ldflags="-s -w -X main.version=${CTS_CORE_VERSION} -X main.release=${CTS_CORE_RELEASE} -X main.commit=${CTS_CORE_COMMIT} -X main.buildTime=${CTS_CORE_BUILD_TIME}" \
     -o cts-core \
     cmd/cts-core/main.go
 

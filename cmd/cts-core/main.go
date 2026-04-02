@@ -28,7 +28,12 @@ import (
 	"golang.org/x/net/http2"
 )
 
-var version = "local-build"
+var (
+	version   = "local-build"
+	release   = "local-build"
+	commit    = "unknown"
+	buildTime = "unknown"
+)
 
 type schedulerRequirementsProvider struct {
 	repo repository.ExchangeRequirementsRepository
@@ -152,6 +157,7 @@ func main() {
 	log := logger.Get("main")
 	log.Debug("Logger configured", "level", cfg.Logging.Level, "dir", cfg.Logging.Dir)
 	log.Debug("Loaded configuration", "path", *configPath)
+	log.Info("INIT START cts-core", "release", release, "commit", commit, "build_time", buildTime)
 
 	log.Info("CTS-Core starting",
 		"version", version,
