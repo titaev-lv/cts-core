@@ -3,8 +3,10 @@ package hsm
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -26,6 +28,8 @@ type Client struct {
 	outLogger  *slog.Logger
 	retryCfg   RetryConfig
 }
+
+const hsmRequestIDHeader = "X-Request-ID"
 
 // RetryConfig contains retry logic configuration
 type RetryConfig struct {
@@ -105,6 +109,7 @@ func (c *Client) Close() error {
 
 // doRequest performs HTTP request with retry logic
 func (c *Client) doRequest(ctx context.Context, method, path string, body interface{}, response interface{}) error {
+	ctx, requestID := ensureRequestID(ctx)
 	var lastErr error
 
 	for attempt := 1; attempt <= c.retryCfg.MaxAttempts; attempt++ {
@@ -127,6 +132,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 		}
 
 		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(hsmRequestIDHeader, requestID)
 
 		// Execute request
 		resp, err := c.httpClient.Do(req)
@@ -189,6 +195,22 @@ func (c *Client) doRequest(ctx context.Context, method, path string, body interf
 	}
 
 	return fmt.Errorf("request failed after %d attempts: %w", c.retryCfg.MaxAttempts, lastErr)
+}
+
+func ensureRequestID(ctx context.Context) (context.Context, string) {
+	requestID := requestid.FromContext(ctx)
+	if requestID == "" {
+		requestID = generateRequestID()
+	}
+	return requestid.WithContext(ctx, requestID), requestID
+}
+
+func generateRequestID() string {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err == nil {
+		return hex.EncodeToString(buf)
+	}
+	return fmt.Sprintf("hsm-%d", time.Now().UTC().UnixNano())
 }
 
 func extractServerLatencyUS(resp *http.Response) int64 {
