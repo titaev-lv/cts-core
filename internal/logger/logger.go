@@ -365,18 +365,18 @@ func GetOutRequest(module string) *slog.Logger {
 	return OutReqLog.With("module", module)
 }
 
-func GetWSAccess(module string) *slog.Logger {
+func GetWSAccess(_ string) *slog.Logger {
 	if WSAccLog == nil {
-		return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: replaceAccessAttr})).With("module", module)
+		return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: replaceAccessAttr}))
 	}
-	return WSAccLog.With("module", module)
+	return WSAccLog
 }
 
-func GetWSOut(module string) *slog.Logger {
+func GetWSOut(_ string) *slog.Logger {
 	if WSOutLog == nil {
-		return Get(module)
+		return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo, ReplaceAttr: replaceTimeAttr}))
 	}
-	return WSOutLog.With("module", module)
+	return WSOutLog
 }
 
 func GetAudit(module string) *slog.Logger {

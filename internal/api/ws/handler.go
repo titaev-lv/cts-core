@@ -526,9 +526,10 @@ func (h *Handler) Serve(c *gin.Context) {
 	unknownActionCount := 0
 
 	msgID := int64(0)
-	if err := h.writeTextMessage(connEntry, []byte("{\"type\":\"connected\"}")); err == nil {
+	connectedPayload := []byte("{\"type\":\"connected\"}")
+	if err := h.writeTextMessage(connEntry, connectedPayload); err == nil {
 		msgID++
-		h.outLog.Info("ws_out", "event", "connected", "conn_id", connID, "msg_id", msgID, "request_id", requestID)
+		h.outLog.Debug(string(connectedPayload), "direction", "out", "action", "connected", "conn_id", connID, "msg_id", msgID, "request_id", requestID)
 	}
 
 	for {
@@ -574,7 +575,18 @@ func (h *Handler) Serve(c *gin.Context) {
 		}
 
 		msgID++
-		h.accessLog.Info("ws_in", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "msg_type", msgType, "size_bytes", len(rawPayload))
+		if msgType == websocket.TextMessage {
+			if env, ok := decodeEnvelope(rawPayload); ok {
+				msgRequestID := resolveRequestID(env.RequestID, msgID)
+				if shouldLogWSBusinessActionInfo(env.Action) {
+					h.accessLog.Info(string(rawPayload), "direction", "in", "action", env.Action, "seq", env.Seq, "ack", env.Ack, "conn_id", connID, "msg_id", msgID, "request_id", msgRequestID)
+				} else {
+					h.accessLog.Debug(string(rawPayload), "direction", "in", "action", env.Action, "seq", env.Seq, "ack", env.Ack, "conn_id", connID, "msg_id", msgID, "request_id", msgRequestID)
+				}
+			} else {
+				h.accessLog.Debug(string(rawPayload), "direction", "in", "conn_id", connID, "msg_id", msgID, "request_id", requestID, "size_bytes", len(rawPayload))
+			}
+		}
 		if h.heartbeatTimeout > 0 {
 			_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
 		}
@@ -903,7 +915,44 @@ func (h *Handler) sendEnvelope(conn *websocket.Conn, connID string, msgID int64,
 		return
 	}
 
-	h.outLog.Info("ws_out", "event", msg.Action, "conn_id", connID, "msg_id", msgID, "request_id", msg.RequestID)
+	if shouldLogWSBusinessActionInfo(msg.Action) {
+		h.outLog.Info(string(b), "direction", "out", "action", msg.Action, "seq", msg.Seq, "ack", msg.Ack, "conn_id", connID, "msg_id", msgID, "request_id", msg.RequestID)
+	} else {
+		h.outLog.Debug(string(b), "direction", "out", "action", msg.Action, "seq", msg.Seq, "ack", msg.Ack, "conn_id", connID, "msg_id", msgID, "request_id", msg.RequestID)
+	}
+}
+
+func shouldLogWSBusinessActionInfo(action string) bool {
+	action = strings.TrimSpace(action)
+	if action == "" {
+		return false
+	}
+
+	if action == actionHeartbeatAck {
+		return false
+	}
+
+	if strings.HasPrefix(action, "task.") {
+		return true
+	}
+
+	switch action {
+	case actionTraderRegister, actionRegisterAck, actionTraderHeartbeat, actionLatencyTest, actionLatencyTestResp, actionLatencyTestAck, actionError:
+		return true
+	default:
+		return false
+	}
+}
+
+func decodeEnvelope(raw []byte) (*envelope, bool) {
+	var env envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, false
+	}
+	if strings.TrimSpace(env.Action) == "" {
+		return nil, false
+	}
+	return &env, true
 }
 
 func (h *Handler) DispatchLatencyTest(_ context.Context, sessionID string, traderID string, exchanges []string) error {
