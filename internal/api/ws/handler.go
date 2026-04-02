@@ -508,6 +508,7 @@ func (h *Handler) Serve(c *gin.Context) {
 	}
 	conn.SetPongHandler(func(_ string) error {
 		connEntry.recordPongReceived()
+		h.accessLog.Debug(controlFrameLogMessage("pong"), "direction", "in", "frame", "pong", "conn_id", connID)
 		if h.heartbeatTimeout > 0 {
 			return conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
 		}
@@ -562,12 +563,14 @@ func (h *Handler) Serve(c *gin.Context) {
 
 		if msgType == websocket.PongMessage {
 			connEntry.recordPongReceived()
+			h.accessLog.Debug(controlFrameLogMessage("pong"), "direction", "in", "frame", "pong", "conn_id", connID)
 			if h.heartbeatTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
 			}
 			continue
 		}
 		if msgType == websocket.PingMessage {
+			h.accessLog.Debug(controlFrameLogMessage("ping"), "direction", "in", "frame", "ping", "conn_id", connID)
 			if h.heartbeatTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(h.heartbeatTimeout))
 			}
@@ -1097,7 +1100,7 @@ func (h *Handler) runPingLoop(entry *wsConnectionEntry, connID string, requestID
 		case <-stop:
 			return
 		case <-ticker.C:
-			if err := h.writePingMessage(entry); err != nil {
+			if err := h.writePingMessage(entry, connID); err != nil {
 				h.accessLog.Warn("ws_ping_failed", "conn_id", connID, "request_id", requestID, "session_id", entry.sessionID, "error", err)
 				_ = entry.conn.Close()
 				return
@@ -1106,12 +1109,13 @@ func (h *Handler) runPingLoop(entry *wsConnectionEntry, connID string, requestID
 	}
 }
 
-func (h *Handler) writePingMessage(entry *wsConnectionEntry) error {
+func (h *Handler) writePingMessage(entry *wsConnectionEntry, connID string) error {
 	if entry == nil || entry.conn == nil {
 		return fmt.Errorf("connection entry is nil")
 	}
 
 	entry.recordPingSent()
+	h.outLog.Debug(controlFrameLogMessage("ping"), "direction", "out", "frame", "ping", "conn_id", connID)
 	return h.withWriteLock(entry, func(conn *websocket.Conn, deadline time.Time) error {
 		return conn.WriteControl(websocket.PingMessage, []byte("ping"), deadline)
 	})
@@ -1596,6 +1600,18 @@ func resolveRequestID(requestID string, msgID int64) string {
 		return requestID
 	}
 	return fmt.Sprintf("srv-%d", msgID)
+}
+
+func controlFrameLogMessage(frame string) string {
+	payload := map[string]string{
+		"type":  "control",
+		"frame": frame,
+	}
+	b, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Sprintf("{\"type\":\"control\",\"frame\":\"%s\"}", frame)
+	}
+	return string(b)
 }
 
 func durationSecondsCeil(d time.Duration) int {
