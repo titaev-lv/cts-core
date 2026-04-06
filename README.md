@@ -83,6 +83,9 @@ mysql -h 127.0.0.1 -u root -proot -e "USE ct_system; SHOW TABLES;"
 
 ```bash
 make smoke-core-ws
+
+# Полный прогон с restart/shutdown checks
+make smoke-core-ws-full
 ```
 
 Этот smoke-сценарий проверяет hard-cutover модель:
@@ -102,6 +105,31 @@ make smoke-core-ws
 ```bash
 SMOKE_SKIP_UP=0 SMOKE_NO_RESTART=0 ./tests/smoke_phase2_ws_lifecycle.sh
 ```
+
+Рекомендуемый стабильный запуск из корня workspace (wss + mTLS + protocol v1):
+
+```bash
+CTS_WS_PROTOCOL_VERSION=1 \
+CTS_WS_CLIENT_CA_PATH=$PWD/volumes/pki/ca/ca.crt \
+CTS_WS_CLIENT_CERT_PATH=$PWD/volumes/pki/cts-core/clients/trader-3/trader-3-cts.crt \
+CTS_WS_CLIENT_KEY_PATH=$PWD/volumes/pki/cts-core/clients/trader-3/trader-3-cts.key \
+CTS_SMOKE_CERTIFICATE_CN=trader-3-cts-client \
+make smoke-core-ws
+```
+
+Расширенный прогон устойчивости (проверка restart/stop-start):
+
+```bash
+CTS_WS_PROTOCOL_VERSION=1 \
+CTS_WS_CLIENT_CA_PATH=$PWD/volumes/pki/ca/ca.crt \
+CTS_WS_CLIENT_CERT_PATH=$PWD/volumes/pki/cts-core/clients/trader-3/trader-3-cts.crt \
+CTS_WS_CLIENT_KEY_PATH=$PWD/volumes/pki/cts-core/clients/trader-3/trader-3-cts.key \
+CTS_SMOKE_CERTIFICATE_CN=trader-3-cts-client \
+SMOKE_SKIP_UP=1 SMOKE_NO_RESTART=0 \
+make smoke-core-ws-full
+```
+
+Если `trader-1` уже держит постоянную WS-сессию, используйте сертификат другого CN (например, `trader-3-cts-client`) для deterministic smoke.
 
 ## Roadmap (операционный)
 
