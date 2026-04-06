@@ -87,12 +87,12 @@ func TestCreateSession_RecoversStaleActiveSession(t *testing.T) {
 		createErrs: []error{duplicateEntryErr(), nil},
 		activeByTrader: map[int]*models.TraderSession{
 			7: {
-				TraderID:       7,
-				SessionID:      "old-stale-session",
-				ConnectedAt:    now.Add(-10 * time.Minute),
-				LastHeartbeat:  now.Add(-6 * time.Minute),
-				EndedAt:        sql.NullTime{},
-				ErrorMessage:   sql.NullString{},
+				TraderID:         7,
+				SessionID:        "old-stale-session",
+				ConnectedAt:      now.Add(-10 * time.Minute),
+				LastHeartbeat:    now.Add(-6 * time.Minute),
+				EndedAt:          sql.NullTime{},
+				ErrorMessage:     sql.NullString{},
 				DisconnectReason: sql.NullString{},
 			},
 		},

@@ -743,7 +743,8 @@ func (h *Handler) Serve(c *gin.Context) {
 				}); err != nil {
 					if errors.Is(err, ErrActiveSessionExists) {
 						h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errDuplicateConnection, "Trader already has an active session", map[string]interface{}{"trader_id": canonicalTraderID}))
-						continue
+						_ = h.closeConnection(connEntry, websocket.ClosePolicyViolation, "duplicate_connection")
+						return
 					}
 					h.sendEnvelope(conn, connID, msgID, newErrorEnvelope(msgRequestID, errInternalError, "Failed to create trader session", nil))
 					continue

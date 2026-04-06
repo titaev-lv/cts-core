@@ -1123,6 +1123,14 @@ func TestRegisterFailsWithDuplicateConnectionWhenActiveSessionExists(t *testing.
 	resp := readEnvelope(t, conn)
 	assertErrorCode(t, resp, errDuplicateConnection)
 	assertErrorDetail(t, resp, "trader_id", defaultTestClientCN)
+
+	_, _, err := readMessageWithTimeout(conn, 300*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected websocket close after duplicate connection error")
+	}
+	if _, ok := err.(*websocket.CloseError); !ok {
+		t.Fatalf("expected websocket.CloseError, got %T (%v)", err, err)
+	}
 }
 
 func TestUnsupportedProtocolVersion(t *testing.T) {
