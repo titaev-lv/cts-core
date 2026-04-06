@@ -4,8 +4,16 @@
 package rest
 
 import (
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -34,6 +42,8 @@ func TestRouterIntegration_HealthMetricsAndWSLifecycle(t *testing.T) {
 		t.Fatalf("state manager init: %v", err)
 	}
 
+	const traderCN = "it-trader-cn-1"
+
 	router, _ := NewRouter(nil, Options{
 		RESTRequestsPerSecond: 1000,
 		RESTBurst:             1000,
@@ -53,15 +63,36 @@ func TestRouterIntegration_HealthMetricsAndWSLifecycle(t *testing.T) {
 		ServiceVersion:        "integration-test",
 	})
 
-	ts := httptest.NewServer(router)
+	caCert, caKey, caPool := generateTestCA(t)
+	serverCert := generateSignedTLSCert(t, caCert, caKey, "localhost", false)
+	clientCert := generateSignedTLSCert(t, caCert, caKey, traderCN, true)
+
+	ts := httptest.NewUnstartedServer(router)
+	ts.TLS = &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+	}
+	ts.StartTLS()
 	defer ts.Close()
 
+	tlsClientConfig := &tls.Config{
+		MinVersion:   tls.VersionTLS13,
+		RootCAs:      caPool,
+		Certificates: []tls.Certificate{clientCert},
+		ServerName:   "localhost",
+	}
+
 	wsURL := toWSURL(ts.URL + "/ws")
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	dialer := websocket.Dialer{TLSClientConfig: tlsClientConfig}
+	conn, _, err := dialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial ws: %v", err)
 	}
 	defer conn.Close()
+
+	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsClientConfig}}
 
 	_, connectedRaw, err := conn.ReadMessage()
 	if err != nil {
@@ -77,7 +108,7 @@ func TestRouterIntegration_HealthMetricsAndWSLifecycle(t *testing.T) {
 		ProtocolVersion: "1",
 		RequestID:       "it-reg-1",
 		Payload: mustJSON(t, map[string]interface{}{
-			"trader_id": "it-trader-1",
+			"trader_id": traderCN,
 			"version":   "1.0.0",
 			"region":    "it",
 		}),
@@ -94,7 +125,7 @@ func TestRouterIntegration_HealthMetricsAndWSLifecycle(t *testing.T) {
 		ProtocolVersion: "1",
 		RequestID:       "it-hb-1",
 		Payload: mustJSON(t, map[string]interface{}{
-			"trader_id": "it-trader-1",
+			"trader_id": traderCN,
 			"status":    "active",
 		}),
 	}
@@ -104,7 +135,7 @@ func TestRouterIntegration_HealthMetricsAndWSLifecycle(t *testing.T) {
 		t.Fatalf("expected trader.heartbeat_ack, got %q", hbResp.Action)
 	}
 
-	healthResp, err := http.Get(ts.URL + "/health")
+	healthResp, err := httpClient.Get(ts.URL + "/health")
 	if err != nil {
 		t.Fatalf("GET /health: %v", err)
 	}
@@ -129,7 +160,7 @@ func TestRouterIntegration_HealthMetricsAndWSLifecycle(t *testing.T) {
 		t.Fatalf("expected at least one active ws connection in health response")
 	}
 
-	metricsResp, err := http.Get(ts.URL + "/metrics")
+	metricsResp, err := httpClient.Get(ts.URL + "/metrics")
 	if err != nil {
 		t.Fatalf("GET /metrics: %v", err)
 	}
@@ -153,8 +184,100 @@ func TestRouterIntegration_HealthMetricsAndWSLifecycle(t *testing.T) {
 
 func toWSURL(httpURL string) string {
 	u, _ := url.Parse(httpURL)
-	u.Scheme = "ws"
+	if strings.EqualFold(u.Scheme, "https") {
+		u.Scheme = "wss"
+	} else {
+		u.Scheme = "ws"
+	}
 	return u.String()
+}
+
+func generateTestCA(t *testing.T) (*x509.Certificate, *rsa.PrivateKey, *x509.CertPool) {
+	t.Helper()
+
+	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate ca key: %v", err)
+	}
+
+	caTemplate := &x509.Certificate{
+		SerialNumber:          mustRandomSerial(t),
+		Subject:               pkix.Name{CommonName: "cts-rest-integration-test-ca"},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+	}
+
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create ca certificate: %v", err)
+	}
+
+	parsedCA, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatalf("parse ca certificate: %v", err)
+	}
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(parsedCA)
+
+	return parsedCA, caKey, caPool
+}
+
+func generateSignedTLSCert(t *testing.T, caCert *x509.Certificate, caKey *rsa.PrivateKey, commonName string, isClient bool) tls.Certificate {
+	t.Helper()
+
+	leafKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate leaf key: %v", err)
+	}
+
+	leafTemplate := &x509.Certificate{
+		SerialNumber: mustRandomSerial(t),
+		Subject:      pkix.Name{CommonName: commonName},
+		NotBefore:    time.Now().Add(-1 * time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+	}
+
+	if isClient {
+		leafTemplate.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+	} else {
+		leafTemplate.ExtKeyUsage = []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}
+		leafTemplate.DNSNames = []string{"localhost"}
+		leafTemplate.IPAddresses = []net.IP{net.ParseIP("127.0.0.1")}
+	}
+
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create leaf certificate: %v", err)
+	}
+
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(leafKey)})
+
+	leafTLS, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		t.Fatalf("build tls key pair: %v", err)
+	}
+
+	return leafTLS
+}
+
+func mustRandomSerial(t *testing.T) *big.Int {
+	t.Helper()
+
+	max := new(big.Int).Lsh(big.NewInt(1), 128)
+	serial, err := rand.Int(rand.Reader, max)
+	if err != nil {
+		t.Fatalf("generate serial number: %v", err)
+	}
+	if serial.Sign() == 0 {
+		return big.NewInt(1)
+	}
+	return serial
 }
 
 func writeWS(t *testing.T, conn *websocket.Conn, msg wsEnvelope) {
