@@ -21,6 +21,7 @@ COMPOSE_FILE="${COMPOSE_FILE:-$COMPOSE_DIR/docker-compose.yml}"
 CTS_HEALTH_URL="${CTS_HEALTH_URL:-}"
 CTS_METRICS_URL="${CTS_METRICS_URL:-}"
 CTS_WS_URL="${CTS_WS_URL:-}"
+CTS_WS_PROTOCOL_VERSION="${CTS_WS_PROTOCOL_VERSION:-1}"
 CTS_WS_CLIENT_CA_PATH="${CTS_WS_CLIENT_CA_PATH:-$COMPOSE_DIR/volumes/pki/ca/ca.crt}"
 CTS_WS_CLIENT_CERT_PATH="${CTS_WS_CLIENT_CERT_PATH:-$COMPOSE_DIR/volumes/pki/cts-core/clients/trader-1/trader-1-cts.crt}"
 CTS_WS_CLIENT_KEY_PATH="${CTS_WS_CLIENT_KEY_PATH:-$COMPOSE_DIR/volumes/pki/cts-core/clients/trader-1/trader-1-cts.key}"
@@ -61,6 +62,25 @@ fi
 echo "[smoke] compose file: $COMPOSE_FILE"
 echo "[smoke] trader identity CN: $CTS_SMOKE_CERTIFICATE_CN"
 
+curl_smoke() {
+  local url="$1"
+  local out_path="$2"
+
+  if curl -k -fsS "$url" >"$out_path" 2>/dev/null; then
+    return 0
+  fi
+
+  if curl -k -fsS \
+    --cacert "$CTS_WS_CLIENT_CA_PATH" \
+    --cert "$CTS_WS_CLIENT_CERT_PATH" \
+    --key "$CTS_WS_CLIENT_KEY_PATH" \
+    "$url" >"$out_path" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
 SERVICES=(mysql hsm cts-core)
 if [ "$WITH_TRADER" -eq 1 ]; then
   SERVICES+=(trader)
@@ -86,7 +106,7 @@ fi
 HEALTH_OK=0
 for i in $(seq 1 30); do
   for candidate in "${CANDIDATE_HEALTH_URLS[@]}"; do
-    if curl -k -fsS "$candidate" >/tmp/cts-core-health.json 2>/dev/null; then
+    if curl_smoke "$candidate" /tmp/cts-core-health.json; then
       CTS_HEALTH_URL="$candidate"
       HEALTH_OK=1
       break
@@ -143,7 +163,11 @@ fi
 echo "[smoke] metrics url: $CTS_METRICS_URL"
 
 echo "[smoke] checking metrics endpoint"
-METRICS_PAYLOAD="$(curl -k -fsS "$CTS_METRICS_URL" || true)"
+if ! curl_smoke "$CTS_METRICS_URL" /tmp/cts-core-metrics.prom; then
+  echo "[smoke] ERROR: metrics endpoint is not reachable: $CTS_METRICS_URL" >&2
+  exit 1
+fi
+METRICS_PAYLOAD="$(cat /tmp/cts-core-metrics.prom)"
 if ! echo "$METRICS_PAYLOAD" | grep -Eq "go_goroutines|cts_core_ws_active_connections"; then
   echo "[smoke] ERROR: metrics endpoint missing expected prometheus series: $CTS_METRICS_URL" >&2
   exit 1
@@ -201,6 +225,7 @@ fi
 
 echo "[smoke] running ws lifecycle client (connect/register/heartbeat/disconnect)"
 CTS_WS_URL="$CTS_WS_URL" \
+CTS_WS_PROTOCOL_VERSION="$CTS_WS_PROTOCOL_VERSION" \
 CTS_WS_CLIENT_CA_PATH="$CTS_WS_CLIENT_CA_PATH" \
 CTS_WS_CLIENT_CERT_PATH="$CTS_WS_CLIENT_CERT_PATH" \
 CTS_WS_CLIENT_KEY_PATH="$CTS_WS_CLIENT_KEY_PATH" \
@@ -218,6 +243,7 @@ cleanup_dup_logs() {
 trap cleanup_dup_logs EXIT
 
 CTS_WS_URL="$CTS_WS_URL" \
+CTS_WS_PROTOCOL_VERSION="$CTS_WS_PROTOCOL_VERSION" \
 CTS_WS_CLIENT_CA_PATH="$CTS_WS_CLIENT_CA_PATH" \
 CTS_WS_CLIENT_CERT_PATH="$CTS_WS_CLIENT_CERT_PATH" \
 CTS_WS_CLIENT_KEY_PATH="$CTS_WS_CLIENT_KEY_PATH" \
@@ -252,6 +278,7 @@ if [ "$PRIMARY_READY" != "1" ]; then
 fi
 
 if ! CTS_WS_URL="$CTS_WS_URL" \
+  CTS_WS_PROTOCOL_VERSION="$CTS_WS_PROTOCOL_VERSION" \
   CTS_WS_CLIENT_CA_PATH="$CTS_WS_CLIENT_CA_PATH" \
   CTS_WS_CLIENT_CERT_PATH="$CTS_WS_CLIENT_CERT_PATH" \
   CTS_WS_CLIENT_KEY_PATH="$CTS_WS_CLIENT_KEY_PATH" \
@@ -334,7 +361,11 @@ echo "[smoke] scheduler gate check passed"
 
 AUDIT_LOG_PATH="${CTS_AUDIT_LOG_PATH:-$COMPOSE_DIR/services/cts-core/logs/audit.log}"
 if [ -f "$AUDIT_LOG_PATH" ]; then
-  AUDIT_CREATE_COUNT="$(tail -n 500 "$AUDIT_LOG_PATH" | awk -v cn="$CTS_SMOKE_CERTIFICATE_CN" 'index($0,"\"action\":\"TRADER_CREATE\"") && index($0,"\"certificate_cn\":\"" cn "\"") {c++} END {print c+0}')"
+  AUDIT_CREATE_COUNT="$(tail -n 500 "$AUDIT_LOG_PATH" | awk -v cn="$CTS_SMOKE_CERTIFICATE_CN" '
+    index($0, "action=TRADER_CREATE") && index($0, "certificate_cn=" cn) { c++ }
+    index($0, "\"action\":\"TRADER_CREATE\"") && index($0, "\"certificate_cn\":\"" cn "\"") { c++ }
+    END {print c+0}
+  ')"
   if [ "$AUDIT_CREATE_COUNT" = "0" ]; then
     echo "[smoke] WARNING: TRADER_CREATE audit event not found in $AUDIT_LOG_PATH for CN '$CTS_SMOKE_CERTIFICATE_CN'" >&2
   else
@@ -346,11 +377,20 @@ fi
 
 echo "[smoke] checking ws lifecycle logs (last 5m)"
 LOGS="$(docker compose -f "$COMPOSE_FILE" logs --since 5m cts-core 2>/dev/null || true)"
-WS_OUT_LOG="$SCRIPT_DIR/../logs/ws_out.log"
+WS_LOG_PATH=""
+if [ -f "$SCRIPT_DIR/../logs/ws.log" ]; then
+  WS_LOG_PATH="$SCRIPT_DIR/../logs/ws.log"
+else
+  WS_LOG_CANDIDATE="$(ls -1t "$SCRIPT_DIR"/../logs/ws-*.log 2>/dev/null | head -n 1 || true)"
+  if [ -n "$WS_LOG_CANDIDATE" ] && [ -f "$WS_LOG_CANDIDATE" ]; then
+    WS_LOG_PATH="$WS_LOG_CANDIDATE"
+  fi
+fi
+
 if echo "$LOGS" | grep -Eq "ws_register|ws_heartbeat|ws_disconnect|ws_timeout"; then
   echo "[smoke] ws lifecycle events found"
-elif [ -f "$WS_OUT_LOG" ] && tail -n 300 "$WS_OUT_LOG" | grep -Eq "trader.register_ack|trader.heartbeat_ack|\"event\":\"error\""; then
-  echo "[smoke] ws lifecycle events found in ws_out.log"
+elif [ -n "$WS_LOG_PATH" ] && tail -n 300 "$WS_LOG_PATH" | grep -Eq "ws_register|ws_heartbeat|ws_disconnect|ws_timeout"; then
+  echo "[smoke] ws lifecycle events found in $(basename "$WS_LOG_PATH")"
 else
   echo "[smoke] WARNING: ws lifecycle events not found in recent compose logs/output" >&2
 fi
@@ -361,13 +401,19 @@ else
   echo "[smoke] restart check"
   docker compose -f "$COMPOSE_FILE" restart cts-core >/dev/null
   sleep 2
-  curl -k -fsS "$CTS_HEALTH_URL" >/dev/null
+  if ! curl_smoke "$CTS_HEALTH_URL" /tmp/cts-core-health-after-restart.json; then
+    echo "[smoke] ERROR: health endpoint not reachable after restart: $CTS_HEALTH_URL" >&2
+    exit 1
+  fi
 
   echo "[smoke] shutdown/start check"
   docker compose -f "$COMPOSE_FILE" stop cts-core >/dev/null
   docker compose -f "$COMPOSE_FILE" start cts-core >/dev/null
   sleep 2
-  curl -k -fsS "$CTS_HEALTH_URL" >/dev/null
+  if ! curl_smoke "$CTS_HEALTH_URL" /tmp/cts-core-health-after-start.json; then
+    echo "[smoke] ERROR: health endpoint not reachable after start: $CTS_HEALTH_URL" >&2
+    exit 1
+  fi
 fi
 
 echo "[smoke] PASS: hard-cutover ws lifecycle smoke checks completed"

@@ -80,6 +80,10 @@ func main() {
 	if expectedTraderID == "" {
 		expectedTraderID = "trader-1-cts-client"
 	}
+	protocolVersion := strings.TrimSpace(envOrDefault("CTS_WS_PROTOCOL_VERSION", "1"))
+	if protocolVersion == "" {
+		fail("CTS_WS_PROTOCOL_VERSION must not be empty")
+	}
 	expectedRegisterErrorCode := strings.TrimSpace(os.Getenv("CTS_SMOKE_EXPECT_REGISTER_ERROR_CODE"))
 	holdSec := parseOptionalIntEnv("CTS_SMOKE_HOLD_SEC")
 
@@ -111,7 +115,7 @@ func main() {
 	registerReq := envelope{
 		Type:            "request",
 		Action:          "trader.register",
-		ProtocolVersion: "2",
+		ProtocolVersion: protocolVersion,
 		RequestID:       registerRequestID,
 		Payload: mustJSON(map[string]interface{}{
 			"version": "1.0.0",
@@ -154,7 +158,7 @@ func main() {
 	heartbeatReq := envelope{
 		Type:            "request",
 		Action:          "trader.heartbeat",
-		ProtocolVersion: "2",
+		ProtocolVersion: protocolVersion,
 		RequestID:       heartbeatRequestID,
 		Payload: mustJSON(map[string]interface{}{
 			"session_id": regAck.SessionID,
