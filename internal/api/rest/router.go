@@ -66,7 +66,7 @@ func NewRouter(dbClient *db.MySQLClient, opts Options) (*gin.Engine, *ws.Handler
 			AllowedCommonNames:  opts.WSAllowedCommonNames,
 			AllowedOUs:          opts.WSAllowedOUs,
 			AllowedDNSNames:     opts.WSAllowedDNSNames,
-			Persistence:         newWSSessionPersistence(dbClient),
+			Persistence:         newWSSessionPersistence(dbClient, opts.WSHeartbeatTimeout),
 			StateManager:        opts.StateManager,
 		})
 	}

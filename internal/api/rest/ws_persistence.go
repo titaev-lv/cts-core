@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
@@ -19,13 +20,14 @@ import (
 type wsSessionPersistence struct {
 	traderRepo        repository.TraderRepository
 	traderSessionRepo repository.TraderSessionRepository
+	staleAfter        time.Duration
 	auditLog          interface {
 		Info(msg string, args ...any)
 		Warn(msg string, args ...any)
 	}
 }
 
-func newWSSessionPersistence(dbClient *db.MySQLClient) ws.SessionPersistence {
+func newWSSessionPersistence(dbClient *db.MySQLClient, staleAfter time.Duration) ws.SessionPersistence {
 	if dbClient == nil || dbClient.DB() == nil {
 		return nil
 	}
@@ -35,6 +37,7 @@ func newWSSessionPersistence(dbClient *db.MySQLClient) ws.SessionPersistence {
 	return &wsSessionPersistence{
 		traderRepo:        repo.Trader(),
 		traderSessionRepo: repo.TraderSession(),
+		staleAfter:        staleAfter,
 		auditLog:          logger.GetAudit("ws_persistence"),
 	}
 }
@@ -89,12 +92,77 @@ func (p *wsSessionPersistence) CreateSession(ctx context.Context, input ws.Sessi
 		LastHeartbeat:  input.LastHeartbeat,
 	}
 	if err := p.traderSessionRepo.Create(ctx, session); err != nil {
-		if isMySQLDuplicateEntryError(err) {
+		if !isMySQLDuplicateEntryError(err) {
+			return err
+		}
+
+		recovered, recoverErr := p.tryRecoverStaleActiveSession(ctx, input)
+		if recoverErr != nil {
+			return recoverErr
+		}
+		if !recovered {
 			return fmt.Errorf("%w: trader_id=%d", ws.ErrActiveSessionExists, input.TraderID)
 		}
-		return err
+
+		if retryErr := p.traderSessionRepo.Create(ctx, session); retryErr != nil {
+			if isMySQLDuplicateEntryError(retryErr) {
+				return fmt.Errorf("%w: trader_id=%d", ws.ErrActiveSessionExists, input.TraderID)
+			}
+			return retryErr
+		}
 	}
 	return nil
+}
+
+func (p *wsSessionPersistence) tryRecoverStaleActiveSession(ctx context.Context, input ws.SessionCreateInput) (bool, error) {
+	if p == nil || p.traderSessionRepo == nil || p.staleAfter <= 0 {
+		return false, nil
+	}
+
+	active, err := p.traderSessionRepo.GetActiveByTraderID(ctx, input.TraderID)
+	if err != nil {
+		return false, err
+	}
+	if active == nil {
+		return false, nil
+	}
+
+	now := input.ConnectedAt
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if !isSessionStale(active, now, p.staleAfter) {
+		return false, nil
+	}
+
+	errMsg := fmt.Sprintf("stale session auto-finalized before new register: stale_after=%s last_heartbeat=%s", p.staleAfter, active.LastHeartbeat.UTC().Format(time.RFC3339Nano))
+	if err := p.traderSessionRepo.EndSession(ctx, active.SessionID, models.DisconnectTimeout, &errMsg); err != nil {
+		return false, err
+	}
+	if p.auditLog != nil {
+		p.auditLog.Warn("ws_stale_active_session_recovered", "trader_id", input.TraderID, "stale_session_id", active.SessionID, "stale_after", p.staleAfter.String(), "last_heartbeat", active.LastHeartbeat.UTC().Format(time.RFC3339Nano))
+	}
+
+	return true, nil
+}
+
+func isSessionStale(session *models.TraderSession, now time.Time, staleAfter time.Duration) bool {
+	if session == nil || staleAfter <= 0 {
+		return false
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+
+	reference := session.LastHeartbeat
+	if reference.IsZero() {
+		reference = session.ConnectedAt
+	}
+	if reference.IsZero() {
+		return false
+	}
+
+	return !reference.Add(staleAfter).After(now)
 }
 
 func (p *wsSessionPersistence) UpdateTraderRelease(ctx context.Context, traderID int, release string) error {
