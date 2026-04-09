@@ -5,10 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	mysqlDriver "github.com/go-sql-driver/mysql"
+	"github.com/jmoiron/sqlx"
 	"github.com/titaev-lv/cts-core/internal/api/ws"
 	"github.com/titaev-lv/cts-core/internal/db/models"
 )
@@ -169,4 +172,73 @@ func TestIsSessionStale_Boundary(t *testing.T) {
 	if isSessionStale(s, now, 4*time.Minute) {
 		t.Fatalf("expected session to be fresh with larger stale window")
 	}
+}
+
+func TestListAvailableExchanges_FromDB(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatalf("sqlmock.New: %v", err)
+	}
+	defer db.Close()
+
+	sqlxDB := sqlx.NewDb(db, "sqlmock")
+	p := &wsSessionPersistence{db: sqlxDB}
+
+	rows := sqlmock.NewRows([]string{"exchange_id", "code", "name", "enabled", "ws_endpoint", "rest_endpoint", "market_types"}).
+		AddRow(2, "binance", "Binance", true, "wss://ws.example", "https://api.example", "spot,futures").
+		AddRow(7, "kucoin", "Kucoin", true, "", "https://api.kucoin.com", "spot")
+
+	mock.ExpectQuery("SELECT[\\s\\S]*FROM[\\s\\S]*TRADE t[\\s\\S]*ORDER BY[\\s\\S]*code").WillReturnRows(rows)
+
+	items, err := p.ListAvailableExchanges(context.Background())
+	if err != nil {
+		t.Fatalf("ListAvailableExchanges returned error: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 exchanges, got %d", len(items))
+	}
+
+	if items[0].Code != "binance" || items[0].ExchangeID != 2 {
+		t.Fatalf("unexpected first entry: %+v", items[0])
+	}
+	if items[0].RESTEndpoint != "https://api.example" {
+		t.Fatalf("unexpected REST endpoint for first entry: %q", items[0].RESTEndpoint)
+	}
+	if items[0].WSPublicEndpoint != "wss://ws.example" || items[0].WSPrivateEndpoint != "wss://ws.example" {
+		t.Fatalf("unexpected WS endpoint mapping: public=%q private=%q", items[0].WSPublicEndpoint, items[0].WSPrivateEndpoint)
+	}
+	if !containsString(items[0].MarketTypes, "spot") || !containsString(items[0].MarketTypes, "futures") {
+		t.Fatalf("expected spot and futures market types, got %v", items[0].MarketTypes)
+	}
+
+	if items[1].Code != "kucoin" || items[1].ExchangeID != 7 {
+		t.Fatalf("unexpected second entry: %+v", items[1])
+	}
+	if items[1].WSPublicEndpoint != "" || items[1].WSPrivateEndpoint != "" {
+		t.Fatalf("expected empty WS endpoints for second entry, got public=%q private=%q", items[1].WSPublicEndpoint, items[1].WSPrivateEndpoint)
+	}
+	if !reflect.DeepEqual(items[1].MarketTypes, []string{"spot"}) {
+		t.Fatalf("expected only spot market type for second entry, got %v", items[1].MarketTypes)
+	}
+
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet SQL expectations: %v", err)
+	}
+}
+
+func TestParseMarketTypesCSV(t *testing.T) {
+	got := parseMarketTypesCSV("spot, futures, SPOT, unknown")
+	want := []string{"spot", "futures"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected market types parse result: got=%v want=%v", got, want)
+	}
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }

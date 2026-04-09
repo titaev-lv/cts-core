@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -18,6 +19,7 @@ import (
 )
 
 type wsSessionPersistence struct {
+	db                sqlx.ExtContext
 	traderRepo        repository.TraderRepository
 	traderSessionRepo repository.TraderSessionRepository
 	staleAfter        time.Duration
@@ -35,11 +37,107 @@ func newWSSessionPersistence(dbClient *db.MySQLClient, staleAfter time.Duration)
 	sqlxDB := sqlx.NewDb(dbClient.DB(), "mysql")
 	repo := repository.New(sqlxDB)
 	return &wsSessionPersistence{
+		db:                sqlxDB,
 		traderRepo:        repo.Trader(),
 		traderSessionRepo: repo.TraderSession(),
 		staleAfter:        staleAfter,
 		auditLog:          logger.GetAudit("ws_persistence"),
 	}
+}
+
+type wsAvailableExchangeRow struct {
+	ExchangeID   int            `db:"exchange_id"`
+	Code         string         `db:"code"`
+	Name         string         `db:"name"`
+	Enabled      bool           `db:"enabled"`
+	WSEndpoint   sql.NullString `db:"ws_endpoint"`
+	RESTEndpoint sql.NullString `db:"rest_endpoint"`
+	MarketTypes  sql.NullString `db:"market_types"`
+}
+
+func (p *wsSessionPersistence) ListAvailableExchanges(ctx context.Context) ([]ws.ExchangeCatalogEntry, error) {
+	if p == nil || p.db == nil {
+		return nil, nil
+	}
+
+	const query = "SELECT " +
+		"e.ID AS exchange_id, " +
+		"LOWER(e.NAME) AS code, " +
+		"e.NAME AS name, " +
+		"e.ACTIVE AS enabled, " +
+		"NULLIF(TRIM(e.WEBSOCKET_URL), '') AS ws_endpoint, " +
+		"COALESCE(NULLIF(TRIM(e.BASE_URL), ''), NULLIF(TRIM(e.URL), '')) AS rest_endpoint, " +
+		"GROUP_CONCAT(DISTINCT LOWER(tp.MARKET_TYPE) ORDER BY LOWER(tp.MARKET_TYPE) SEPARATOR ',') AS market_types " +
+		"FROM TRADE t " +
+		"INNER JOIN `USER` u ON u.ID = t.UID " +
+		"INNER JOIN USERS_GROUP ug ON ug.UID = u.ID AND ug.GID = 2 " +
+		"INNER JOIN `GROUP` g ON g.ID = ug.GID " +
+		"INNER JOIN TRADE_PAIRS tps ON tps.TRADE_ID = t.ID " +
+		"INNER JOIN EXCHANGE_ACCOUNTS ea ON ea.ID = tps.EAID " +
+		"INNER JOIN TRADE_PAIR tp ON tp.ID = tps.PAIR_ID " +
+		"INNER JOIN EXCHANGE e ON e.ID = tp.EXCHANGE_ID AND e.ID = ea.EXID " +
+		"WHERE t.ACTIVE = 1 " +
+		"AND u.ACTIVE = 1 " +
+		"AND g.ACTIVE = 1 " +
+		"AND ea.ACTIVE = 1 " +
+		"AND tp.ACTIVE = 1 " +
+		"AND e.ACTIVE = 1 " +
+		"AND COALESCE(e.DELETED, 0) = 0 " +
+		"GROUP BY e.ID, e.NAME, e.ACTIVE, e.WEBSOCKET_URL, e.BASE_URL, e.URL " +
+		"ORDER BY code"
+
+	rows := make([]wsAvailableExchangeRow, 0)
+	if err := sqlx.SelectContext(ctx, p.db, &rows, query); err != nil {
+		return nil, fmt.Errorf("list available exchanges: %w", err)
+	}
+
+	items := make([]ws.ExchangeCatalogEntry, 0, len(rows))
+	for _, row := range rows {
+		entry := ws.ExchangeCatalogEntry{
+			ExchangeID:   row.ExchangeID,
+			Code:         strings.TrimSpace(row.Code),
+			Name:         strings.TrimSpace(row.Name),
+			Enabled:      row.Enabled,
+			MarketTypes:  parseMarketTypesCSV(row.MarketTypes.String),
+			RESTEndpoint: strings.TrimSpace(row.RESTEndpoint.String),
+			RateLimits: map[string]int{
+				"global": 20,
+			},
+		}
+		wsEndpoint := strings.TrimSpace(row.WSEndpoint.String)
+		if wsEndpoint != "" {
+			entry.WSPublicEndpoint = wsEndpoint
+			entry.WSPrivateEndpoint = wsEndpoint
+		}
+		if len(entry.MarketTypes) == 0 {
+			entry.MarketTypes = []string{"spot"}
+		}
+		items = append(items, entry)
+	}
+
+	return items, nil
+}
+
+func parseMarketTypesCSV(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, 2)
+	out := make([]string, 0, 2)
+	for _, item := range strings.Split(raw, ",") {
+		value := strings.ToLower(strings.TrimSpace(item))
+		if value != "spot" && value != "futures" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+
+	return out
 }
 
 func (p *wsSessionPersistence) ResolveOrCreateTraderByCN(ctx context.Context, certificateCN string) (ws.TraderIdentity, error) {

@@ -108,6 +108,10 @@ type SessionPersistence interface {
 	FinalizeSession(ctx context.Context, sessionID string, reason string, errorMsg *string) error
 }
 
+type exchangeCatalogProvider interface {
+	ListAvailableExchanges(ctx context.Context) ([]ExchangeCatalogEntry, error)
+}
+
 type DBRetryConfig struct {
 	MaxAttempts  int
 	InitialDelay time.Duration
@@ -189,8 +193,8 @@ type TraderSnapshot struct {
 
 const defaultExchangeCatalogVersion = "2026-03-15T00:00:00Z"
 
-func defaultAvailableExchanges() []exchangeCatalogEntry {
-	return []exchangeCatalogEntry{
+func defaultAvailableExchanges() []ExchangeCatalogEntry {
+	return []ExchangeCatalogEntry{
 		{
 			ExchangeID:        1,
 			Code:              "binance",
@@ -268,7 +272,7 @@ func normalizeCapabilities(capabilities []string) []string {
 	return items
 }
 
-func buildEffectiveExchanges(capabilities []string, available []exchangeCatalogEntry) []string {
+func buildEffectiveExchanges(capabilities []string, available []ExchangeCatalogEntry) []string {
 	enabledCodes := make([]string, 0, len(available))
 	enabledSet := make(map[string]struct{}, len(available))
 	for _, ex := range available {
@@ -704,6 +708,15 @@ func (h *Handler) Serve(c *gin.Context) {
 			capabilities := normalizeCapabilities(req.Capabilities)
 			clientRelease := strings.TrimSpace(req.Release)
 			availableExchanges := defaultAvailableExchanges()
+			if provider, ok := h.persistence.(exchangeCatalogProvider); ok {
+				catalog, err := provider.ListAvailableExchanges(c.Request.Context())
+				if err != nil {
+					h.accessLog.Warn("ws_exchange_catalog_load_failed", "conn_id", connID, "request_id", msgRequestID, "error", err)
+					availableExchanges = nil
+				} else {
+					availableExchanges = catalog
+				}
+			}
 			effectiveExchanges := buildEffectiveExchanges(capabilities, availableExchanges)
 			loadIndex, tradeLoadIndex := extractCurrentLoadIndices(req.CurrentLoad)
 			canonicalTraderID := strings.TrimSpace(clientCertCN)

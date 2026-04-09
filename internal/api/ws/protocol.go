@@ -77,7 +77,7 @@ type registerRequest struct {
 	CurrentLoad  map[string]interface{} `json:"current_load,omitempty"`
 }
 
-type exchangeCatalogEntry struct {
+type ExchangeCatalogEntry struct {
 	ExchangeID        int            `json:"exchange_id"`
 	Code              string         `json:"code"`
 	Name              string         `json:"name"`
@@ -96,7 +96,7 @@ type registerAck struct {
 	SessionTimeoutSec      int                    `json:"session_timeout_sec"`
 	ServerTime             int64                  `json:"server_time"`
 	ExchangeCatalogVersion string                 `json:"exchange_catalog_version,omitempty"`
-	AvailableExchanges     []exchangeCatalogEntry `json:"available_exchanges,omitempty"`
+	AvailableExchanges     []ExchangeCatalogEntry `json:"available_exchanges,omitempty"`
 	EffectiveExchanges     []string               `json:"effective_exchanges,omitempty"`
 }
 
