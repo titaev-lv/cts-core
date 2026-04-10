@@ -189,7 +189,7 @@ func TestRegisterSuccess(t *testing.T) {
 	}
 }
 
-func TestRegisterAckIncludesExchangeCatalogAndEffectiveExchanges(t *testing.T) {
+func TestRegisterAckIsRegistrationOnlyAndTriggersLatencyBootstrap(t *testing.T) {
 	conn := dialTestWS(t)
 	defer conn.Close()
 
@@ -216,22 +216,25 @@ func TestRegisterAckIncludesExchangeCatalogAndEffectiveExchanges(t *testing.T) {
 	if err := json.Unmarshal(resp.Payload, &ack); err != nil {
 		t.Fatalf("unmarshal ack: %v", err)
 	}
-	if ack.ExchangeCatalogVersion == "" {
-		t.Fatalf("expected exchange_catalog_version in ack")
-	}
-	if len(ack.AvailableExchanges) == 0 {
-		t.Fatalf("expected available_exchanges in ack")
-	}
-	if len(ack.EffectiveExchanges) == 0 {
-		t.Fatalf("expected effective_exchanges in ack")
+	if ack.Status != "ok" || ack.TraderID == "" || ack.SessionID == "" {
+		t.Fatalf("unexpected register ack payload: %+v", ack)
 	}
 
-	joined := strings.Join(ack.EffectiveExchanges, ",")
+	latReq := readEnvelopeRaw(t, conn)
+	if latReq.Action != actionLatencyTest {
+		t.Fatalf("expected action %q after register_ack, got %q", actionLatencyTest, latReq.Action)
+	}
+
+	var payload latencyTestRequest
+	if err := json.Unmarshal(latReq.Payload, &payload); err != nil {
+		t.Fatalf("unmarshal latency test payload: %v", err)
+	}
+	joined := strings.Join(payload.Exchanges, ",")
 	if !strings.Contains(joined, "binance") || !strings.Contains(joined, "kucoin") {
-		t.Fatalf("expected effective_exchanges to include binance and kucoin, got %v", ack.EffectiveExchanges)
+		t.Fatalf("expected bootstrap latency exchanges to include binance and kucoin, got %v", payload.Exchanges)
 	}
 	if strings.Contains(joined, "unknown") {
-		t.Fatalf("expected unknown capability to be filtered out, got %v", ack.EffectiveExchanges)
+		t.Fatalf("expected unknown capability to be filtered from bootstrap latency exchanges, got %v", payload.Exchanges)
 	}
 }
 
@@ -730,8 +733,8 @@ func TestSeqAckStampedOnServerResponses(t *testing.T) {
 	if hbResp.Action != actionHeartbeatAck {
 		t.Fatalf("expected action %q, got %q", actionHeartbeatAck, hbResp.Action)
 	}
-	if hbResp.Seq != 2 {
-		t.Fatalf("expected outbound seq=2, got %d", hbResp.Seq)
+	if hbResp.Seq != 3 {
+		t.Fatalf("expected outbound seq=3 after bootstrap latency request, got %d", hbResp.Seq)
 	}
 	if hbResp.Ack != 2 {
 		t.Fatalf("expected outbound ack=2, got %d", hbResp.Ack)
@@ -739,7 +742,8 @@ func TestSeqAckStampedOnServerResponses(t *testing.T) {
 }
 
 func TestSequenceGapClosesConnection(t *testing.T) {
-	conn := dialTestWS(t)
+	h := NewHandler()
+	conn := dialTestWSWithHandler(t, h)
 	defer conn.Close()
 
 	consumeConnected(t, conn)
@@ -756,6 +760,7 @@ func TestSequenceGapClosesConnection(t *testing.T) {
 	}
 	writeJSON(t, conn, registerReq)
 	_ = readEnvelope(t, conn)
+	consumeBootstrapLatencyIfAny(t, conn)
 
 	gapReq := envelope{
 		Type:      msgTypeRequest,
@@ -769,18 +774,14 @@ func TestSequenceGapClosesConnection(t *testing.T) {
 	}
 	writeJSON(t, conn, gapReq)
 
-	_, _, err := readMessageWithTimeout(conn, 300*time.Millisecond)
+	_, _, err := readMessageWithTimeout(conn, 350*time.Millisecond)
 	if err == nil {
 		t.Fatalf("expected connection close after sequence gap")
 	}
 
-	closeErr, ok := err.(*websocket.CloseError)
-	if !ok {
-		t.Fatalf("expected websocket.CloseError, got %T (%v)", err, err)
-	}
-	if closeErr.Code != wsCloseCodeSequenceGap {
-		t.Fatalf("expected close code %d, got %d", wsCloseCodeSequenceGap, closeErr.Code)
-	}
+	waitForCondition(t, 500*time.Millisecond, func() bool {
+		return h.GetStats().Disconnect.Close4009 >= 1
+	})
 }
 
 func TestDuplicateInboundSeqIsIgnored(t *testing.T) {
@@ -1479,15 +1480,21 @@ func TestParallelConnectionsRegisterHeartbeatStability(t *testing.T) {
 				return
 			}
 
-			_, hbRespRaw, err := conn.ReadMessage()
-			if err != nil {
-				errCh <- fmt.Errorf("read heartbeat ack worker %d: %w", i, err)
-				return
-			}
 			var hbResp envelope
-			if err := json.Unmarshal(hbRespRaw, &hbResp); err != nil {
-				errCh <- fmt.Errorf("unmarshal heartbeat ack worker %d: %w", i, err)
-				return
+			for {
+				_, hbRespRaw, err := conn.ReadMessage()
+				if err != nil {
+					errCh <- fmt.Errorf("read heartbeat ack worker %d: %w", i, err)
+					return
+				}
+				if err := json.Unmarshal(hbRespRaw, &hbResp); err != nil {
+					errCh <- fmt.Errorf("unmarshal heartbeat ack worker %d: %w", i, err)
+					return
+				}
+				if hbResp.Action == actionLatencyTest && strings.HasPrefix(hbResp.RequestID, "lat-boot-") {
+					continue
+				}
+				break
 			}
 			if hbResp.Action != actionHeartbeatAck {
 				errCh <- fmt.Errorf("unexpected heartbeat action worker %d: %s", i, hbResp.Action)
@@ -1664,6 +1671,19 @@ func writeJSON(t *testing.T, conn *websocket.Conn, msg envelope) {
 
 func readEnvelope(t *testing.T, conn *websocket.Conn) envelope {
 	t.Helper()
+	for i := 0; i < 8; i++ {
+		msg := readEnvelopeRaw(t, conn)
+		if msg.Action == actionLatencyTest && strings.HasPrefix(msg.RequestID, "lat-boot-") {
+			continue
+		}
+		return msg
+	}
+	t.Fatalf("read ws message: exceeded skip budget for bootstrap latency envelopes")
+	return envelope{}
+}
+
+func readEnvelopeRaw(t *testing.T, conn *websocket.Conn) envelope {
+	t.Helper()
 	_, b, err := conn.ReadMessage()
 	if err != nil {
 		t.Fatalf("read ws message: %v", err)
@@ -1736,6 +1756,15 @@ func registerTrader(t *testing.T, conn *websocket.Conn, traderID, requestID stri
 	resp := readEnvelope(t, conn)
 	if resp.Action != actionRegisterAck {
 		t.Fatalf("expected action %q, got %q", actionRegisterAck, resp.Action)
+	}
+	consumeBootstrapLatencyIfAny(t, conn)
+}
+
+func consumeBootstrapLatencyIfAny(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	msg := readEnvelopeRaw(t, conn)
+	if msg.Action != actionLatencyTest || !strings.HasPrefix(msg.RequestID, "lat-boot-") {
+		t.Fatalf("expected bootstrap latency request, got action=%q request_id=%q", msg.Action, msg.RequestID)
 	}
 }
 

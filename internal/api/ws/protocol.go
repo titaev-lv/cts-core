@@ -90,14 +90,11 @@ type ExchangeCatalogEntry struct {
 }
 
 type registerAck struct {
-	Status                 string                 `json:"status"`
-	TraderID               string                 `json:"trader_id"`
-	SessionID              string                 `json:"session_id"`
-	SessionTimeoutSec      int                    `json:"session_timeout_sec"`
-	ServerTime             int64                  `json:"server_time"`
-	ExchangeCatalogVersion string                 `json:"exchange_catalog_version,omitempty"`
-	AvailableExchanges     []ExchangeCatalogEntry `json:"available_exchanges,omitempty"`
-	EffectiveExchanges     []string               `json:"effective_exchanges,omitempty"`
+	Status            string `json:"status"`
+	TraderID          string `json:"trader_id"`
+	SessionID         string `json:"session_id"`
+	SessionTimeoutSec int    `json:"session_timeout_sec"`
+	ServerTime        int64  `json:"server_time"`
 }
 
 type heartbeatRequest struct {

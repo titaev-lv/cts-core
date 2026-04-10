@@ -191,8 +191,6 @@ type TraderSnapshot struct {
 	ExchangeLatencies  map[string]float64 `json:"exchange_latencies,omitempty"`
 }
 
-const defaultExchangeCatalogVersion = "2026-03-15T00:00:00Z"
-
 func defaultAvailableExchanges() []ExchangeCatalogEntry {
 	return []ExchangeCatalogEntry{
 		{
@@ -783,15 +781,20 @@ func (h *Handler) Serve(c *gin.Context) {
 			}
 			timeoutSec := durationSecondsCeil(h.heartbeatTimeout)
 			h.sendEnvelope(conn, connID, msgID, newRegisterAckEnvelope(msgRequestID, registerAck{
-				Status:                 "ok",
-				TraderID:               canonicalTraderID,
-				SessionID:              session.sessionID,
-				SessionTimeoutSec:      timeoutSec,
-				ServerTime:             nowMs,
-				ExchangeCatalogVersion: defaultExchangeCatalogVersion,
-				AvailableExchanges:     availableExchanges,
-				EffectiveExchanges:     effectiveExchanges,
+				Status:            "ok",
+				TraderID:          canonicalTraderID,
+				SessionID:         session.sessionID,
+				SessionTimeoutSec: timeoutSec,
+				ServerTime:        nowMs,
 			}))
+			if len(effectiveExchanges) > 0 {
+				bootstrapRequestID := fmt.Sprintf("lat-boot-%d", nowMs)
+				h.sendEnvelope(conn, connID, msgID, newLatencyTestEnvelope(bootstrapRequestID, latencyTestRequest{
+					Exchanges:   effectiveExchanges,
+					Reason:      "post_register",
+					RequestedAt: time.Now().UnixMilli(),
+				}))
+			}
 			h.accessLog.Info("ws_register", "conn_id", connID, "request_id", msgRequestID, "trader_id", canonicalTraderID, "protocol_version", msg.ProtocolVersion, "release_version", clientRelease, "region", req.Region)
 		case actionTraderHeartbeat:
 			if session.traderID == "" {

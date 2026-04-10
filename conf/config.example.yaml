@@ -139,7 +139,7 @@ session:
 # Task scheduler (Phase 1.4)
 scheduler:
   task_assignment_interval: 5s
-  latency_check_interval: 20m
+  latency_check_interval: 15m
   resource_check_interval: 30s
   resource_hard_limit: 0.98       # hard reject when utilization >= this value
   resource_soft_limit: 0.75       # apply score penalty above this value
