@@ -130,6 +130,38 @@ func TestRegisterUsesCertificateCNWhenClientCertRequired(t *testing.T) {
 	}
 }
 
+func TestRegisterStripsCTSClientSuffixFromCertificateCNInAck(t *testing.T) {
+	h := NewHandlerWithOptions(HandlerOptions{RequireClientCert: true})
+	conn := dialTestWSSWithHandlerAndClientCN(t, h, "trader-1-cts-client")
+	defer conn.Close()
+
+	consumeConnected(t, conn)
+
+	req := envelope{
+		Type:      msgTypeRequest,
+		Action:    actionTraderRegister,
+		RequestID: "req-cn-strip-1",
+		Payload: mustJSON(t, map[string]interface{}{
+			"trader_id": "payload-trader-id",
+			"region":    "eu-frankfurt",
+		}),
+	}
+	writeJSON(t, conn, req)
+
+	resp := readEnvelope(t, conn)
+	if resp.Action != actionRegisterAck {
+		t.Fatalf("expected action %q, got %q", actionRegisterAck, resp.Action)
+	}
+
+	var ack registerAck
+	if err := json.Unmarshal(resp.Payload, &ack); err != nil {
+		t.Fatalf("unmarshal ack: %v", err)
+	}
+	if ack.TraderID != "trader-1" {
+		t.Fatalf("expected trader_id %q after suffix strip, got %q", "trader-1", ack.TraderID)
+	}
+}
+
 func TestRegisterRejectsEmptyCertificateCNWhenClientCertRequired(t *testing.T) {
 	h := NewHandlerWithOptions(HandlerOptions{RequireClientCert: true})
 	conn := dialTestWSSWithHandlerAndClientCN(t, h, "")

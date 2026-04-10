@@ -250,6 +250,21 @@ func normalizeTraderRole(role string) string {
 	}
 }
 
+func normalizeTraderIDForProtocol(traderID string) string {
+	norm := strings.TrimSpace(traderID)
+	if norm == "" {
+		return ""
+	}
+
+	const suffix = "-cts-client"
+	lowerNorm := strings.ToLower(norm)
+	if strings.HasSuffix(lowerNorm, suffix) && len(norm) > len(suffix) {
+		norm = strings.TrimSpace(norm[:len(norm)-len(suffix)])
+	}
+
+	return norm
+}
+
 func normalizeCapabilities(capabilities []string) []string {
 	if len(capabilities) == 0 {
 		return nil
@@ -770,6 +785,8 @@ func (h *Handler) Serve(c *gin.Context) {
 					}
 				}
 			}
+
+			canonicalTraderID = normalizeTraderIDForProtocol(canonicalTraderID)
 
 			session.markRegistered(canonicalTraderID, nowMs)
 			session.setRegistrationInfo(role, capabilities, effectiveExchanges, resolvedTraderID, resolvedTraderStatus)
